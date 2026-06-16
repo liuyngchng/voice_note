@@ -1,10 +1,16 @@
-## This file must *NOT* be checked into Version Control Systems,
-# as it contains information specific to your local configuration.
-#
-# Location of the SDK. This is only used by Gradle.
-# For customization when using a Version Control System, please read the
-# header note.
-#Fri Jun 12 19:09:52 CST 2026
-sdk.dir=/your_android_sdk_dir/cAndroid/Sdk
-keystore.password=your_key_store_password
-key.password=your_key_password
+## 本文件不应签入版本控制系统，包含本地专属配置。
+##
+## 复制为 local.properties 后填入真实值。
+
+# Android SDK 路径（仅 Gradle 使用）
+sdk.dir=/path/to/Android/Sdk
+
+# === Release 签名配置 ===
+# 密钥库文件路径
+KEYSTORE_FILE=smartbadge-release.keystore
+# 密钥库密码
+KEYSTORE_PASSWORD=
+# 密钥别名
+KEY_ALIAS=smartbadge
+# 别名密码
+KEY_PASSWORD=

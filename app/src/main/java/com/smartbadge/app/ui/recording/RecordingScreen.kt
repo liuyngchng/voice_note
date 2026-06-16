@@ -138,7 +138,7 @@ fun RecordingScreen(
                 OutlinedTextField(
                     value = uiState.clientName,
                     onValueChange = viewModel::updateClientName,
-                    label = { Text("客户名称 *") },
+                    label = { Text("客户名称") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )

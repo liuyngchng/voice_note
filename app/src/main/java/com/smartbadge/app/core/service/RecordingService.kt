@@ -13,6 +13,7 @@ import com.smartbadge.app.MainActivity
 import com.smartbadge.app.core.asr.AsrEvent
 import com.smartbadge.app.core.asr.FunASRClient
 import com.smartbadge.app.core.audio.AudioCapture
+import com.smartbadge.app.core.audio.AudioFileManager
 import com.smartbadge.app.core.llm.LLMClient
 import com.smartbadge.app.core.location.LocationTracker
 import com.smartbadge.app.data.repository.VisitRepositoryImpl
@@ -41,6 +42,7 @@ class RecordingService : Service() {
     @Inject lateinit var llmClient: LLMClient
     @Inject lateinit var locationTracker: LocationTracker
     @Inject lateinit var visitRepository: VisitRepositoryImpl
+    @Inject lateinit var audioFileManager: AudioFileManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var recordingJob: Job? = null
@@ -121,6 +123,9 @@ class RecordingService : Service() {
         // Start foreground
         startForeground(NOTIFICATION_ID, buildNotification("拜访录音中..."))
 
+        // Initialize audio file recording
+        audioFileManager.startNewRecording(visitId, java.time.Instant.now())
+
         // Duration counter
         durationJob = serviceScope.launch {
             while (true) {
@@ -167,6 +172,7 @@ class RecordingService : Service() {
             funASRClient.sendHandshake()
 
             audioCapture.startCapture().collect { audioData ->
+                audioFileManager.writeAudioChunk(audioData)
                 funASRClient.sendAudio(audioData)
             }
         }
@@ -193,6 +199,9 @@ class RecordingService : Service() {
                 }
             }
 
+            // Finalize audio file
+            val audioFilePath = audioFileManager.finalizeRecording()
+
             // Finalize visit
             val visit = visitRepository.getVisitById(currentVisitId)
             if (visit != null) {
@@ -201,7 +210,7 @@ class RecordingService : Service() {
                         endTime = java.time.Instant.now(),
                         locationPoints = locationPoints.toList(),
                         transcriptText = transcript,
-                        audioFilePath = ""
+                        audioFilePath = audioFilePath
                     )
                 )
             }

@@ -52,11 +52,6 @@ class RecordingViewModel @Inject constructor(
 
     fun startVisit() {
         val state = _uiState.value
-        if (state.clientName.isBlank()) {
-            _uiState.value = state.copy(error = "请输入客户名称")
-            return
-        }
-
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isStarting = true, error = null)
 
