@@ -15,10 +15,10 @@ import javax.inject.Singleton
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 data class AppSettings(
-    val asrUrl: String = "ws://192.168.1.100:10095",
-    val llmUrl: String = "https://api.openai.com/v1/chat/completions",
-    val llmKey: String = "",
-    val llmModel: String = "gpt-4o-mini",
+    val asrUrl: String = "ws://192.168.27.29:10095",
+    val llmUrl: String = "https://api.deepseek.com/chat/completions",
+    val llmKey: String = "sk-0220a5e0d8ff4d39828859be52563df1",
+    val llmModel: String = "deepseek-v4-pro",
     val llmPrompt: String = ""
 )
 
@@ -36,10 +36,10 @@ class SettingsDataStore @Inject constructor(
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
         AppSettings(
-            asrUrl = prefs[Keys.ASR_URL] ?: "ws://192.168.1.100:10095",
-            llmUrl = prefs[Keys.LLM_URL] ?: "https://api.openai.com/v1/chat/completions",
-            llmKey = prefs[Keys.LLM_KEY] ?: "",
-            llmModel = prefs[Keys.LLM_MODEL] ?: "gpt-4o-mini",
+            asrUrl = prefs[Keys.ASR_URL] ?: "ws://192.168.27.29:10095",
+            llmUrl = prefs[Keys.LLM_URL] ?: "https://api.deepseek.com/v1/chat/completions",
+            llmKey = prefs[Keys.LLM_KEY] ?: "sk-0220a5e0d8ff4d39828859be52563df1",
+            llmModel = prefs[Keys.LLM_MODEL] ?: "deepseek-v4-pro",
             llmPrompt = prefs[Keys.LLM_PROMPT] ?: ""
         )
     }
