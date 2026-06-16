@@ -1,0 +1,31 @@
+*.iml
+.gradle/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# Build outputs
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.keystore
+!gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration
+local.properties
+gradle-local.properties
+
+# Android
+app/build/
+app/release/
+gen/
+
+# Generated files
+bin/
+
+# Gradle wrapper (keep the jar, ignore properties if it contains sensitive data)
+# gradle/wrapper/gradle-wrapper.properties
