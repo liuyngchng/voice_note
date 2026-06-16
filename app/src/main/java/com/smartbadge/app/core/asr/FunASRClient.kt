@@ -11,6 +11,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString.Companion.toByteString
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -87,7 +88,7 @@ class FunASRClient @Inject constructor() {
     }
 
     fun sendAudio(data: ByteArray) {
-        webSocket?.send(okhttp3.ByteString.of(data, 0, data.size))
+        webSocket?.send(data.toByteString())
     }
 
     fun sendEnd() {
