@@ -21,10 +21,10 @@ final class SettingsViewModel: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        asrURL = defaults.string(forKey: "asr_url") ?? ""
-        llmURL = defaults.string(forKey: "llm_url") ?? ""
-        llmKey = defaults.string(forKey: "llm_key") ?? ""
-        llmModel = defaults.string(forKey: "llm_model") ?? "gpt-4o-mini"
+        asrURL = defaults.string(forKey: "asr_url") ?? "ws://192.168.27.29:10095"
+        llmURL = defaults.string(forKey: "llm_url") ?? "https://api.deepseek.com"
+        llmKey = defaults.string(forKey: "llm_key") ?? "sk-0220a5e0d8ff4d39828859be52563df1"
+        llmModel = defaults.string(forKey: "llm_model") ?? "deepseek-v4-pro"
         llmPrompt = defaults.string(forKey: "llm_prompt") ?? ""
     }
 

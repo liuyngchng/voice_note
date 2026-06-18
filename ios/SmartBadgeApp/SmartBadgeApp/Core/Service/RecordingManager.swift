@@ -28,7 +28,7 @@ final class RecordingManager: ObservableObject {
     private var currentAsrURL: String = ""
     private var currentLlmURL: String = ""
     private var currentLlmKey: String = ""
-    private var currentLlmModel: String = "gpt-4o-mini"
+    private var currentLlmModel: String = "deepseek-v4-pro"
     private var currentLlmPrompt: String?
 
     private var transcriptBuffer = ""
@@ -53,7 +53,7 @@ final class RecordingManager: ObservableObject {
         asrURL: String,
         llmURL: String,
         llmKey: String,
-        llmModel: String = "gpt-4o-mini",
+        llmModel: String = "deepseek-v4-pro",
         llmPrompt: String? = nil
     ) {
         currentVisitId = visitId

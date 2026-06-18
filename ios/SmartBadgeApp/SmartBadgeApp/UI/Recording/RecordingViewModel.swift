@@ -47,7 +47,7 @@ final class RecordingViewModel: ObservableObject {
             // 获取设置
             let llmURL = UserDefaults.standard.string(forKey: "llm_url") ?? ""
             let llmKey = UserDefaults.standard.string(forKey: "llm_key") ?? ""
-            let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "gpt-4o-mini"
+            let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
             let llmPrompt = UserDefaults.standard.string(forKey: "llm_prompt")
             let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? ""
 
