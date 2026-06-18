@@ -93,7 +93,7 @@ struct RecordingView: View {
                         .padding(.bottom, 4)
                 }
 
-                Button(action: viewModel.stopVisit) {
+                Button(action: { viewModel.stopVisit() }) {
                     HStack {
                         if viewModel.isStopping {
                             ProgressView()
@@ -167,7 +167,7 @@ struct RecordingView: View {
             }
 
             Section {
-                Button(action: viewModel.startVisit) {
+                Button(action: { viewModel.startVisit() }) {
                     HStack {
                         if viewModel.isStarting {
                             ProgressView()

@@ -11,7 +11,7 @@ except ImportError:
     print("需要安装 websockets 库: pip install websockets")
     sys.exit(1)
 
-ASR_URL = "ws://192.168.1.104:10095"
+ASR_URL = "ws://192.168.1.110:10095"
 
 
 def generate_silence_pcm(duration_sec=1.0, sample_rate=16000):

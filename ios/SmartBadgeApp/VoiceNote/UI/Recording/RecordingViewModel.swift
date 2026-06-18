@@ -48,7 +48,6 @@ final class RecordingViewModel: ObservableObject {
             let llmURL = UserDefaults.standard.string(forKey: "llm_url") ?? ""
             let llmKey = UserDefaults.standard.string(forKey: "llm_key") ?? ""
             let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
-            let llmPrompt = UserDefaults.standard.string(forKey: "llm_prompt")
             let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? ""
 
             let visit = Visit(
@@ -65,29 +64,28 @@ final class RecordingViewModel: ObservableObject {
                 let visitId = try await container.visitRepository.createVisit(visit)
                 currentVisitId = visitId
 
-                // 开始写音频文件
-                let pcmURL = recordingManager.startWritingAudio(visitId: visitId)
+                // 开始写音频文件（仅调用一次，pcmURL 由 RecordingManager 内部持有）
+                _ = recordingManager.startWritingAudio(visitId: visitId)
 
-                // 启动录音
+                // 启动录音（ASR + 音频流）
                 recordingManager.startRecording(
                     visitId: visitId,
                     asrURL: asrURL,
                     llmURL: llmURL,
                     llmKey: llmKey,
-                    llmModel: llmModel,
-                    llmPrompt: llmPrompt?.isEmpty == false ? llmPrompt : nil
+                    llmModel: llmModel
                 )
+
+                // 绑定状态轮询
+                observeRecordingState()
 
             } catch {
                 errorMessage = error.localizedDescription
             }
-
-            // 绑定状态
-            observeRecordingState(pcmURL: recordingManager.startWritingAudio(visitId: currentVisitId ?? UUID()))
         }
     }
 
-    private func observeRecordingState(pcmURL: URL) {
+    private func observeRecordingState() {
         isRecording = true
 
         // 用 Timer 轮询方式简绑定
@@ -108,19 +106,7 @@ final class RecordingViewModel: ObservableObject {
             await MainActor.run {
                 isRecording = false
             }
-
-            // 录音结束后保存
-            if let visitId = currentVisitId {
-                let wavPath = recordingManager.finalizeAudio(visitId: visitId, pcmURL: pcmURL)
-                if let path = wavPath {
-                    try? await container.visitRepository.updateAudioFilePath(
-                        visitId,
-                        path: path,
-                        endTime: Date(),
-                        locationPoints: []
-                    )
-                }
-            }
+            // 音频定稿和路径更新已移至 RecordingManager.stopRecording() 内部处理
         }
     }
 

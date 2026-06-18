@@ -39,6 +39,8 @@ final class RecordingManager: ObservableObject {
     private var asrTask: Task<Void, Never>?
     private var durationTask: Task<Void, Never>?
 
+    private var currentPcmURL: URL?
+    private var lastPartialText: String = ""
     private var audioDataWritable: ((Data) -> Void)?
     private var batteryWarningShown = false
 
@@ -100,46 +102,68 @@ final class RecordingManager: ObservableObject {
         let asrClient = container.asrClient
         let audioCapture = container.audioCapture
 
-        // 1. 连接 ASR WebSocket
         let asrStream = asrClient.connect(url: asrURL)
 
-        // 2. 接收 ASR 结果
-        asrTask = Task {
-            for await event in asrStream {
-                switch event {
-                case .partial(let text):
-                    transcriptBuffer += text
-                    transcript = transcriptBuffer
-                case .final(let text):
-                    transcriptBuffer += text
-                    transcript = transcriptBuffer
-                case .error(let msg):
-                    Log.recording("ASR error: \(msg)")
-                case .connected:
-                    Log.recording("ASR connected")
-                    // 发送握手
-                    asrClient.sendHandshake()
-                case .disconnected:
-                    Log.recording("ASR disconnected")
-                }
-            }
-        }
-
-        // 3. 启动录音并发送音频到 ASR
+        // 主流程：等待连接 → 握手 → 采集音频（顺序执行，对齐 Android）
         audioStreamTask = Task {
-            do {
-                // 等待 WebSocket 连通
-                try? await Task.sleep(nanoseconds: 300_000_000)
+            // 等待 WebSocket 建立连接
+            try? await Task.sleep(nanoseconds: 500_000_000)
 
+            // 先发送握手，确保在音频数据之前到达服务端
+            asrClient.sendHandshake()
+            Log.recording("ASR handshake sent")
+
+            // 然后启动音频采集
+            do {
                 let stream = try audioCapture.startCapturing()
                 for try await audioData in stream {
-                    // 写入本地文件
                     audioDataWritable?(audioData)
-                    // 实时发送给 ASR
                     asrClient.sendAudio(audioData)
                 }
             } catch {
                 Log.recording("Audio capture error: \(error)")
+            }
+        }
+
+        // ASR 事件消费（独立 Task，与音频发送并行）
+        asrTask = Task {
+            for await event in asrStream {
+                switch event {
+                case .partial(let text):
+                    // 去重：检测重叠的增量修正
+                    if !lastPartialText.isEmpty {
+                        if text.hasPrefix(lastPartialText) {
+                            // 新文本是旧文本的扩展，只追加后缀
+                            let suffix = String(text.dropFirst(lastPartialText.count))
+                            if !suffix.isEmpty {
+                                transcriptBuffer += suffix
+                            }
+                        } else if !lastPartialText.hasPrefix(text) {
+                            // 不重叠的增量片段
+                            transcriptBuffer += text
+                        }
+                        // 否则新文本是旧文本的子串（回退修正），忽略
+                    } else {
+                        transcriptBuffer += text
+                    }
+                    lastPartialText = text
+                    transcript = transcriptBuffer
+
+                case .final(let text):
+                    // FunASR 2pass 离线结果返回完整修正文本，替换而非追加
+                    transcriptBuffer = text
+                    transcript = transcriptBuffer
+                    lastPartialText = ""
+
+                case .error(let msg):
+                    Log.recording("ASR error: \(msg)")
+
+                case .connected:
+                    Log.recording("ASR connected")
+
+                case .disconnected:
+                    Log.recording("ASR disconnected")
+                }
             }
         }
     }
@@ -158,15 +182,29 @@ final class RecordingManager: ObservableObject {
         container.locationTracker.stopTracking()
         container.audioCapture.stop()
 
-        // 发送 ASR 结束信号
+        // 发送 ASR 结束信号（触发离线纠错）
         container.asrClient.sendEnd()
 
         Task {
-            // 等待最终结果返回
+            // 等待最终 ASR 离线结果返回
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             container.asrClient.disconnect()
             audioStreamTask?.cancel()
             asrTask?.cancel()
+
+            // 先定稿音频文件并写入数据库（确保离线重试时路径可用）
+            if let visitId = currentVisitId, let pcmURL = currentPcmURL {
+                let wavPath = finalizeAudio(visitId: visitId, pcmURL: pcmURL)
+                if let path = wavPath {
+                    try? await container.visitRepository.updateAudioFilePath(
+                        visitId,
+                        path: path,
+                        endTime: Date(),
+                        locationPoints: locationPoints
+                    )
+                }
+                currentPcmURL = nil
+            }
 
             await generateSummary()
         }
@@ -274,6 +312,7 @@ final class RecordingManager: ObservableObject {
             try? fileHandle?.write(contentsOf: data)
         }
 
+        currentPcmURL = url
         return url
     }
 

@@ -103,7 +103,9 @@ final class FunASRClient {
     }
 
     func sendAudio(_ data: Data) {
-        webSocket?.send(.data(data)) { _ in }
+        webSocket?.send(.data(data)) { error in
+            if let error { Log.asr("send audio error: \(error)") }
+        }
     }
 
     func sendEnd() {
@@ -122,7 +124,9 @@ final class FunASRClient {
         guard let data = try? JSONSerialization.data(withJSONObject: dict),
               let text = String(data: data, encoding: .utf8)
         else { return }
-        webSocket?.send(.string(text)) { _ in }
+        webSocket?.send(.string(text)) { error in
+            if let error { Log.asr("send json error: \(error)") }
+        }
     }
 
     private func scheduleReconnect(continuation: AsyncStream<ASREvent>.Continuation) {
@@ -132,6 +136,87 @@ final class FunASRClient {
 
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
             self?.openWebSocket(url: url, continuation: continuation)
+        }
+    }
+
+    // MARK: - 连接测试（供设置页使用，与真实录音共用握手逻辑）
+
+    /// 测试 WebSocket 连接可达性 — 使用与真实录音相同的握手格式和连接流程
+    static func testConnection(urlString: String) async -> ConnectionTestResult {
+        guard !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failure("WebSocket 地址为空")
+        }
+        guard let url = URL(string: urlString) else {
+            return .failure("无效的 URL 格式")
+        }
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "ws" || scheme == "wss" else {
+            return .failure("URL 必须以 ws:// 或 wss:// 开头")
+        }
+
+        return await withCheckedContinuation { continuation in
+            final class Gate { var fired = false }
+            let gate = Gate()
+
+            let finish: @Sendable (ConnectionTestResult) -> Void = { result in
+                guard !gate.fired else { return }
+                gate.fired = true
+                continuation.resume(returning: result)
+            }
+
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 10
+            let session = URLSession(configuration: config)
+            let task = session.webSocketTask(with: url)
+
+            // 超时 8 秒
+            DispatchQueue.global().asyncAfter(deadline: .now() + 8) {
+                task.cancel()
+                finish(.failure("连接超时（8秒）"))
+            }
+
+            task.resume()
+
+            // 发送握手 — 与 sendHandshake() 完全一致的格式
+            let handshake: [String: Any] = [
+                "mode": "2pass",
+                "chunk_size": [5, 10, 5],
+                "wav_name": "streaming",
+                "is_speaking": true
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: handshake),
+               let text = String(data: data, encoding: .utf8) {
+                task.send(.string(text)) { error in
+                    if let error = error {
+                        task.cancel()
+                        finish(.failure("发送握手失败: \(error.localizedDescription)"))
+                    }
+                }
+            } else {
+                task.cancel()
+                finish(.failure("无法构建握手消息"))
+            }
+
+            // 握手后发送结束信号，触发服务端离线 pass 返回结果
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.5) {
+                let endMsg: [String: Any] = ["is_speaking": false]
+                if let data = try? JSONSerialization.data(withJSONObject: endMsg),
+                   let text = String(data: data, encoding: .utf8) {
+                    task.send(.string(text)) { _ in }
+                }
+            }
+
+            // 等待服务端响应（成功则表明连接可用）
+            task.receive { result in
+                switch result {
+                case .success:
+                    task.cancel()
+                    finish(.success)
+                case .failure(let error):
+                    task.cancel()
+                    finish(.failure("连接失败: \(error.localizedDescription)"))
+                }
+            }
         }
     }
 
@@ -194,23 +279,27 @@ final class FunASRClient {
             ]
             if let data = try? JSONSerialization.data(withJSONObject: handshake),
                let text = String(data: data, encoding: .utf8) {
-                task.send(.string(text)) { _ in }
+                task.send(.string(text)) { error in
+                    if let error { Log.asr("processFile send handshake error: \(error)") }
+                }
             }
 
-            // 分块发送 PCM 数据
+            // 逐块读取并发送 PCM 数据（同步循环 + 短 sleep 节流）
             let chunkSize = 64_000
-            var offset = 44
             while let chunk = try? fileHandle.read(upToCount: chunkSize), !chunk.isEmpty {
-                task.send(.data(chunk)) { _ in }
-                offset += chunk.count
-                Thread.sleep(forTimeInterval: 0.005)
+                task.send(.data(chunk)) { error in
+                    if let error { Log.asr("processFile send chunk error: \(error)") }
+                }
+                Thread.sleep(forTimeInterval: 0.005) // 5ms 节流
             }
 
-            // 发送结束
+            // 所有数据发送完毕，发送结束信号
             let endMsg: [String: Any] = ["is_speaking": false]
             if let data = try? JSONSerialization.data(withJSONObject: endMsg),
                let text = String(data: data, encoding: .utf8) {
-                task.send(.string(text)) { _ in }
+                task.send(.string(text)) { error in
+                    if let error { Log.asr("processFile send end error: \(error)") }
+                }
             }
 
             // 接收结果
@@ -218,12 +307,11 @@ final class FunASRClient {
                 task.receive { result in
                     switch result {
                     case .success(let message):
-                        if case .string(let text) = message {
-                            if let data = text.data(using: .utf8),
-                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                               let t = json["text"] as? String {
-                                transcript += t
-                            }
+                        if case .string(let text) = message,
+                           let data = text.data(using: .utf8),
+                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                           let t = json["text"] as? String {
+                            transcript += t
                         }
                         receive()
                     case .failure:
@@ -235,6 +323,7 @@ final class FunASRClient {
                     }
                 }
             }
+
             receive()
         }
     }
@@ -265,5 +354,15 @@ enum ASRError: LocalizedError {
         case .noTranscript: return "未收到转写结果"
         case .allRetriesExhausted: return "所有重试均已失败"
         }
+    }
+}
+
+// MARK: - 日志
+
+extension Log {
+    static func asr(_ msg: String) {
+        #if DEBUG
+        print("[FunASR] \(msg)")
+        #endif
     }
 }

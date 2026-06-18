@@ -14,6 +14,111 @@ final class LLMClient {
         return e
     }()
 
+    // MARK: - 连接测试（供设置页使用，与真实调用共用 encoder/decoder）
+
+    /// 测试 LLM API 连接可达性 — 使用与 generateSummary 相同的编码器和请求格式
+    static func testConnection(
+        baseURL: String,
+        apiKey: String,
+        model: String
+    ) async -> ConnectionTestResult {
+        guard !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failure("API 地址为空")
+        }
+        guard !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failure("API Key 为空")
+        }
+        guard !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failure("模型名称为空")
+        }
+
+        guard let url = buildChatURL(from: baseURL) else {
+            return .failure("无效的 URL 格式")
+        }
+
+        // 使用与 generateSummary 相同的 encoder（snakeCase）
+        let encoder = JSONEncoder()
+        encoder.keyEncodingStrategy = .convertToSnakeCase
+
+        let requestBody = ChatCompletionRequest(
+            model: model,
+            messages: [ChatMessage(role: "user", content: "hi")],
+            temperature: 0
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 15
+
+        do {
+            request.httpBody = try encoder.encode(requestBody)
+        } catch {
+            return .failure("无法编码请求体")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure("无效的服务器响应")
+            }
+
+            switch httpResponse.statusCode {
+            case 200...299:
+                // 使用与 generateSummary 相同的 decoder 验证响应格式
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase
+                if (try? decoder.decode(ChatCompletionResponse.self, from: data)) != nil {
+                    return .success
+                }
+                return .success  // 2xx 就算成功
+
+            case 401:
+                return .failure("API Key 无效 (401 Unauthorized)")
+            case 403:
+                return .failure("访问被拒绝 (403 Forbidden)，请检查 API Key 权限")
+            case 404:
+                return .failure("接口未找到 (404)，请检查 API 地址是否正确")
+            case 429:
+                return .failure("请求过于频繁 (429)，请稍后重试")
+            case 500...599:
+                let body = String(data: data, encoding: .utf8) ?? ""
+                return .failure("服务器错误 (\(httpResponse.statusCode)): \(body.prefix(200))")
+            default:
+                let body = String(data: data, encoding: .utf8) ?? ""
+                return .failure("HTTP \(httpResponse.statusCode): \(body.prefix(200))")
+            }
+
+        } catch let error as URLError {
+            switch error.code {
+            case .cannotFindHost, .cannotConnectToHost:
+                return .failure("无法连接到服务器: \(error.localizedDescription)")
+            case .timedOut:
+                return .failure("请求超时（15秒）")
+            case .notConnectedToInternet:
+                return .failure("未连接到互联网")
+            case .secureConnectionFailed:
+                return .failure("SSL/TLS 连接失败: \(error.localizedDescription)")
+            default:
+                return .failure("网络错误: \(error.localizedDescription)")
+            }
+        } catch {
+            return .failure("请求失败: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - URL 构建（对齐 Android: 自动拼接 chat/completions 路径）
+
+    private static func buildChatURL(from baseURL: String) -> URL? {
+        if baseURL.contains("/chat/completions") {
+            return URL(string: baseURL)
+        }
+        let trimmed = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return URL(string: "\(trimmed)/v1/chat/completions")
+    }
+
     // MARK: - 生成拜访总结
 
     func generateSummary(
@@ -23,7 +128,7 @@ final class LLMClient {
         model: String,
         customPrompt: String?
     ) async -> Result<VisitSummary, Error> {
-        guard let url = URL(string: apiUrl) else {
+        guard let url = Self.buildChatURL(from: apiUrl) else {
             return .failure(LLMError.invalidURL)
         }
 

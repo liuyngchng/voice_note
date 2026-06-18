@@ -34,6 +34,7 @@
 		793370C52FE40E1800752EE2 /* VisitRepositoryImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */; };
 		793370C72FE40E8900752EE2 /* SmartBadgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370C62FE40E8900752EE2 /* SmartBadgeApp.swift */; };
 		793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D02FE40E9000752EE2 /* AudioPlayer.swift */; };
+		793370C92FE40E9000752EE3 /* ConnectionTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D12FE40E9000752EE3 /* ConnectionTester.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,11 +55,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		79336FCB2FE40A2000752EE2 /* SmartBadgeApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SmartBadgeApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		79336FCB2FE40A2000752EE2 /* VoiceNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		79336FD22FE40A2200752EE2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79336FD52FE40A2200752EE2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
-		79336FDB2FE40A2200752EE2 /* SmartBadgeAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmartBadgeAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		79336FE52FE40A2200752EE2 /* SmartBadgeAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SmartBadgeAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		79336FDB2FE40A2200752EE2 /* VoiceNoteTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VoiceNoteTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		79336FE52FE40A2200752EE2 /* VoiceNoteUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VoiceNoteUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		793370862FE40E1600752EE2 /* SettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		793370872FE40E1600752EE2 /* SettingsViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SettingsViewModel.swift; sourceTree = "<group>"; };
 		793370892FE40E1600752EE2 /* HomeViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
@@ -84,6 +85,7 @@
 		793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisitRepositoryImpl.swift; sourceTree = "<group>"; };
 		793370C62FE40E8900752EE2 /* SmartBadgeApp.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SmartBadgeApp.swift; sourceTree = "<group>"; };
 		793370D02FE40E9000752EE2 /* AudioPlayer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
+		793370D12FE40E9000752EE3 /* ConnectionTester.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ConnectionTester.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -114,7 +116,7 @@
 		79336FC22FE40A2000752EE2 = {
 			isa = PBXGroup;
 			children = (
-				79336FCD2FE40A2000752EE2 /* SmartBadgeApp */,
+				79336FCD2FE40A2000752EE2 /* VoiceNote */,
 				79336FCC2FE40A2000752EE2 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -122,14 +124,14 @@
 		79336FCC2FE40A2000752EE2 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				79336FCB2FE40A2000752EE2 /* SmartBadgeApp.app */,
-				79336FDB2FE40A2200752EE2 /* SmartBadgeAppTests.xctest */,
-				79336FE52FE40A2200752EE2 /* SmartBadgeAppUITests.xctest */,
+				79336FCB2FE40A2000752EE2 /* VoiceNote.app */,
+				79336FDB2FE40A2200752EE2 /* VoiceNoteTests.xctest */,
+				79336FE52FE40A2200752EE2 /* VoiceNoteUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		79336FCD2FE40A2000752EE2 /* SmartBadgeApp */ = {
+		79336FCD2FE40A2000752EE2 /* VoiceNote */ = {
 			isa = PBXGroup;
 			children = (
 				793370C62FE40E8900752EE2 /* SmartBadgeApp.swift */,
@@ -140,7 +142,7 @@
 				79336FD22FE40A2200752EE2 /* Assets.xcassets */,
 				79336FD42FE40A2200752EE2 /* Preview Content */,
 			);
-			path = SmartBadgeApp;
+			path = VoiceNote;
 			sourceTree = "<group>";
 		};
 		79336FD42FE40A2200752EE2 /* Preview Content */ = {
@@ -311,6 +313,7 @@
 			isa = PBXGroup;
 			children = (
 				793370AB2FE40E1700752EE2 /* RecordingManager.swift */,
+				793370D12FE40E9000752EE3 /* ConnectionTester.swift */,
 			);
 			path = Service;
 			sourceTree = "<group>";
@@ -334,9 +337,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		79336FCA2FE40A2000752EE2 /* SmartBadgeApp */ = {
+		79336FCA2FE40A2000752EE2 /* VoiceNote */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 79336FEF2FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "SmartBadgeApp" */;
+			buildConfigurationList = 79336FEF2FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "VoiceNote" */;
 			buildPhases = (
 				79336FC72FE40A2000752EE2 /* Sources */,
 				79336FC82FE40A2000752EE2 /* Frameworks */,
@@ -346,14 +349,14 @@
 			);
 			dependencies = (
 			);
-			name = SmartBadgeApp;
+			name = VoiceNote;
 			productName = SmartBadgeApp;
-			productReference = 79336FCB2FE40A2000752EE2 /* SmartBadgeApp.app */;
+			productReference = 79336FCB2FE40A2000752EE2 /* VoiceNote.app */;
 			productType = "com.apple.product-type.application";
 		};
-		79336FDA2FE40A2200752EE2 /* SmartBadgeAppTests */ = {
+		79336FDA2FE40A2200752EE2 /* VoiceNoteTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 79336FF22FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "SmartBadgeAppTests" */;
+			buildConfigurationList = 79336FF22FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "VoiceNoteTests" */;
 			buildPhases = (
 				79336FD72FE40A2200752EE2 /* Sources */,
 				79336FD82FE40A2200752EE2 /* Frameworks */,
@@ -364,14 +367,14 @@
 			dependencies = (
 				79336FDD2FE40A2200752EE2 /* PBXTargetDependency */,
 			);
-			name = SmartBadgeAppTests;
+			name = VoiceNoteTests;
 			productName = SmartBadgeAppTests;
-			productReference = 79336FDB2FE40A2200752EE2 /* SmartBadgeAppTests.xctest */;
+			productReference = 79336FDB2FE40A2200752EE2 /* VoiceNoteTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		79336FE42FE40A2200752EE2 /* SmartBadgeAppUITests */ = {
+		79336FE42FE40A2200752EE2 /* VoiceNoteUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 79336FF52FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "SmartBadgeAppUITests" */;
+			buildConfigurationList = 79336FF52FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "VoiceNoteUITests" */;
 			buildPhases = (
 				79336FE12FE40A2200752EE2 /* Sources */,
 				79336FE22FE40A2200752EE2 /* Frameworks */,
@@ -382,9 +385,9 @@
 			dependencies = (
 				79336FE72FE40A2200752EE2 /* PBXTargetDependency */,
 			);
-			name = SmartBadgeAppUITests;
+			name = VoiceNoteUITests;
 			productName = SmartBadgeAppUITests;
-			productReference = 79336FE52FE40A2200752EE2 /* SmartBadgeAppUITests.xctest */;
+			productReference = 79336FE52FE40A2200752EE2 /* VoiceNoteUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -409,7 +412,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 79336FC62FE40A2000752EE2 /* Build configuration list for PBXProject "SmartBadgeApp" */;
+			buildConfigurationList = 79336FC62FE40A2000752EE2 /* Build configuration list for PBXProject "VoiceNote" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -422,9 +425,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				79336FCA2FE40A2000752EE2 /* SmartBadgeApp */,
-				79336FDA2FE40A2200752EE2 /* SmartBadgeAppTests */,
-				79336FE42FE40A2200752EE2 /* SmartBadgeAppUITests */,
+				79336FCA2FE40A2000752EE2 /* VoiceNote */,
+				79336FDA2FE40A2200752EE2 /* VoiceNoteTests */,
+				79336FE42FE40A2200752EE2 /* VoiceNoteUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -485,6 +488,7 @@
 				793370BA2FE40E1800752EE2 /* VisitRepository.swift in Sources */,
 				793370BE2FE40E1800752EE2 /* PersistenceController.swift in Sources */,
 				793370BF2FE40E1800752EE2 /* LLMClient.swift in Sources */,
+				793370C92FE40E9000752EE3 /* ConnectionTester.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -507,12 +511,12 @@
 /* Begin PBXTargetDependency section */
 		79336FDD2FE40A2200752EE2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 79336FCA2FE40A2000752EE2 /* SmartBadgeApp */;
+			target = 79336FCA2FE40A2000752EE2 /* VoiceNote */;
 			targetProxy = 79336FDC2FE40A2200752EE2 /* PBXContainerItemProxy */;
 		};
 		79336FE72FE40A2200752EE2 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 79336FCA2FE40A2000752EE2 /* SmartBadgeApp */;
+			target = 79336FCA2FE40A2000752EE2 /* VoiceNote */;
 			targetProxy = 79336FE62FE40A2200752EE2 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -644,7 +648,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SmartBadgeApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "智能工牌";
+				INFOPLIST_KEY_CFBundleDisplayName = "语音笔记";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -679,7 +683,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = SmartBadgeApp/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "智能工牌";
+				INFOPLIST_KEY_CFBundleDisplayName = "语音笔记";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -785,7 +789,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		79336FC62FE40A2000752EE2 /* Build configuration list for PBXProject "SmartBadgeApp" */ = {
+		79336FC62FE40A2000752EE2 /* Build configuration list for PBXProject "VoiceNote" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				79336FED2FE40A2200752EE2 /* Debug */,
@@ -794,7 +798,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		79336FEF2FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "SmartBadgeApp" */ = {
+		79336FEF2FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "VoiceNote" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				79336FF02FE40A2200752EE2 /* Debug */,
@@ -803,7 +807,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		79336FF22FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "SmartBadgeAppTests" */ = {
+		79336FF22FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "VoiceNoteTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				79336FF32FE40A2200752EE2 /* Debug */,
@@ -812,7 +816,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		79336FF52FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "SmartBadgeAppUITests" */ = {
+		79336FF52FE40A2200752EE2 /* Build configuration list for PBXNativeTarget "VoiceNoteUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				79336FF62FE40A2200752EE2 /* Debug */,
