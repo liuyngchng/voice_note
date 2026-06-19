@@ -336,9 +336,12 @@ final class RecordingManager: ObservableObject {
 
         Log.recording("finalizeAudio: PCM size=\(pcmData.count) bytes, duration≈\(Double(pcmData.count) / 32000.0)s")
 
-        // 验证 PCM 数据非空（检查前 100 个 sample 的最大值）
+        // 验证 PCM 数据非空（取中间 100 个 sample，避开开头的静音段）
+        let sampleCount = pcmData.count / MemoryLayout<Int16>.size
+        let midOffset = max(0, (sampleCount / 2 - 50) * MemoryLayout<Int16>.size)
         let samples = pcmData.withUnsafeBytes { ptr -> [Int16] in
-            Array(ptr.bindMemory(to: Int16.self).prefix(100))
+            let base = ptr.baseAddress!.advanced(by: midOffset)
+            return Array(UnsafeBufferPointer(start: base.bindMemory(to: Int16.self, capacity: 100), count: min(100, sampleCount)))
         }
         let maxAbs = samples.map(abs).max() ?? 0
         Log.recording("finalizeAudio: 前100个sample中最大振幅=\(maxAbs)")
@@ -373,12 +376,23 @@ final class RecordingManager: ObservableObject {
     private func saveTranscriptToFile(visitId: UUID, text: String) -> URL? {
         guard !text.isEmpty else { return nil }
         let dir = audioDirectory.appendingPathComponent(visitId.uuidString, isDirectory: true)
-        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            Log.recording("创建转写目录失败: \(error)")
+            return nil
+        }
         let dateString = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
         let url = dir.appendingPathComponent("\(dateString).txt")
-        try? text.write(to: url, atomically: true, encoding: .utf8)
-        return url
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Log.recording("转写文件已保存: \(url.path) (\(text.count) 字符)")
+            return url
+        } catch {
+            Log.recording("转写文件写入失败: \(error)")
+            return nil
+        }
     }
 }
 

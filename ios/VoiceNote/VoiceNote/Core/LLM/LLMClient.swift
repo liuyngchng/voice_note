@@ -133,6 +133,8 @@ final class LLMClient {
         }
 
         let prompt = customPrompt?.isBlank == false ? customPrompt! : defaultPrompt
+        Log.llm("[请求] URL=\(url.absoluteString), model=\(model), transcript=\(transcript.count)字, prompt=\(prompt.count)字")
+
         let systemMessage = ChatMessage(role: "system", content: prompt)
         let userMessage = ChatMessage(role: "user", content: transcript)
 
@@ -151,31 +153,43 @@ final class LLMClient {
         do {
             request.httpBody = try encoder.encode(requestBody)
         } catch {
+            Log.llm("[请求] 编码失败: \(error)")
             return .failure(error)
         }
 
         do {
+            let startTime = Date()
             let (data, response) = try await URLSession.shared.data(for: request)
+            let elapsed = Date().timeIntervalSince(startTime)
 
             guard let httpResponse = response as? HTTPURLResponse else {
+                Log.llm("[响应] 无效响应, 耗时=\(String(format: "%.1f", elapsed))s")
                 return .failure(LLMError.invalidResponse)
             }
             guard (200...299).contains(httpResponse.statusCode) else {
                 let body = String(data: data, encoding: .utf8) ?? ""
+                Log.llm("[响应] HTTP \(httpResponse.statusCode), 耗时=\(String(format: "%.1f", elapsed))s, body=\(body.prefix(300))")
                 return .failure(LLMError.httpError(httpResponse.statusCode, body))
             }
 
+            Log.llm("[响应] HTTP 200, 耗时=\(String(format: "%.1f", elapsed))s, bodySize=\(data.count) bytes")
+
             let completion = try decoder.decode(ChatCompletionResponse.self, from: data)
             guard let content = completion.choices.first?.message.content else {
+                Log.llm("[响应] 空内容")
                 return .failure(LLMError.emptyResponse)
             }
 
+            Log.llm("[响应] content 长度=\(content.count)字, 开始解析...")
             let summary = try parseSummary(from: content)
+            Log.llm("[解析] 成功: topics=\(summary.topics.count), conclusions=\(summary.conclusions.count), todos=\(summary.todos.count), nextSteps=\(summary.nextSteps.count)")
             return .success(summary)
 
         } catch let error as LLMError {
+            Log.llm("[响应] LLMError: \(error.errorDescription ?? "unknown")")
             return .failure(error)
         } catch {
+            Log.llm("[响应] 异常: \(error.localizedDescription)")
             return .failure(error)
         }
     }
@@ -301,4 +315,14 @@ enum LLMError: LocalizedError {
 
 private extension String {
     var isBlank: Bool { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+}
+
+// MARK: - 日志
+
+extension Log {
+    static func llm(_ msg: String) {
+        #if DEBUG
+        print("[LLM] \(msg)")
+        #endif
+    }
 }

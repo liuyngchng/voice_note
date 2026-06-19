@@ -269,25 +269,32 @@ private struct TranscriptSheetView: View {
 
     var body: some View {
         NavigationView {
-            ScrollView {
-                if #available(iOS 15.0, *) {
+            if #available(iOS 15.0, *) {
+                ScrollView {
                     Text(text)
                         .font(.body)
                         .textSelection(.enabled)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    SelectableTextView(text: text)
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("关闭", action: onDismiss)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("关闭", action: onDismiss)
+                    }
                 }
+            } else {
+                // iOS 14: UITextView 自带滚动，不套 ScrollView
+                SelectableTextView(text: text)
+                    .padding()
+                    .navigationTitle(title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("关闭", action: onDismiss)
+                        }
+                    }
             }
         }
     }
