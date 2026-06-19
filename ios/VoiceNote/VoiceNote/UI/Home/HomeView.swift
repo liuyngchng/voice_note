@@ -5,7 +5,6 @@ struct HomeView: View {
     let onNewVisit: () -> Void
     let onVisitTap: (UUID) -> Void
 
-    @State private var appeared = false
     @State private var isRefreshing = false
 
     var body: some View {
@@ -52,10 +51,7 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            if !appeared {
-                appeared = true
-                viewModel.loadVisits()
-            }
+            viewModel.loadVisits()
         }
         .modifier(RefreshableModifier(isRefreshing: $isRefreshing) {
             viewModel.loadVisits()

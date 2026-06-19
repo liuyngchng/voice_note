@@ -5,6 +5,8 @@ struct RecordingView: View {
     let onBack: () -> Void
     let onVisitComplete: (UUID) -> Void
 
+    @State private var hasNavigated = false
+
     var body: some View {
         Group {
             if viewModel.isRecording {
@@ -29,7 +31,8 @@ struct RecordingView: View {
             isRecording: viewModel.isRecording
         ))
         .onChange(of: viewModel.isRecording) { newValue in
-            if !newValue, let visitId = viewModel.currentVisitId {
+            if !newValue, !hasNavigated, let visitId = viewModel.currentVisitId {
+                hasNavigated = true
                 onVisitComplete(visitId)
             }
         }

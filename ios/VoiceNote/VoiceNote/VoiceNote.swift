@@ -132,12 +132,7 @@ private struct RootView: View {
             viewModel: RecordingViewModel(container: container),
             onBack: { showRecording = false },
             onVisitComplete: { id in
-                // 替换当前页面: 先弹出 Recording，再推入 Detail
                 showRecording = false
-                detailId = id
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                    showDetail = true
-                }
             }
         )
         .navigationBarBackButtonHidden(true)

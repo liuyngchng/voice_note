@@ -26,6 +26,7 @@ final class RecordingViewModel: ObservableObject {
     private let recordingManager: RecordingManager
 
     var currentVisitId: UUID?
+    private var hasStopped = false
 
     init(container: AppContainer) {
         self.container = container
@@ -115,6 +116,8 @@ final class RecordingViewModel: ObservableObject {
     }
 
     func stopVisit() {
+        guard !hasStopped else { return }
+        hasStopped = true
         isStopping = true
         recordingManager.stopRecording()
         // 立即返回主界面
