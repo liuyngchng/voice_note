@@ -11,7 +11,7 @@ struct HomeView: View {
         List {
             Section(header: Text("今日概览")) {
                 HStack {
-                    StatCard(title: "今日记录", value: "\(viewModel.todayVisitCount)")
+                    StatCard(title: "今日记录", value: "\(viewModel.todayRecordCount)")
                     Spacer()
                     StatCard(title: "总记录", value: "\(viewModel.totalRecordCount)")
                 }
@@ -19,25 +19,16 @@ struct HomeView: View {
             }
 
             Section(header: Text("最近记录")) {
-                if viewModel.recentVisits.isEmpty {
+                if viewModel.recentRecords.isEmpty {
                     Text("暂无记录")
                         .foregroundColor(.secondary)
                         .padding(.vertical, 20)
                         .frame(maxWidth: .infinity, alignment: .center)
                 } else {
-                    ForEach(viewModel.recentVisits) { visit in
-                        VisitRow(visit: visit)
+                    ForEach(viewModel.recentRecords) { record in
+                        RecordRow(record: record)
                             .contentShape(Rectangle())
-                            .onTapGesture { onVisitTap(visit.id) }
-                            .modifier(SwipeActionsModifier {
-                                viewModel.deleteVisit(id: visit.id)
-                            })
-                    }
-                    .onDelete { indexSet in
-                        for index in indexSet {
-                            let visit = viewModel.recentVisits[index]
-                            viewModel.deleteVisit(id: visit.id)
-                        }
+                            .onTapGesture { onVisitTap(record.id) }
                     }
                 }
             }
@@ -51,33 +42,11 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            viewModel.loadVisits()
+            viewModel.loadRecords()
         }
         .modifier(RefreshableModifier(isRefreshing: $isRefreshing) {
-            viewModel.loadVisits()
+            viewModel.loadRecords()
         })
-    }
-}
-
-// MARK: - iOS 15+ swipeActions / iOS 14 .onDelete 互补
-
-private struct SwipeActionsModifier: ViewModifier {
-    let onDelete: () -> Void
-
-    func body(content: Content) -> some View {
-        if #available(iOS 15.0, *) {
-            content
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        onDelete()
-                    } label: {
-                        Label("删除", systemImage: "trash")
-                    }
-                }
-        } else {
-            // iOS 14: .onDelete 由父级 ForEach 提供标准左滑删除
-            content
-        }
     }
 }
 
@@ -154,9 +123,7 @@ private extension UIView {
     func findParentTableView() -> UITableView? {
         var view: UIView? = self
         while let current = view {
-            // 当前层自身
             if let tableView = current as? UITableView { return tableView }
-            // 子视图 2 层深度 (SwiftUI List 的 UITableView 不会藏太深)
             for subview in current.subviews {
                 if let tableView = subview as? UITableView { return tableView }
                 for subsubview in subview.subviews {
@@ -187,24 +154,24 @@ private struct StatCard: View {
     }
 }
 
-private struct VisitRow: View {
-    let visit: Visit
+private struct RecordRow: View {
+    let record: VoiceRecord
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(visit.clientName)
+                Text(record.title)
                     .font(.headline)
                 Spacer()
                 statusBadge
             }
-            if !visit.purpose.isEmpty {
-                Text(visit.purpose)
+            if !record.desc.isEmpty {
+                Text(record.desc)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
-            Text(visit.startTime, style: .date)
+            Text(record.startTime, style: .date)
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }
@@ -212,7 +179,7 @@ private struct VisitRow: View {
     }
 
     @ViewBuilder var statusBadge: some View {
-        if visit.summary != nil {
+        if record.summary != nil {
             Text("已总结")
                 .font(.caption2)
                 .padding(.horizontal, 8)
@@ -220,7 +187,7 @@ private struct VisitRow: View {
                 .background(Color.green.opacity(0.15))
                 .foregroundColor(.green)
                 .cornerRadius(4)
-        } else if visit.transcriptStatus == .processing || visit.summaryStatus == .processing {
+        } else if record.transcriptStatus == .processing || record.summaryStatus == .processing {
             Text("处理中")
                 .font(.caption2)
                 .padding(.horizontal, 8)

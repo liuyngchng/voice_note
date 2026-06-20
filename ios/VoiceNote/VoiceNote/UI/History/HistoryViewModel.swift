@@ -3,7 +3,7 @@ import Foundation
 
 @MainActor
 final class HistoryViewModel: ObservableObject {
-    @Published var visits: [Visit] = []
+    @Published var records: [VoiceRecord] = []
     @Published var searchQuery = ""
     @Published var isLoading = false
 
@@ -17,14 +17,14 @@ final class HistoryViewModel: ObservableObject {
         Task {
             isLoading = true
             defer { Task { @MainActor in isLoading = false } }
-            let result: [Visit]
+            let result: [VoiceRecord]
             if searchQuery.isEmpty {
-                result = (try? await container.visitRepository.getAllVisits()) ?? []
+                result = (try? await container.recordRepository.getAllRecords()) ?? []
             } else {
-                result = (try? await container.visitRepository.searchVisits(query: searchQuery)) ?? []
+                result = (try? await container.recordRepository.searchRecords(query: searchQuery)) ?? []
             }
             await MainActor.run {
-                visits = result
+                records = result
                 isLoading = false
             }
         }
@@ -32,18 +32,18 @@ final class HistoryViewModel: ObservableObject {
 
     func loadAll() {
         Task {
-            let result = try? await container.visitRepository.getAllVisits()
+            let result = try? await container.recordRepository.getAllRecords()
             await MainActor.run {
-                visits = result ?? []
+                records = result ?? []
             }
         }
     }
 
-    func deleteVisit(id: UUID) {
+    func deleteRecord(id: UUID) {
         Task {
-            try? await container.visitRepository.deleteVisit(id: id)
+            try? await container.recordRepository.deleteRecord(id: id)
             await MainActor.run {
-                visits.removeAll { $0.id == id }
+                records.removeAll { $0.id == id }
             }
         }
     }

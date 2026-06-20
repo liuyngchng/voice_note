@@ -3,52 +3,52 @@ import Foundation
 
 @MainActor
 final class HomeViewModel: ObservableObject {
-    @Published var visits: [Visit] = []
+    @Published var records: [VoiceRecord] = []
     @Published var isLoading = false
 
     private let container: AppContainer
 
     /// 有录音文件的记录
-    private var recordedVisits: [Visit] {
-        visits.filter { visit in
-            guard let path = visit.audioFilePath, !path.isEmpty else { return false }
+    private var recordedRecords: [VoiceRecord] {
+        records.filter { record in
+            guard let path = record.audioFilePath, !path.isEmpty else { return false }
             return FileManager.default.fileExists(atPath: path)
         }
     }
 
     // 统计数据
-    var todayVisitCount: Int {
+    var todayRecordCount: Int {
         let calendar = Calendar.current
-        return recordedVisits.filter { calendar.isDateInToday($0.startTime) }.count
+        return recordedRecords.filter { calendar.isDateInToday($0.startTime) }.count
     }
 
     /// 总录音记录数
     var totalRecordCount: Int {
-        recordedVisits.count
+        recordedRecords.count
     }
 
-    var recentVisits: [Visit] {
-        Array(visits.prefix(5))
+    var recentRecords: [VoiceRecord] {
+        Array(records.prefix(2))
     }
 
     init(container: AppContainer) {
         self.container = container
     }
 
-    func loadVisits() {
+    func loadRecords() {
         Task {
-            let result = try? await container.visitRepository.getAllVisits()
+            let result = try? await container.recordRepository.getAllRecords()
             await MainActor.run {
-                visits = result ?? []
+                records = result ?? []
             }
         }
     }
 
-    func deleteVisit(id: UUID) {
+    func deleteRecord(id: UUID) {
         Task {
-            try? await container.visitRepository.deleteVisit(id: id)
+            try? await container.recordRepository.deleteRecord(id: id)
             await MainActor.run {
-                visits.removeAll { $0.id == id }
+                records.removeAll { $0.id == id }
             }
         }
     }

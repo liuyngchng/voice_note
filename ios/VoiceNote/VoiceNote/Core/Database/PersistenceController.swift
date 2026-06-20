@@ -30,9 +30,9 @@ final class PersistenceController: ObservableObject {
     private static let model: NSManagedObjectModel = {
         let model = NSManagedObjectModel()
 
-        let visitEntity = NSEntityDescription()
-        visitEntity.name = "VisitEntity"
-        visitEntity.managedObjectClassName = NSStringFromClass(VisitEntity.self)
+        let recordEntity = NSEntityDescription()
+        recordEntity.name = "VoiceRecordEntity"
+        recordEntity.managedObjectClassName = NSStringFromClass(VoiceRecordEntity.self)
 
         func makeAttr(_ name: String, _ type: NSAttributeType, _ optional: Bool = true) -> NSAttributeDescription {
             let attr = NSAttributeDescription()
@@ -58,21 +58,12 @@ final class PersistenceController: ObservableObject {
             return attr
         }
 
-        let boolAttr: (String, Bool, Any?) -> NSAttributeDescription = { name, opt, defaultVal in
-            let attr = NSAttributeDescription()
-            attr.name = name
-            attr.attributeType = .booleanAttributeType
-            attr.isOptional = opt
-            attr.defaultValue = defaultVal
-            return attr
-        }
-
-        visitEntity.properties = [
+        recordEntity.properties = [
             uuidAttr("id", false),
-            makeAttr("clientName", .stringAttributeType, false),
-            makeAttr("clientCompany", .stringAttributeType),
-            makeAttr("purpose", .stringAttributeType),
-            makeAttr("participantsJSON", .stringAttributeType),
+            makeAttr("title", .stringAttributeType, false),
+            makeAttr("memo", .stringAttributeType),
+            makeAttr("desc", .stringAttributeType),
+            makeAttr("speakersJSON", .stringAttributeType),
             dateAttr("startTime", false),
             dateAttr("endTime", true),
             makeAttr("transcriptText", .stringAttributeType),
@@ -83,20 +74,20 @@ final class PersistenceController: ObservableObject {
             makeAttr("summaryJSON", .stringAttributeType),
         ]
 
-        model.entities = [visitEntity]
+        model.entities = [recordEntity]
         return model
     }()
 }
 
 // MARK: - NSManagedObject 子类
 
-@objc(VisitEntity)
-final class VisitEntity: NSManagedObject {
+@objc(VoiceRecordEntity)
+final class VoiceRecordEntity: NSManagedObject {
     @NSManaged var id: UUID
-    @NSManaged var clientName: String
-    @NSManaged var clientCompany: String?
-    @NSManaged var purpose: String?
-    @NSManaged var participantsJSON: String?
+    @NSManaged var title: String
+    @NSManaged var memo: String?
+    @NSManaged var desc: String?
+    @NSManaged var speakersJSON: String?
     @NSManaged var startTime: Date
     @NSManaged var endTime: Date?
     @NSManaged var transcriptText: String?

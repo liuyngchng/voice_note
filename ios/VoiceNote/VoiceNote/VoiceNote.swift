@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Network
 
 /// App 入口
 /// 对齐 Android: SmartBadgeApp.kt + MainActivity.kt
@@ -15,20 +16,49 @@ struct SmartBadgeApp: App {
     }
 }
 
-// MARK: - 麦克风权限请求
+// MARK: - 权限请求 (麦克风 + 局域网)
 
-private struct MicrophonePermissionModifier: ViewModifier {
+private struct PermissionModifier: ViewModifier {
     @State private var hasRequested = false
 
     func body(content: Content) -> some View {
         content.onAppear {
             guard !hasRequested else { return }
             hasRequested = true
+
+            // 0. 版本号
+            let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+            print("[App] 语音笔记 v\(shortVersion) build \(build) 启动")
+
+            // 1. 麦克风权限
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                if granted {
-                    print("[Mic] 麦克风权限已授予")
-                } else {
-                    print("[Mic] 麦克风权限被拒绝")
+                print(granted ? "[Perm] 麦克风权限已授予" : "[Perm] 麦克风权限被拒绝")
+            }
+
+            // 2. 局域网权限 — iOS 14+ 自动弹窗
+            //    用 NWConnection 触达本地 IP 触发系统对话框
+            let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
+            if let url = URL(string: asrURL),
+               let host = url.host,
+               let port = url.port {
+                let conn = NWConnection(
+                    host: NWEndpoint.Host(host),
+                    port: NWEndpoint.Port(integerLiteral: UInt16(port)),
+                    using: .tcp
+                )
+                conn.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready, .failed:
+                        conn.cancel()
+                    default:
+                        break
+                    }
+                }
+                conn.start(queue: .global())
+                // 3 秒后取消，避免长时间挂起
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
+                    conn.cancel()
                 }
             }
         }
@@ -56,7 +86,7 @@ private struct RootView: View {
                 .background(detailLink)
         }
         .navigationViewStyle(.stack)
-        .modifier(MicrophonePermissionModifier())
+        .modifier(PermissionModifier())
     }
 
     // MARK: - 隐藏 NavigationLink (程序化导航)

@@ -52,44 +52,34 @@ struct RecordingView: View {
                     .padding(.vertical, 4)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("实时转写")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
-
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            if viewModel.transcript.isEmpty {
-                                Text("等待语音输入...")
-                                    .foregroundColor(.secondary.opacity(0.5))
-                                    .padding(.top, 80)
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Text(viewModel.transcript)
-                                    .font(.body)
-                                    .padding(4)
-                                    .id("transcript")
-                            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if viewModel.transcript.isEmpty {
+                            Text("语音识别结果将在此显示")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary.opacity(0.4))
+                                .padding(.top, 80)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text(viewModel.transcript)
+                                .font(.body)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .id("transcript")
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onChange(of: viewModel.transcript) { _ in
-                        withAnimation {
-                            proxy.scrollTo("transcript", anchor: .bottom)
-                        }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onChange(of: viewModel.transcript) { _ in
+                    withAnimation {
+                        proxy.scrollTo("transcript", anchor: .bottom)
                     }
                 }
             }
             .padding(.top, 12)
 
             VStack(spacing: 8) {
-                if viewModel.phase == .generatingSummary {
-                    ProgressView("正在生成总结...")
-                        .padding(.bottom, 4)
-                }
-
                 Button(action: { viewModel.stopVisit() }) {
                     HStack {
                         if viewModel.isStopping {
@@ -114,16 +104,26 @@ struct RecordingView: View {
         .background(Color(.systemGroupedBackground))
     }
 
+    @State private var dotPulse = false
+
     private var recordingIndicator: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(Color.red)
-                .frame(width: 10, height: 10)
-                .overlay(
-                    Circle()
-                        .fill(Color.red.opacity(0.3))
-                        .frame(width: 16, height: 16)
-                )
+        HStack(spacing: 10) {
+            // 脉冲红点（对齐 iOS 语音备忘录）
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.3))
+                    .frame(width: 20, height: 20)
+                    .scaleEffect(dotPulse ? 1.8 : 1.0)
+                    .opacity(dotPulse ? 0 : 0.5)
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 10, height: 10)
+            }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: false)) {
+                    dotPulse = true
+                }
+            }
 
             Text("录音中")
                 .font(.subheadline)
@@ -137,8 +137,8 @@ struct RecordingView: View {
                 .bold()
         }
         .padding(12)
-        .background(Color.orange.opacity(0.1))
-        .cornerRadius(8)
+        .background(Color(.systemGray6))
+        .cornerRadius(10)
         .padding(.horizontal, 12)
         .padding(.top, 8)
     }
@@ -148,7 +148,7 @@ struct RecordingView: View {
     private var formContent: some View {
         Form {
             Section(header: Text("记录信息")) {
-                TextField("标题", text: $viewModel.title)
+                TextField("录音名称（可选）", text: $viewModel.title)
 
                 TextField("备注", text: $viewModel.notes)
 

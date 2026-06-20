@@ -1,8 +1,7 @@
 import Foundation
 
 /// AI 生成的总结
-/// 对齐 Android: app/src/.../domain/model/VisitSummary.kt
-struct VisitSummary: Codable, Equatable {
+struct RecordSummary: Codable, Equatable {
     var topics: [String]
     var conclusions: [String]
     var todos: [TodoItem]

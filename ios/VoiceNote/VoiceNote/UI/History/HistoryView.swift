@@ -11,7 +11,7 @@ struct HistoryView: View {
 
     var body: some View {
         Group {
-            if viewModel.visits.isEmpty && !viewModel.isLoading {
+            if viewModel.records.isEmpty && !viewModel.isLoading {
                 VStack(spacing: 12) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 40))
@@ -28,8 +28,8 @@ struct HistoryView: View {
                 .padding(.vertical, 60)
             } else {
                 List {
-                    ForEach(viewModel.visits) { visit in
-                        VisitRow(visit: visit)
+                    ForEach(viewModel.records) { visit in
+                        RecordRow(record: visit)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedDetailId = visit.id
@@ -37,13 +37,13 @@ struct HistoryView: View {
                                 onVisitTap(visit.id)
                             }
                             .modifier(SwipeActionsModifier {
-                                viewModel.deleteVisit(id: visit.id)
+                                viewModel.deleteRecord(id: visit.id)
                             })
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
-                            let visit = viewModel.visits[index]
-                            viewModel.deleteVisit(id: visit.id)
+                            let visit = viewModel.records[index]
+                            viewModel.deleteRecord(id: visit.id)
                         }
                     }
                 }
@@ -189,33 +189,33 @@ private struct SwipeActionsModifier: ViewModifier {
     }
 }
 
-private struct VisitRow: View {
-    let visit: Visit
+private struct RecordRow: View {
+    let record: VoiceRecord
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(visit.clientName)
+                Text(record.title)
                     .font(.headline)
-                if !visit.clientCompany.isEmpty {
-                    Text("· \(visit.clientCompany)")
+                if !record.memo.isEmpty {
+                    Text("· \(record.memo)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                if visit.summary != nil {
+                if record.summary != nil {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                         .font(.caption)
                 }
             }
-            if !visit.purpose.isEmpty {
-                Text(visit.purpose)
+            if !record.desc.isEmpty {
+                Text(record.desc)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
             }
-            Text(visit.startTime, style: .date)
+            Text(record.startTime, style: .date)
                 .font(.caption2)
                 .foregroundColor(.secondary)
         }

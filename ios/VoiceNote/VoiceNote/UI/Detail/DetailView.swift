@@ -25,24 +25,24 @@ struct DetailView: View {
                 Button("返回", action: onBack)
             }
         }
-        .onAppear { viewModel.loadVisit(id: visitId) }
+        .onAppear { viewModel.loadRecord(id: visitId) }
         .onDisappear { viewModel.audioPlayer.stop() }
     }
 
-    private func content(_ visit: Visit) -> some View {
+    private func content(_ visit: VoiceRecord) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 // 基本信息
                 GroupBox(label: Text("基本信息")) {
-                    infoRow("标题", visit.clientName)
-                    if !visit.clientCompany.isEmpty {
-                        infoRow("备注", visit.clientCompany)
+                    infoRow("标题", visit.title)
+                    if !visit.memo.isEmpty {
+                        infoRow("备注", visit.memo)
                     }
-                    if !visit.purpose.isEmpty {
-                        infoRow("描述", visit.purpose)
+                    if !visit.desc.isEmpty {
+                        infoRow("描述", visit.desc)
                     }
-                    if !visit.participants.isEmpty {
-                        infoRow("参与人员", visit.participants.joined(separator: "、"))
+                    if !visit.speakers.isEmpty {
+                        infoRow("参与人员", visit.speakers.joined(separator: "、"))
                     }
                     infoRow("开始时间", formattedDate(visit.startTime))
                     if let end = visit.endTime {
@@ -94,9 +94,23 @@ struct DetailView: View {
                     }
                     .padding()
                 } else if visit.summaryStatus == .unavailable {
-                    Text("总结生成失败")
-                        .foregroundColor(.secondary)
-                        .padding()
+                    VStack(spacing: 8) {
+                        Text("总结生成失败")
+                            .foregroundColor(.secondary)
+                        Button {
+                            viewModel.retrySummary()
+                        } label: {
+                            HStack {
+                                if viewModel.isRetryingSummary {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                                Text(viewModel.isRetryingSummary ? "重试中..." : "重新生成")
+                            }
+                        }
+                        .disabled(viewModel.isRetryingSummary)
+                    }
+                    .padding()
                 }
 
                 // 完整转写 — 显示文件名，点击查看内容
@@ -130,6 +144,24 @@ struct DetailView: View {
                         ProgressView()
                         Text("正在转写...")
                             .foregroundColor(.secondary)
+                    }
+                    .padding()
+                } else if visit.transcriptStatus == .unavailable {
+                    VStack(spacing: 8) {
+                        Text("转写失败")
+                            .foregroundColor(.secondary)
+                        Button {
+                            viewModel.retryTranscript()
+                        } label: {
+                            HStack {
+                                if viewModel.isRetryingTranscript {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                }
+                                Text(viewModel.isRetryingTranscript ? "重试中..." : "重新转写")
+                            }
+                        }
+                        .disabled(viewModel.isRetryingTranscript)
                     }
                     .padding()
                 }

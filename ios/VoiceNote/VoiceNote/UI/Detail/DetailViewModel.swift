@@ -3,8 +3,10 @@ import Foundation
 
 @MainActor
 final class DetailViewModel: ObservableObject {
-    @Published var visit: Visit?
+    @Published var visit: VoiceRecord?
     @Published var isLoading = true
+    @Published var isRetryingTranscript = false
+    @Published var isRetryingSummary = false
 
     @Published var audioPlayer = AudioPlayer()
 
@@ -23,7 +25,7 @@ final class DetailViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    func loadVisit(id: UUID) {
+    func loadRecord(id: UUID) {
         currentVisitId = id
         refresh()
     }
@@ -31,7 +33,7 @@ final class DetailViewModel: ObservableObject {
     private func refresh() {
         guard let id = currentVisitId else { return }
         Task {
-            let result = try? await container.visitRepository.getVisit(id: id)
+            let result = try? await container.recordRepository.getRecord(id: id)
             await MainActor.run {
                 visit = result
                 isLoading = false
@@ -75,5 +77,102 @@ final class DetailViewModel: ObservableObject {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return String(format: "%02d:%02d", m, s)
+    }
+
+    // MARK: - 手动重试
+
+    func retryTranscript() {
+        guard let id = currentVisitId,
+              let audioPath = visit?.audioFilePath, !audioPath.isEmpty,
+              !isRetryingTranscript
+        else { return }
+
+        let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
+        let asrClient = container.asrClient
+        let repository = container.recordRepository
+
+        isRetryingTranscript = true
+
+        Task {
+            // 从 WAV 文件读取 PCM 数据
+            var pcmData = Data()
+            if let handle = FileHandle(forReadingAtPath: audioPath) {
+                defer { try? handle.close() }
+                _ = try? handle.read(upToCount: 44)
+                while let chunk = try? handle.read(upToCount: 64_000), !chunk.isEmpty {
+                    pcmData.append(chunk)
+                }
+            }
+
+            guard !pcmData.isEmpty else {
+                isRetryingTranscript = false
+                try? await repository.updateTranscriptStatus(id, status: .unavailable)
+                refresh()
+                return
+            }
+
+            try? await repository.updateTranscriptStatus(id, status: .processing)
+            refresh()
+
+            let result = await asrClient.processPCMChunk(
+                pcmData: pcmData, serverUrl: asrURL,
+                wavName: "retry-\(id.uuidString.prefix(8))"
+            )
+
+            if case .success(let text) = result, !text.isEmpty {
+                let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("audio/\(id.uuidString)", isDirectory: true)
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let dateStr = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                let fileURL = dir.appendingPathComponent("\(dateStr).txt")
+                try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+
+                try? await repository.updateTranscript(id, text: text, filePath: fileURL.path)
+                try? await repository.updateTranscriptStatus(id, status: .completed)
+            } else {
+                try? await repository.updateTranscriptStatus(id, status: .unavailable)
+            }
+
+            isRetryingTranscript = false
+            refresh()
+        }
+    }
+
+    func retrySummary() {
+        guard let id = currentVisitId,
+              let transcript = visit?.transcriptText,
+              !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !isRetryingSummary
+        else { return }
+
+        let llmURL = UserDefaults.standard.string(forKey: "llm_url") ?? "https://api.deepseek.com"
+        let llmKey = UserDefaults.standard.string(forKey: "llm_key") ?? ""
+        let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
+
+        guard !llmURL.isEmpty, !llmKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let llmClient = container.llmClient
+        let repository = container.recordRepository
+
+        isRetryingSummary = true
+
+        Task {
+            try? await repository.updateSummaryStatus(id, status: .processing)
+            refresh()
+
+            let summaryResult = await llmClient.generateSummary(
+                transcript: transcript, apiUrl: llmURL, apiKey: llmKey,
+                model: llmModel, customPrompt: nil
+            )
+
+            if case .success(let summary) = summaryResult {
+                try? await repository.updateSummary(id, summary: summary)
+            } else {
+                try? await repository.updateSummaryStatus(id, status: .unavailable)
+            }
+
+            isRetryingSummary = false
+            refresh()
+        }
     }
 }

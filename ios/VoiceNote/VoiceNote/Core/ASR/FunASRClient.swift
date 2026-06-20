@@ -81,10 +81,13 @@ final class FunASRClient {
 
         let resultText = json["text"] as? String ?? ""
         let isFinal = json["is_final"] as? Bool ?? false
+        let mode = json["mode"] as? String ?? ""
 
         guard !resultText.isEmpty else { return }
 
-        if isFinal {
+        // FunASR 2pass 离线结果 is_final 为 false，但 mode 为 "offline"
+        // 此时应视为最终结果，替换而非追加
+        if isFinal || mode == "offline" {
             continuation.yield(.final(resultText))
         } else {
             continuation.yield(.partial(resultText))
@@ -249,7 +252,7 @@ final class FunASRClient {
     // MARK: - 离线文件处理（带重试）
 
     func processFile(audioFilePath: String, serverUrl: String, maxRetries: Int = 5) async -> Result<String, Error> {
-        let retryDelays: [TimeInterval] = [20, 40, 80, 160, 320]
+        let retryDelays: [TimeInterval] = [5, 10, 20, 40, 80]
 
         for attempt in 0..<maxRetries {
             if attempt > 0 {
@@ -272,12 +275,29 @@ final class FunASRClient {
         }
         defer { try? fileHandle.close() }
 
-        // 跳过 WAV 头 44 字节
+        // 跳过 WAV 头 44 字节，读取纯 PCM 数据
         let wavHeader = try? fileHandle.read(upToCount: 44)
         guard wavHeader?.count == 44 else {
             return .failure(ASRError.invalidWavFile)
         }
+        var pcmData = Data()
+        while let chunk = try? fileHandle.read(upToCount: 64_000), !chunk.isEmpty {
+            pcmData.append(chunk)
+        }
+        let wavName = URL(fileURLWithPath: audioFilePath).lastPathComponent
+        return await processPCMChunk(pcmData: pcmData, serverUrl: serverUrl, wavName: wavName)
+    }
 
+    /// 将内存中的 PCM 数据通过 WebSocket 发送给 FunASR 离线模式进行转写
+    /// - Parameters:
+    ///   - pcmData: 原始 PCM 数据 (16kHz / 16bit / mono)，不含 WAV 头
+    ///   - serverUrl: FunASR WebSocket 地址
+    ///   - wavName: 用于握手标识的名称
+    /// - Returns: 转写文本结果
+    func processPCMChunk(pcmData: Data, serverUrl: String, wavName: String = "chunk") async -> Result<String, Error> {
+        guard !pcmData.isEmpty else {
+            return .failure(ASRError.fileNotFound)
+        }
         guard let wsUrl = URL(string: serverUrl) else {
             return .failure(ASRError.invalidURL)
         }
@@ -300,22 +320,27 @@ final class FunASRClient {
             // 发送握手
             let handshake: [String: Any] = [
                 "mode": "offline",
-                "wav_name": URL(fileURLWithPath: audioFilePath).lastPathComponent,
+                "wav_name": wavName,
                 "is_speaking": true
             ]
             if let data = try? JSONSerialization.data(withJSONObject: handshake),
                let text = String(data: data, encoding: .utf8) {
                 task.send(.string(text)) { error in
-                    if let error { Log.asr("processFile send handshake error: \(error)") }
+                    if let error { Log.asr("processPCMChunk send handshake error: \(error)") }
                 }
             }
 
-            // 逐块读取并发送 PCM 数据（同步循环 + 短 sleep 节流）
+            // 逐块发送 PCM 数据
             let chunkSize = 64_000
-            while let chunk = try? fileHandle.read(upToCount: chunkSize), !chunk.isEmpty {
+            var offset = 0
+            while offset < pcmData.count {
+                let remaining = pcmData.count - offset
+                let size = min(chunkSize, remaining)
+                let chunk = pcmData.subdata(in: offset..<(offset + size))
                 task.send(.data(chunk)) { error in
-                    if let error { Log.asr("processFile send chunk error: \(error)") }
+                    if let error { Log.asr("processPCMChunk send chunk error: \(error)") }
                 }
+                offset += size
                 Thread.sleep(forTimeInterval: 0.005) // 5ms 节流
             }
 
@@ -324,7 +349,7 @@ final class FunASRClient {
             if let data = try? JSONSerialization.data(withJSONObject: endMsg),
                let text = String(data: data, encoding: .utf8) {
                 task.send(.string(text)) { error in
-                    if let error { Log.asr("processFile send end error: \(error)") }
+                    if let error { Log.asr("processPCMChunk send end error: \(error)") }
                 }
             }
 

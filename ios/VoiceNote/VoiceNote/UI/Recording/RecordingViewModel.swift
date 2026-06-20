@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 
@@ -34,10 +35,24 @@ final class RecordingViewModel: ObservableObject {
     }
 
     func startVisit() {
-        guard !title.isEmpty else {
-            errorMessage = "请输入标题"
+        // 检查麦克风权限
+        let micPermission = AVAudioSession.sharedInstance().recordPermission
+        switch micPermission {
+        case .denied:
+            errorMessage = "麦克风权限已被拒绝。请前往 设置 > 隐私 > 麦克风 中开启。"
             return
+        case .granted:
+            break
+        case .undetermined:
+            break
+        @unknown default:
+            break
         }
+
+        // 标题为空时自动生成（类似 iOS 语音备忘录）
+        let finalTitle = title.trimmingCharacters(in: .whitespaces).isEmpty
+            ? Self.defaultTitle()
+            : title
 
         Task {
             await MainActor.run {
@@ -51,30 +66,30 @@ final class RecordingViewModel: ObservableObject {
             let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
             let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
 
-            let visit = Visit(
-                clientName: title,
-                clientCompany: notes,
-                purpose: description,
-                participants: participants
+            let record = VoiceRecord(
+                title: finalTitle,
+                memo: notes,
+                desc: description,
+                speakers: participants
                     .split(separator: ",")
                     .map { String($0).trimmingCharacters(in: .whitespaces) }
                     .filter { !$0.isEmpty }
             )
 
             do {
-                let visitId = try await container.visitRepository.createVisit(visit)
-                currentVisitId = visitId
+                let recordId = try await container.recordRepository.createRecord(record)
+                currentVisitId = recordId
 
-                // 标记转写和总结为处理中
-                try? await container.visitRepository.updateTranscriptStatus(visitId, status: .processing)
-                try? await container.visitRepository.updateSummaryStatus(visitId, status: .processing)
+                // 标记为待处理
+                try? await container.recordRepository.updateTranscriptStatus(recordId, status: .pending)
+                try? await container.recordRepository.updateSummaryStatus(recordId, status: .pending)
 
                 // 开始写音频文件（仅调用一次，pcmURL 由 RecordingManager 内部持有）
-                _ = recordingManager.startWritingAudio(visitId: visitId)
+                _ = recordingManager.startWritingAudio(recordId: recordId)
 
                 // 启动录音（ASR + 音频流）
                 recordingManager.startRecording(
-                    visitId: visitId,
+                    recordId: recordId,
                     asrURL: asrURL,
                     llmURL: llmURL,
                     llmKey: llmKey,
@@ -123,5 +138,13 @@ final class RecordingViewModel: ObservableObject {
         // 立即返回主界面
         isRecording = false
         isStopping = false
+    }
+
+    /// 默认标题：新录音 6月20日 09:41
+    private static func defaultTitle() -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "zh_CN")
+        fmt.dateFormat = "M月d日 HH:mm"
+        return "新录音 \(fmt.string(from: Date()))"
     }
 }

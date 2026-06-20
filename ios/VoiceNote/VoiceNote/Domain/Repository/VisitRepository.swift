@@ -1,35 +1,34 @@
 import Foundation
 
-/// 数据仓库接口
-/// 对齐 Android: VisitRepository.kt
-protocol VisitRepository {
+/// 语音笔记数据仓库接口
+protocol RecordRepository {
     /// 创建新记录，返回生成的 ID
-    func createVisit(_ visit: Visit) async throws -> UUID
+    func createRecord(_ record: VoiceRecord) async throws -> UUID
 
     /// 更新音频文件路径
-    func updateAudioFilePath(_ visitId: UUID, path: String, endTime: Date) async throws
+    func updateAudioFilePath(_ recordId: UUID, path: String, endTime: Date) async throws
 
     /// 更新转写文本
-    func updateTranscript(_ visitId: UUID, text: String, filePath: String) async throws
+    func updateTranscript(_ recordId: UUID, text: String, filePath: String) async throws
 
     /// 更新转写状态
-    func updateTranscriptStatus(_ visitId: UUID, status: ProcessingStatus) async throws
+    func updateTranscriptStatus(_ recordId: UUID, status: ProcessingStatus) async throws
 
     /// 更新总结
-    func updateSummary(_ visitId: UUID, summary: VisitSummary) async throws
+    func updateSummary(_ recordId: UUID, summary: RecordSummary) async throws
 
     /// 更新总结状态
-    func updateSummaryStatus(_ visitId: UUID, status: ProcessingStatus) async throws
+    func updateSummaryStatus(_ recordId: UUID, status: ProcessingStatus) async throws
 
     /// 按 ID 查询
-    func getVisit(id: UUID) async throws -> Visit?
+    func getRecord(id: UUID) async throws -> VoiceRecord?
 
     /// 查询所有记录（按时间倒序）
-    func getAllVisits() async throws -> [Visit]
+    func getAllRecords() async throws -> [VoiceRecord]
 
     /// 按标题搜索
-    func searchVisits(query: String) async throws -> [Visit]
+    func searchRecords(query: String) async throws -> [VoiceRecord]
 
     /// 删除记录
-    func deleteVisit(id: UUID) async throws
+    func deleteRecord(id: UUID) async throws
 }

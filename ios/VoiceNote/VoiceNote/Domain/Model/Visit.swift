@@ -1,13 +1,12 @@
 import Foundation
 
-/// 语音记录（领域模型）
-/// 对齐 Android: app/src/.../domain/model/Visit.kt
-struct Visit: Identifiable, Codable {
+/// 语音笔记（领域模型）
+struct VoiceRecord: Identifiable, Codable {
     let id: UUID
-    var clientName: String
-    var clientCompany: String
-    var purpose: String
-    var participants: [String]
+    var title: String
+    var memo: String
+    var desc: String
+    var speakers: [String]
     var startTime: Date
     var endTime: Date?
     var transcriptText: String?
@@ -15,14 +14,14 @@ struct Visit: Identifiable, Codable {
     var transcriptStatus: ProcessingStatus
     var summaryStatus: ProcessingStatus
     var audioFilePath: String?
-    var summary: VisitSummary?
+    var summary: RecordSummary?
 
     init(
         id: UUID = UUID(),
-        clientName: String = "",
-        clientCompany: String = "",
-        purpose: String = "",
-        participants: [String] = [],
+        title: String = "",
+        memo: String = "",
+        desc: String = "",
+        speakers: [String] = [],
         startTime: Date = Date(),
         endTime: Date? = nil,
         transcriptText: String? = nil,
@@ -30,13 +29,13 @@ struct Visit: Identifiable, Codable {
         transcriptStatus: ProcessingStatus = .pending,
         summaryStatus: ProcessingStatus = .pending,
         audioFilePath: String? = nil,
-        summary: VisitSummary? = nil
+        summary: RecordSummary? = nil
     ) {
         self.id = id
-        self.clientName = clientName
-        self.clientCompany = clientCompany
-        self.purpose = purpose
-        self.participants = participants
+        self.title = title
+        self.memo = memo
+        self.desc = desc
+        self.speakers = speakers
         self.startTime = startTime
         self.endTime = endTime
         self.transcriptText = transcriptText
@@ -49,7 +48,6 @@ struct Visit: Identifiable, Codable {
 }
 
 /// 处理状态
-/// 对齐 Android: ProcessingStatus
 enum ProcessingStatus: String, Codable {
     case pending
     case processing

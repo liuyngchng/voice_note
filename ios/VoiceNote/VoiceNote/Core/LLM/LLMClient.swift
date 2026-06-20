@@ -119,7 +119,7 @@ final class LLMClient {
         return URL(string: "\(trimmed)/v1/chat/completions")
     }
 
-    // MARK: - 生成拜访总结
+    // MARK: - 生成语音笔记总结
 
     func generateSummary(
         transcript: String,
@@ -127,7 +127,7 @@ final class LLMClient {
         apiKey: String,
         model: String,
         customPrompt: String?
-    ) async -> Result<VisitSummary, Error> {
+    ) async -> Result<RecordSummary, Error> {
         guard let url = Self.buildChatURL(from: apiUrl) else {
             return .failure(LLMError.invalidURL)
         }
@@ -204,7 +204,7 @@ final class LLMClient {
         return String(text[Range(match.range, in: text)!])
     }
 
-    private func parseSummary(from text: String) throws -> VisitSummary {
+    private func parseSummary(from text: String) throws -> RecordSummary {
         // 尝试提取 JSON 块 (iOS 14 兼容: 使用 NSRegularExpression 替代 Swift Regex)
         let jsonText: String
         if let jsonMatch = firstJSONObject(in: text) {
@@ -213,7 +213,7 @@ final class LLMClient {
             jsonText = text
         } else {
             // 没有 JSON，作为纯文本返回
-            return VisitSummary(
+            return RecordSummary(
                 topics: [],
                 conclusions: [text],
                 todos: [],
@@ -227,7 +227,7 @@ final class LLMClient {
 
         do {
             let decoded = try decoder.decode(LLMSummaryResponse.self, from: data)
-            return VisitSummary(
+            return RecordSummary(
                 topics: decoded.topics ?? [],
                 conclusions: decoded.conclusions ?? [],
                 todos: (decoded.todos ?? []).map {
@@ -243,7 +243,7 @@ final class LLMClient {
     // MARK: - 默认 Prompt
 
     private let defaultPrompt = """
-    你是一个专业的商务助理，负责总结语音记录。
+    你是一个专业的语音笔记助手，负责总结转写文本。
     请根据转写文本，提取以下信息，并以 JSON 格式返回：
 
     {

@@ -9,7 +9,7 @@ final class AppContainer: ObservableObject {
     let llmClient = LLMClient()
     let persistence = PersistenceController.shared
 
-    lazy var visitRepository: VisitRepository = VisitRepositoryImpl(container: self)
+    lazy var recordRepository: RecordRepository = RecordRepositoryImpl(container: self)
 
     init() {}
 }

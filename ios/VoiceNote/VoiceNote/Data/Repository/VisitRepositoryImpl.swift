@@ -3,7 +3,7 @@ import Foundation
 
 /// 数据仓库实现
 /// 对齐 Android: VisitRepositoryImpl.kt
-final class VisitRepositoryImpl: VisitRepository {
+final class RecordRepositoryImpl: RecordRepository {
     private let container: AppContainer
     private let context: NSManagedObjectContext
 
@@ -15,78 +15,78 @@ final class VisitRepositoryImpl: VisitRepository {
         self.context = container.persistence.container.viewContext
     }
 
-    func createVisit(_ visit: Visit) async throws -> UUID {
-        let entity = VisitEntity(context: context)
-        entity.id = visit.id
-        entity.clientName = visit.clientName
-        entity.clientCompany = visit.clientCompany
-        entity.purpose = visit.purpose
-        entity.participantsJSON = try? encoder.encodeString(visit.participants)
-        entity.startTime = visit.startTime
-        entity.transcriptStatus = visit.transcriptStatus.rawValue
-        entity.summaryStatus = visit.summaryStatus.rawValue
+    func createRecord(_ record: VoiceRecord) async throws -> UUID {
+        let entity = VoiceRecordEntity(context: context)
+        entity.id = record.id
+        entity.title = record.title
+        entity.memo = record.memo
+        entity.desc = record.desc
+        entity.speakersJSON = try? encoder.encodeString(record.speakers)
+        entity.startTime = record.startTime
+        entity.transcriptStatus = record.transcriptStatus.rawValue
+        entity.summaryStatus = record.summaryStatus.rawValue
 
         try context.save()
-        return visit.id
+        return record.id
     }
 
-    func updateAudioFilePath(_ visitId: UUID, path: String, endTime: Date) async throws {
-        guard let entity = try fetchEntity(id: visitId) else { return }
+    func updateAudioFilePath(_ recordId: UUID, path: String, endTime: Date) async throws {
+        guard let entity = try fetchEntity(id: recordId) else { return }
         entity.audioFilePath = path
         entity.endTime = endTime
         try context.save()
     }
 
-    func updateTranscript(_ visitId: UUID, text: String, filePath: String) async throws {
-        guard let entity = try fetchEntity(id: visitId) else { return }
+    func updateTranscript(_ recordId: UUID, text: String, filePath: String) async throws {
+        guard let entity = try fetchEntity(id: recordId) else { return }
         entity.transcriptText = text
         entity.transcriptFilePath = filePath
         try context.save()
     }
 
-    func updateTranscriptStatus(_ visitId: UUID, status: ProcessingStatus) async throws {
-        guard let entity = try fetchEntity(id: visitId) else { return }
+    func updateTranscriptStatus(_ recordId: UUID, status: ProcessingStatus) async throws {
+        guard let entity = try fetchEntity(id: recordId) else { return }
         entity.transcriptStatus = status.rawValue
         try context.save()
     }
 
-    func updateSummary(_ visitId: UUID, summary: VisitSummary) async throws {
-        guard let entity = try fetchEntity(id: visitId) else { return }
+    func updateSummary(_ recordId: UUID, summary: RecordSummary) async throws {
+        guard let entity = try fetchEntity(id: recordId) else { return }
         entity.summaryJSON = try? encoder.encodeString(summary)
         entity.summaryStatus = ProcessingStatus.completed.rawValue
         try context.save()
     }
 
-    func updateSummaryStatus(_ visitId: UUID, status: ProcessingStatus) async throws {
-        guard let entity = try fetchEntity(id: visitId) else { return }
+    func updateSummaryStatus(_ recordId: UUID, status: ProcessingStatus) async throws {
+        guard let entity = try fetchEntity(id: recordId) else { return }
         entity.summaryStatus = status.rawValue
         try context.save()
     }
 
-    func getVisit(id: UUID) async throws -> Visit? {
+    func getRecord(id: UUID) async throws -> VoiceRecord? {
         guard let entity = try fetchEntity(id: id) else { return nil }
         return mapEntity(entity)
     }
 
-    func getAllVisits() async throws -> [Visit] {
-        let request = VisitEntity.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \VisitEntity.startTime, ascending: false)]
-        let entities = try context.fetch(request) as! [VisitEntity]
+    func getAllRecords() async throws -> [VoiceRecord] {
+        let request = VoiceRecordEntity.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
+        let entities = try context.fetch(request) as! [VoiceRecordEntity]
         return entities.map(mapEntity)
     }
 
-    func searchVisits(query: String) async throws -> [Visit] {
-        let request = VisitEntity.fetchRequest()
+    func searchRecords(query: String) async throws -> [VoiceRecord] {
+        let request = VoiceRecordEntity.fetchRequest()
         request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
-            NSPredicate(format: "clientName CONTAINS[cd] %@", query),
-            NSPredicate(format: "clientCompany CONTAINS[cd] %@", query)
+            NSPredicate(format: "title CONTAINS[cd] %@", query),
+            NSPredicate(format: "memo CONTAINS[cd] %@", query)
         ])
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \VisitEntity.startTime, ascending: false)]
-        let entities = try context.fetch(request) as! [VisitEntity]
+        request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
+        let entities = try context.fetch(request) as! [VoiceRecordEntity]
         return entities.map(mapEntity)
     }
 
-    func deleteVisit(id: UUID) async throws {
+    func deleteRecord(id: UUID) async throws {
         guard let entity = try fetchEntity(id: id) else { return }
 
         // 清理磁盘上的音频文件和转写文件
@@ -101,20 +101,20 @@ final class VisitRepositoryImpl: VisitRepository {
 
     // MARK: - 私有
 
-    private func fetchEntity(id: UUID) throws -> VisitEntity? {
-        let request = VisitEntity.fetchRequest()
+    private func fetchEntity(id: UUID) throws -> VoiceRecordEntity? {
+        let request = VoiceRecordEntity.fetchRequest()
         request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
         request.fetchLimit = 1
-        return try context.fetch(request).first as? VisitEntity
+        return try context.fetch(request).first as? VoiceRecordEntity
     }
 
-    private func mapEntity(_ e: VisitEntity) -> Visit {
-        Visit(
+    private func mapEntity(_ e: VoiceRecordEntity) -> VoiceRecord {
+        VoiceRecord(
             id: e.id,
-            clientName: e.clientName,
-            clientCompany: e.clientCompany ?? "",
-            purpose: e.purpose ?? "",
-            participants: (try? decoder.decode([String].self, from: e.participantsJSON)) ?? [],
+            title: e.title,
+            memo: e.memo ?? "",
+            desc: e.desc ?? "",
+            speakers: (try? decoder.decode([String].self, from: e.speakersJSON)) ?? [],
             startTime: e.startTime,
             endTime: e.endTime,
             transcriptText: e.transcriptText,
@@ -122,7 +122,7 @@ final class VisitRepositoryImpl: VisitRepository {
             transcriptStatus: ProcessingStatus(rawValue: e.transcriptStatus) ?? .pending,
             summaryStatus: ProcessingStatus(rawValue: e.summaryStatus) ?? .pending,
             audioFilePath: e.audioFilePath,
-            summary: (try? decoder.decode(VisitSummary.self, from: e.summaryJSON))
+            summary: (try? decoder.decode(RecordSummary.self, from: e.summaryJSON))
         )
     }
 }
