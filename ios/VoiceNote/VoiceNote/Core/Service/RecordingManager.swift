@@ -157,11 +157,10 @@ final class RecordingManager: ObservableObject {
 
         Log.recording("发送片段 #\(index) (PCM \(chunk.count / 1000)KB)")
 
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: .utility) {
             let result = await asrClient.processPCMChunk(
                 pcmData: chunk, serverUrl: asrURL, wavName: "chunk-\(index)"
             )
-            guard let self else { return }
             // 切回主线程更新状态
             await MainActor.run {
                 self.pendingChunkCount -= 1
@@ -185,16 +184,7 @@ final class RecordingManager: ObservableObject {
                         ? "暂时无法获取转写内容"
                         : finalText
                     let fileURL = self.saveTranscriptToFile(recordId: rid, text: savedText)
-                    Task {
-                        try? await repository.updateTranscript(
-                            rid, text: savedText, filePath: fileURL?.path ?? ""
-                        )
-                        try? await repository.updateTranscriptStatus(
-                            rid,
-                            status: savedText == "暂时无法获取转写内容" ? .unavailable : .completed
-                        )
-                        self.startSummaryIfReady(recordId: rid, transcriptText: savedText)
-                    }
+                    self.doFinalizeTranscript(recordId: rid, text: savedText, fileURL: fileURL)
                 }
             }
         }
@@ -235,14 +225,10 @@ final class RecordingManager: ObservableObject {
         let pcmURL = currentPcmURL
         let repository = container.recordRepository
 
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            Log.recording("后台收尾：音频定稿")
-            Log.recording("stopRecording 收尾: recordId=\(recordId?.uuidString ?? "nil"), pcmURL=\(pcmURL?.path ?? "nil")")
+        Task {
+            Log.recording("音频定稿开始")
             if let recordId, let pcmURL {
-                let wavPath: String? = await MainActor.run {
-                    self.finalizeAudio(recordId: recordId, pcmURL: pcmURL)
-                }
+                let wavPath = finalizeAudio(recordId: recordId, pcmURL: pcmURL)
                 if let path = wavPath {
                     Log.recording("WAV 已定稿: \(path)")
                     try? await repository.updateAudioFilePath(recordId, path: path, endTime: Date())
@@ -255,6 +241,22 @@ final class RecordingManager: ObservableObject {
             }
         }
         currentPcmURL = nil
+    }
+
+    /// 保存最终转写到 DB，然后触发 LLM 总结
+    private func doFinalizeTranscript(recordId: UUID, text: String, fileURL: URL?) {
+        let repository = container.recordRepository
+        let savedText = text
+        Task {
+            try? await repository.updateTranscript(recordId, text: savedText, filePath: fileURL?.path ?? "")
+            let status: ProcessingStatus = savedText == "暂时无法获取转写内容" ? .unavailable : .completed
+            try? await repository.updateTranscriptStatus(recordId, status: status)
+            if status == .completed {
+                startSummaryIfReady(recordId: recordId, transcriptText: savedText)
+            } else {
+                try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+            }
+        }
     }
 
     /// chunk 全部完成后调用的 LLM 总结
@@ -271,10 +273,12 @@ final class RecordingManager: ObservableObject {
         let llmClient = container.llmClient
 
         guard !llmURL.isEmpty, !llmKey.isEmpty else {
+            Log.recording("LLM 总结跳过: Key=\(llmKey.isEmpty ? "未配置" : "已配置"), URL=\(llmURL.isEmpty ? "未配置" : llmURL.prefix(30))")
             Task { try? await repository.updateSummaryStatus(recordId, status: .unavailable) }
             return
         }
 
+        Log.recording("LLM 总结开始: model=\(llmModel), transcript=\(transcriptText.count)字")
         Task {
             try? await repository.updateSummaryStatus(recordId, status: .processing)
             let delays: [TimeInterval] = [5, 10, 20, 40, 80]
@@ -286,10 +290,15 @@ final class RecordingManager: ObservableObject {
                     model: llmModel, customPrompt: llmPrompt
                 )
                 if case .success = r { summaryResult = r; break }
+                Log.recording("LLM 第\(i+1)次尝试失败, \(Int(delay))s 后重试...")
             }
             if case .success(let summary) = summaryResult {
+                Log.recording("LLM 总结成功: topics=\(summary.topics.count), todos=\(summary.todos.count)")
                 try? await repository.updateSummary(recordId, summary: summary)
             } else {
+                if case .failure(let error) = summaryResult {
+                    Log.recording("LLM 总结失败: \(error.localizedDescription)")
+                }
                 try? await repository.updateSummaryStatus(recordId, status: .unavailable)
             }
         }
@@ -297,6 +306,14 @@ final class RecordingManager: ObservableObject {
 
 
     // MARK: - 文件管理
+
+    private static func localDateString() -> String {
+        let fmt = DateFormatter()
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.timeZone = TimeZone.current
+        fmt.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        return fmt.string(from: Date())
+    }
 
     private let fileManager = FileManager.default
 
@@ -309,8 +326,7 @@ final class RecordingManager: ObservableObject {
         let dir = audioDirectory.appendingPathComponent(recordId.uuidString, isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let dateString = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
+        let dateString = Self.localDateString()
         let url = dir.appendingPathComponent("\(dateString).pcm")
         fileManager.createFile(atPath: url.path, contents: nil)
 
@@ -394,8 +410,7 @@ final class RecordingManager: ObservableObject {
             Log.recording("创建转写目录失败: \(error)")
             return nil
         }
-        let dateString = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
+        let dateString = Self.localDateString()
         let url = dir.appendingPathComponent("\(dateString).txt")
         do {
             try text.write(to: url, atomically: true, encoding: .utf8)
@@ -412,10 +427,50 @@ final class RecordingManager: ObservableObject {
 
 import os
 
+// MARK: - 文件日志（写入 Documents/app.log，通过 Xcode Devices 导出）
+
+final class LogFile {
+    static let shared = LogFile()
+
+    private let queue = DispatchQueue(label: "com.voicenote.logfile")
+    private var fileHandle: FileHandle?
+    private let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        return f
+    }()
+
+    private init() {
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = dir.appendingPathComponent("app.log")
+        let maxSize = 2 * 1024 * 1024
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int, size > maxSize {
+            try? FileManager.default.removeItem(at: url)
+        }
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        fileHandle = try? FileHandle(forWritingTo: url)
+        fileHandle?.seekToEndOfFile()
+    }
+
+    func append(_ tag: String, _ msg: String) {
+        let ts = dateFormatter.string(from: Date())
+        let line = "[\(ts)] [\(tag)] \(msg)\n"
+        queue.async { [weak self] in
+            if let data = line.data(using: .utf8) {
+                try? self?.fileHandle?.write(contentsOf: data)
+            }
+        }
+    }
+}
+
 enum Log {
     private static let logger = Logger(subsystem: "com.voicenote", category: "recording")
+
     static func recording(_ msg: String) {
         logger.info("\(msg)")
+        LogFile.shared.append("recording", msg)
     }
 }
 

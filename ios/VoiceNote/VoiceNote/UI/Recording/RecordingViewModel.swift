@@ -28,6 +28,8 @@ final class RecordingViewModel: ObservableObject {
 
     var currentVisitId: UUID?
     private var hasStopped = false
+    /// 结束录音后是否自动跳转到详情页
+    var shouldNavigateToDetail = false
 
     init(container: AppContainer) {
         self.container = container
@@ -130,9 +132,10 @@ final class RecordingViewModel: ObservableObject {
         }
     }
 
-    func stopVisit() {
+    func stopVisit(navigateToDetail: Bool = false) {
         guard !hasStopped else { return }
         hasStopped = true
+        shouldNavigateToDetail = navigateToDetail
         isStopping = true
         recordingManager.stopRecording()
         // 立即返回主界面

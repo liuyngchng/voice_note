@@ -47,4 +47,13 @@ final class HistoryViewModel: ObservableObject {
             }
         }
     }
+
+    func deleteAll() {
+        Task {
+            try? await container.recordRepository.deleteAllRecords()
+            await MainActor.run {
+                records.removeAll()
+            }
+        }
+    }
 }

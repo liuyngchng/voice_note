@@ -15,88 +15,156 @@ final class RecordRepositoryImpl: RecordRepository {
         self.context = container.persistence.container.viewContext
     }
 
-    func createRecord(_ record: VoiceRecord) async throws -> UUID {
-        let entity = VoiceRecordEntity(context: context)
-        entity.id = record.id
-        entity.title = record.title
-        entity.memo = record.memo
-        entity.desc = record.desc
-        entity.speakersJSON = try? encoder.encodeString(record.speakers)
-        entity.startTime = record.startTime
-        entity.transcriptStatus = record.transcriptStatus.rawValue
-        entity.summaryStatus = record.summaryStatus.rawValue
+    // MARK: - Core Data (context.perform 兼容 iOS 14)
 
-        try context.save()
-        return record.id
+    func createRecord(_ record: VoiceRecord) async throws -> UUID {
+        try await withCheckedThrowingContinuation { c in
+            context.perform {
+                let entity = VoiceRecordEntity(context: self.context)
+                entity.id = record.id
+                entity.title = record.title
+                entity.memo = record.memo
+                entity.desc = record.desc
+                entity.speakersJSON = try? self.encoder.encodeString(record.speakers)
+                entity.startTime = record.startTime
+                entity.transcriptStatus = record.transcriptStatus.rawValue
+                entity.summaryStatus = record.summaryStatus.rawValue
+                do {
+                    try self.context.save()
+                    c.resume(returning: record.id)
+                } catch {
+                    c.resume(throwing: error)
+                }
+            }
+        }
     }
 
     func updateAudioFilePath(_ recordId: UUID, path: String, endTime: Date) async throws {
-        guard let entity = try fetchEntity(id: recordId) else { return }
-        entity.audioFilePath = path
-        entity.endTime = endTime
-        try context.save()
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.audioFilePath = path
+                entity.endTime = endTime
+                try? self.context.save()
+                c.resume()
+            }
+        }
     }
 
     func updateTranscript(_ recordId: UUID, text: String, filePath: String) async throws {
-        guard let entity = try fetchEntity(id: recordId) else { return }
-        entity.transcriptText = text
-        entity.transcriptFilePath = filePath
-        try context.save()
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.transcriptText = text
+                entity.transcriptFilePath = filePath
+                try? self.context.save()
+                c.resume()
+            }
+        }
     }
 
     func updateTranscriptStatus(_ recordId: UUID, status: ProcessingStatus) async throws {
-        guard let entity = try fetchEntity(id: recordId) else { return }
-        entity.transcriptStatus = status.rawValue
-        try context.save()
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.transcriptStatus = status.rawValue
+                try? self.context.save()
+                c.resume()
+            }
+        }
     }
 
     func updateSummary(_ recordId: UUID, summary: RecordSummary) async throws {
-        guard let entity = try fetchEntity(id: recordId) else { return }
-        entity.summaryJSON = try? encoder.encodeString(summary)
-        entity.summaryStatus = ProcessingStatus.completed.rawValue
-        try context.save()
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.summaryJSON = try? self.encoder.encodeString(summary)
+                entity.summaryStatus = ProcessingStatus.completed.rawValue
+                try? self.context.save()
+                c.resume()
+            }
+        }
     }
 
     func updateSummaryStatus(_ recordId: UUID, status: ProcessingStatus) async throws {
-        guard let entity = try fetchEntity(id: recordId) else { return }
-        entity.summaryStatus = status.rawValue
-        try context.save()
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.summaryStatus = status.rawValue
+                try? self.context.save()
+                c.resume()
+            }
+        }
     }
 
     func getRecord(id: UUID) async throws -> VoiceRecord? {
-        guard let entity = try fetchEntity(id: id) else { return nil }
-        return mapEntity(entity)
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: id) else {
+                    c.resume(returning: nil)
+                    return
+                }
+                c.resume(returning: self.mapEntity(entity))
+            }
+        }
     }
 
     func getAllRecords() async throws -> [VoiceRecord] {
-        let request = VoiceRecordEntity.fetchRequest()
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
-        let entities = try context.fetch(request) as! [VoiceRecordEntity]
-        return entities.map(mapEntity)
+        await withCheckedContinuation { c in
+            context.perform {
+                let request = VoiceRecordEntity.fetchRequest()
+                request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
+                let entities = (try? self.context.fetch(request)) as? [VoiceRecordEntity] ?? []
+                c.resume(returning: entities.map(self.mapEntity))
+            }
+        }
     }
 
     func searchRecords(query: String) async throws -> [VoiceRecord] {
-        let request = VoiceRecordEntity.fetchRequest()
-        request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
-            NSPredicate(format: "title CONTAINS[cd] %@", query),
-            NSPredicate(format: "memo CONTAINS[cd] %@", query)
-        ])
-        request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
-        let entities = try context.fetch(request) as! [VoiceRecordEntity]
-        return entities.map(mapEntity)
+        await withCheckedContinuation { c in
+            context.perform {
+                let request = VoiceRecordEntity.fetchRequest()
+                request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+                    NSPredicate(format: "title CONTAINS[cd] %@", query),
+                    NSPredicate(format: "memo CONTAINS[cd] %@", query)
+                ])
+                request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
+                let entities = (try? self.context.fetch(request)) as? [VoiceRecordEntity] ?? []
+                c.resume(returning: entities.map(self.mapEntity))
+            }
+        }
     }
 
     func deleteRecord(id: UUID) async throws {
-        guard let entity = try fetchEntity(id: id) else { return }
-
-        // 清理磁盘上的音频文件和转写文件
-        if let audioPath = entity.audioFilePath, !audioPath.isEmpty {
-            let dir = URL(fileURLWithPath: audioPath).deletingLastPathComponent()
-            try? FileManager.default.removeItem(at: dir)
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: id) else { c.resume(); return }
+                if let audioPath = entity.audioFilePath, !audioPath.isEmpty {
+                    let dir = URL(fileURLWithPath: audioPath).deletingLastPathComponent()
+                    try? FileManager.default.removeItem(at: dir)
+                }
+                self.context.delete(entity)
+                try? self.context.save()
+                c.resume()
+            }
         }
+    }
 
-        context.delete(entity)
-        try context.save()
+    func deleteAllRecords() async throws {
+        await withCheckedContinuation { c in
+            context.perform {
+                let request = VoiceRecordEntity.fetchRequest()
+                let entities = (try? self.context.fetch(request)) as? [VoiceRecordEntity] ?? []
+                let audioDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .appendingPathComponent("audio", isDirectory: true)
+                try? FileManager.default.removeItem(at: audioDir)
+                for entity in entities {
+                    self.context.delete(entity)
+                }
+                try? self.context.save()
+                c.resume()
+            }
+        }
     }
 
     // MARK: - 私有

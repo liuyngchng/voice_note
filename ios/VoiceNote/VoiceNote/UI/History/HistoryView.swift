@@ -8,6 +8,7 @@ struct HistoryView: View {
     // 内部 Detail 导航 (iOS 14 兼容)
     @State private var selectedDetailId: UUID?
     @State private var showDetail = false
+    @State private var showDeleteAllAlert = false
 
     var body: some View {
         Group {
@@ -55,6 +56,25 @@ struct HistoryView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("返回", action: onBack)
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if !viewModel.records.isEmpty {
+                    Button {
+                        showDeleteAllAlert = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                }
+            }
+        }
+        .alert(isPresented: $showDeleteAllAlert) {
+            Alert(
+                title: Text("清空所有记录"),
+                message: Text("将删除全部 \(viewModel.records.count) 条记录及其音频文件，此操作不可撤销。"),
+                primaryButton: .destructive(Text("清空")) {
+                    viewModel.deleteAll()
+                },
+                secondaryButton: .cancel(Text("取消"))
+            )
         }
         .modifier(SearchableModifier(
             searchQuery: $viewModel.searchQuery,

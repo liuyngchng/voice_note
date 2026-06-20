@@ -123,23 +123,12 @@ struct DetailView: View {
                     .padding()
                     .frame(maxWidth: .infinity)
                 } else if visit.transcriptStatus == .unavailable {
-                    VStack(spacing: 8) {
-                        Text("转写失败")
-                            .foregroundColor(.secondary)
-                        Button {
-                            viewModel.retryTranscript()
-                        } label: {
-                            HStack {
-                                if viewModel.isRetryingTranscript {
-                                    ProgressView().scaleEffect(0.8)
-                                }
-                                Text(viewModel.isRetryingTranscript ? "重试中..." : "重新转写")
-                            }
-                        }
-                        .disabled(viewModel.isRetryingTranscript)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity)
+                    Text(viewModel.transcriptError ?? "转写失败")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .frame(maxWidth: .infinity)
                 } else if visit.transcriptStatus == .pending {
                     HStack {
                         ProgressView().scaleEffect(0.8)
@@ -149,6 +138,26 @@ struct DetailView: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity)
+                }
+
+                // 手动重试入口（转写完成或失败后均可手动重试）
+                if visit.transcriptStatus == .completed || visit.transcriptStatus == .unavailable {
+                    Divider().padding(.horizontal)
+                    Button {
+                        viewModel.retryTranscript()
+                    } label: {
+                        HStack {
+                            if viewModel.isRetryingTranscript {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            Text(viewModel.isRetryingTranscript ? "重试中..." : "重新转写")
+                                .font(.subheadline)
+                        }
+                    }
+                    .disabled(viewModel.isRetryingTranscript)
+                    .padding(.bottom, 8)
                 }
             }
             .padding()
@@ -198,23 +207,12 @@ struct DetailView: View {
                     .padding()
                     .frame(maxWidth: .infinity)
                 } else if visit.summaryStatus == .unavailable {
-                    VStack(spacing: 8) {
-                        Text("总结生成失败")
-                            .foregroundColor(.secondary)
-                        Button {
-                            viewModel.retrySummary()
-                        } label: {
-                            HStack {
-                                if viewModel.isRetryingSummary {
-                                    ProgressView().scaleEffect(0.8)
-                                }
-                                Text(viewModel.isRetryingSummary ? "重试中..." : "重新生成")
-                            }
-                        }
-                        .disabled(viewModel.isRetryingSummary)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity)
+                    Text(viewModel.summaryError ?? "总结生成失败")
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .frame(maxWidth: .infinity)
                 } else if visit.summaryStatus == .pending {
                     HStack {
                         ProgressView().scaleEffect(0.8)
@@ -224,6 +222,26 @@ struct DetailView: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity)
+                }
+
+                // 手动重试入口（总结完成或失败后均可手动重试）
+                if visit.summaryStatus == .completed || visit.summaryStatus == .unavailable {
+                    Divider().padding(.horizontal)
+                    Button {
+                        viewModel.retrySummary()
+                    } label: {
+                        HStack {
+                            if viewModel.isRetryingSummary {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            Text(viewModel.isRetryingSummary ? "重试中..." : "重新生成总结")
+                                .font(.subheadline)
+                        }
+                    }
+                    .disabled(viewModel.isRetryingSummary)
+                    .padding(.bottom, 8)
                 }
             }
             .padding()

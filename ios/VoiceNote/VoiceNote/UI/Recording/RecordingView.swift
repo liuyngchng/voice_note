@@ -21,7 +21,7 @@ struct RecordingView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("返回") {
                     if viewModel.isRecording {
-                        viewModel.stopVisit()
+                        viewModel.stopVisit(navigateToDetail: false)
                     }
                     onBack()
                 }
@@ -31,7 +31,7 @@ struct RecordingView: View {
             isRecording: viewModel.isRecording
         ))
         .onChange(of: viewModel.isRecording) { newValue in
-            if !newValue, !hasNavigated, let visitId = viewModel.currentVisitId {
+            if !newValue, !hasNavigated, viewModel.shouldNavigateToDetail, let visitId = viewModel.currentVisitId {
                 hasNavigated = true
                 onVisitComplete(visitId)
             }
@@ -80,7 +80,9 @@ struct RecordingView: View {
             .padding(.top, 12)
 
             VStack(spacing: 8) {
-                Button(action: { viewModel.stopVisit() }) {
+                Button(action: {
+                    viewModel.stopVisit(navigateToDetail: true)
+                }) {
                     HStack {
                         if viewModel.isStopping {
                             ProgressView()

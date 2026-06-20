@@ -21,6 +21,11 @@ struct SmartBadgeApp: App {
 
 private let permLogger = Logger(subsystem: "com.voicenote", category: "app")
 
+private func appLog(_ tag: String, _ msg: String) {
+    permLogger.info("\(msg)")
+    LogFile.shared.append(tag, msg)
+}
+
 private struct PermissionModifier: ViewModifier {
     @State private var hasRequested = false
 
@@ -32,11 +37,11 @@ private struct PermissionModifier: ViewModifier {
             // 0. 版本号
             let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
             let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-            permLogger.info("[App] 语音笔记 v\(shortVersion) build \(build) 启动")
+            appLog("app","[App] 语音笔记 v\(shortVersion) build \(build) 启动")
 
             // 1. 麦克风权限
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                permLogger.info("\(granted ? "[Perm] 麦克风权限已授予" : "[Perm] 麦克风权限被拒绝")")
+                appLog("app","\(granted ? "[Perm] 麦克风权限已授予" : "[Perm] 麦克风权限被拒绝")")
             }
 
             // 2. 局域网权限 — iOS 14+ 自动弹窗
@@ -45,7 +50,7 @@ private struct PermissionModifier: ViewModifier {
             if let url = URL(string: asrURL),
                let host = url.host,
                let port = url.port {
-                permLogger.info("[Perm] 触发局域网权限: \(host):\(port)")
+                appLog("app","[Perm] 触发局域网权限: \(host):\(port)")
                 let conn = NWConnection(
                     host: NWEndpoint.Host(host),
                     port: NWEndpoint.Port(integerLiteral: UInt16(port)),
@@ -54,10 +59,10 @@ private struct PermissionModifier: ViewModifier {
                 conn.stateUpdateHandler = { state in
                     switch state {
                     case .ready:
-                        permLogger.info("[Perm] 局域网连接就绪")
+                        appLog("app","[Perm] 局域网连接就绪")
                         conn.cancel()
                     case .failed(let error):
-                        permLogger.info("[Perm] 局域网连接失败: \(error.localizedDescription)")
+                        appLog("app","[Perm] 局域网连接失败: \(error.localizedDescription)")
                         conn.cancel()
                     default:
                         break
@@ -69,7 +74,7 @@ private struct PermissionModifier: ViewModifier {
                     conn.cancel()
                 }
             } else {
-                permLogger.info("[Perm] 局域网权限: ASR URL 解析失败，跳过")
+                appLog("app","[Perm] 局域网权限: ASR URL 解析失败，跳过")
             }
         }
     }

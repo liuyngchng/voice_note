@@ -15,9 +15,26 @@ final class PersistenceController: ObservableObject {
             container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
         }
 
-        container.loadPersistentStores { _, error in
+        // 遇到损坏的 store 自动删除重建
+        container.loadPersistentStores { [weak self] desc, error in
             if let error {
-                fatalError("Core Data 加载失败: \(error)")
+                print("[CoreData] 加载失败: \(error.localizedDescription)，尝试重建...")
+                if let url = desc.url {
+                    try? FileManager.default.removeItem(at: url)
+                    // 删除关联文件
+                    let shm = url.appendingPathExtension("sqlite-shm")
+                    let wal = url.appendingPathExtension("sqlite-wal")
+                    try? FileManager.default.removeItem(at: shm)
+                    try? FileManager.default.removeItem(at: wal)
+                }
+                // 重试
+                self?.container.loadPersistentStores { _, error2 in
+                    if let error2 {
+                        print("[CoreData] 重建失败: \(error2.localizedDescription)")
+                    } else {
+                        print("[CoreData] 数据库已重建")
+                    }
+                }
             }
         }
 

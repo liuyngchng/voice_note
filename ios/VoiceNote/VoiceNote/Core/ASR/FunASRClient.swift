@@ -303,6 +303,7 @@ final class FunASRClient {
             return .failure(ASRError.invalidURL)
         }
 
+        Log.asr("processPCMChunk 开始: pcmData=\(pcmData.count/1000)KB, wavName=\(wavName)")
         return await withCheckedContinuation { continuation in
             let wsSession = URLSession(configuration: .default)
             let task = wsSession.webSocketTask(with: wsUrl)
@@ -312,6 +313,7 @@ final class FunASRClient {
             func finish(_ result: Result<String, Error>) {
                 guard !hasResumed else { return }
                 hasResumed = true
+                Log.asr("processPCMChunk finish: \(result)")
                 task.cancel()
                 continuation.resume(returning: result)
             }
@@ -355,18 +357,29 @@ final class FunASRClient {
             }
 
             // 接收结果
+            // 服务端发完 offline 结果后不一定立即关连接，客户端收到即结束
             func receive() {
                 task.receive { result in
                     switch result {
                     case .success(let message):
-                        if case .string(let text) = message,
-                           let data = text.data(using: .utf8),
-                           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                           let t = json["text"] as? String {
-                            transcript += t
+                        if case .string(let text) = message {
+                            Log.asrDebug("<== 服务端推送全文: \(text)")
+                            if let data = text.data(using: .utf8),
+                               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                               let t = json["text"] as? String, !t.isEmpty {
+                                transcript += t
+                                let mode = json["mode"] as? String ?? ""
+                                Log.asr("processPCMChunk got text: \"\(t.prefix(40))...\", mode=\(mode)")
+                                // offline 模式结果 → 最终结果，立即结束
+                                if mode == "offline" {
+                                    finish(.success(transcript))
+                                    return
+                                }
+                            }
                         }
                         receive()
-                    case .failure:
+                    case .failure(let error):
+                        Log.asr("processPCMChunk recv failure: \(error.localizedDescription)")
                         if transcript.isEmpty {
                             finish(.failure(ASRError.noTranscript))
                         } else {
@@ -415,5 +428,10 @@ extension Log {
     private static let logger = Logger(subsystem: "com.voicenote", category: "asr")
     static func asr(_ msg: String) {
         logger.info("\(msg)")
+        LogFile.shared.append("asr", msg)
+    }
+    static func asrDebug(_ msg: String) {
+        logger.debug("\(msg)")
+        LogFile.shared.append("asr-debug", msg)
     }
 }

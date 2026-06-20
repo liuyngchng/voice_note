@@ -31,4 +31,7 @@ protocol RecordRepository {
 
     /// 删除记录
     func deleteRecord(id: UUID) async throws
+
+    /// 清空所有记录
+    func deleteAllRecords() async throws
 }

@@ -324,5 +324,6 @@ extension Log {
     private static let logger = Logger(subsystem: "com.voicenote", category: "llm")
     static func llm(_ msg: String) {
         logger.info("\(msg)")
+        LogFile.shared.append("llm", msg)
     }
 }
