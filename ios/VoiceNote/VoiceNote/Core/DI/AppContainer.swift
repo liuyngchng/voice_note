@@ -10,6 +10,7 @@ final class AppContainer: ObservableObject {
     let persistence = PersistenceController.shared
 
     lazy var recordRepository: RecordRepository = RecordRepositoryImpl(container: self)
+    lazy var recordingManager = RecordingManager(container: self)
 
     init() {}
 }

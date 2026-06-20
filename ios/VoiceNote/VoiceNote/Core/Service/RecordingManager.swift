@@ -146,38 +146,56 @@ final class RecordingManager: ObservableObject {
     private func processCurrentChunk() {
         guard !pcmBuffer.isEmpty else { return }
         let chunk = pcmBuffer
-        pcmBuffer = Data() // 下一段从零开始累积
+        pcmBuffer = Data()
         let index = chunkIndex
         chunkIndex += 1
         pendingChunkCount += 1
         let asrURL = currentAsrURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let asrClient = container.asrClient
+        let repository = container.recordRepository
+        let recordId = currentRecordId
 
         Log.recording("发送片段 #\(index) (PCM \(chunk.count / 1000)KB)")
 
         Task.detached(priority: .utility) { [weak self] in
             let result = await asrClient.processPCMChunk(
-                pcmData: chunk,
-                serverUrl: asrURL,
-                wavName: "chunk-\(index)"
+                pcmData: chunk, serverUrl: asrURL, wavName: "chunk-\(index)"
             )
-            await MainActor.run { [weak self] in
-                guard let self else { return }
+            guard let self else { return }
+            // 切回主线程更新状态
+            await MainActor.run {
                 self.pendingChunkCount -= 1
                 if case .success(let text) = result {
                     var chunks = self.transcriptChunks
                     chunks[index] = text
                     self.transcriptChunks = chunks
-                    // 首个片段完成 → 转写进入处理中状态
-                    if chunks.count == 1, let rid = self.currentRecordId {
-                        Task { try? await self.container.recordRepository.updateTranscriptStatus(rid, status: .processing) }
+                    if chunks.count == 1, let rid = recordId {
+                        Task { try? await repository.updateTranscriptStatus(rid, status: .processing) }
                     }
                     Log.recording("片段 #\(index) 完成: \"\(text.prefix(40))...\"")
                 } else {
                     Log.recording("片段 #\(index) 失败")
                 }
-                // 实时更新 UI 显示（按序号拼接已完成片段）
                 self.transcript = self.joinedTranscript()
+
+                if self.pendingChunkCount == 0, !self.isRecording, let rid = recordId {
+                    Log.recording("全部片段完成，保存最终转写")
+                    let finalText = self.joinedTranscript()
+                    let savedText = finalText.isBlank
+                        ? "暂时无法获取转写内容"
+                        : finalText
+                    let fileURL = self.saveTranscriptToFile(recordId: rid, text: savedText)
+                    Task {
+                        try? await repository.updateTranscript(
+                            rid, text: savedText, filePath: fileURL?.path ?? ""
+                        )
+                        try? await repository.updateTranscriptStatus(
+                            rid,
+                            status: savedText == "暂时无法获取转写内容" ? .unavailable : .completed
+                        )
+                        self.startSummaryIfReady(recordId: rid, transcriptText: savedText)
+                    }
+                }
             }
         }
     }
@@ -212,38 +230,22 @@ final class RecordingManager: ObservableObject {
         }
         audioStreamTask?.cancel()
 
-        // 所有收尾工作放到后台执行，不阻塞 UI
+        // 音频定稿：后台执行，不阻塞 UI
         let recordId = currentRecordId
         let pcmURL = currentPcmURL
-        let llmURL = currentLlmURL
-        let llmKey = currentLlmKey
-        let llmModel = currentLlmModel
-        let llmPrompt = currentLlmPrompt
+        let repository = container.recordRepository
 
         Task.detached(priority: .utility) { [weak self] in
             guard let self else { return }
-
-            // 等待所有片段完成（最长等 5 min/片段）
-            let maxWaitPerChunk: TimeInterval = 300
-            let start = Date()
-            var totalWait: TimeInterval = 0
-            while await MainActor.run(body: { self.pendingChunkCount }) > 0 {
-                if totalWait >= maxWaitPerChunk { break }
-                try? await Task.sleep(nanoseconds: 2_000_000_000) // 每 2s 检查
-                totalWait = Date().timeIntervalSince(start)
-            }
-
-            // 定稿音频文件
+            Log.recording("后台收尾：音频定稿")
             Log.recording("stopRecording 收尾: recordId=\(recordId?.uuidString ?? "nil"), pcmURL=\(pcmURL?.path ?? "nil")")
             if let recordId, let pcmURL {
-                let wavPath = await MainActor.run {
+                let wavPath: String? = await MainActor.run {
                     self.finalizeAudio(recordId: recordId, pcmURL: pcmURL)
                 }
                 if let path = wavPath {
                     Log.recording("WAV 已定稿: \(path)")
-                    try? await self.container.recordRepository.updateAudioFilePath(
-                        recordId, path: path, endTime: Date()
-                    )
+                    try? await repository.updateAudioFilePath(recordId, path: path, endTime: Date())
                     Log.recording("audioFilePath 已写入 DB")
                 } else {
                     Log.recording("finalizeAudio 返回 nil，WAV 定稿失败")
@@ -251,51 +253,46 @@ final class RecordingManager: ObservableObject {
             } else {
                 Log.recording("定稿跳过: recordId 或 pcmURL 为 nil")
             }
-
-            // 拼接所有片段 → 最终转写
-            let finalText = await MainActor.run { self.joinedTranscript() }
-            let savedText = finalText.isBlank
-                ? "暂时无法获取转写内容"
-                : finalText
-            let fileURL = await MainActor.run {
-                self.saveTranscriptToFile(recordId: recordId!, text: savedText)
-            }
-            if let recordId {
-                try? await self.container.recordRepository.updateTranscript(
-                    recordId, text: savedText, filePath: fileURL?.path ?? ""
-                )
-                try? await self.container.recordRepository.updateTranscriptStatus(
-                    recordId,
-                    status: savedText == "暂时无法获取转写内容" ? .unavailable : .completed
-                )
-            }
-
-            // LLM 总结（5 次重试）—— 转写完成且填了 API Key 才执行
-            let llmConfigured = !llmURL.isEmpty && !llmKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if savedText != "暂时无法获取转写内容", llmConfigured, let recordId {
-                try? await self.container.recordRepository.updateSummaryStatus(recordId, status: .processing)
-
-                let delays: [TimeInterval] = [5, 10, 20, 40, 80]
-                var summaryResult: Result<RecordSummary, Error> = .failure(LLMError.parseFailed("未开始"))
-                for (i, delay) in delays.enumerated() {
-                    if i > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-                    let r = await self.container.llmClient.generateSummary(
-                        transcript: savedText, apiUrl: llmURL, apiKey: llmKey,
-                        model: llmModel, customPrompt: llmPrompt
-                    )
-                    if case .success = r { summaryResult = r; break }
-                }
-                if case .success(let summary) = summaryResult {
-                    try? await self.container.recordRepository.updateSummary(recordId, summary: summary)
-                } else {
-                    try? await self.container.recordRepository.updateSummaryStatus(recordId, status: .unavailable)
-                }
-            } else if let recordId {
-                // 转写失败 → 总结也标记为不可用，避免 UI 一直显示"处理中"
-                try? await self.container.recordRepository.updateSummaryStatus(recordId, status: .unavailable)
-            }
         }
         currentPcmURL = nil
+    }
+
+    /// chunk 全部完成后调用的 LLM 总结
+    private func startSummaryIfReady(recordId: UUID, transcriptText: String) {
+        guard !transcriptText.isEmpty,
+              transcriptText != "暂时无法获取转写内容"
+        else { return }
+
+        let llmURL = currentLlmURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let llmKey = currentLlmKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let llmModel = currentLlmModel
+        let llmPrompt = currentLlmPrompt
+        let repository = container.recordRepository
+        let llmClient = container.llmClient
+
+        guard !llmURL.isEmpty, !llmKey.isEmpty else {
+            Task { try? await repository.updateSummaryStatus(recordId, status: .unavailable) }
+            return
+        }
+
+        Task {
+            try? await repository.updateSummaryStatus(recordId, status: .processing)
+            let delays: [TimeInterval] = [5, 10, 20, 40, 80]
+            var summaryResult: Result<RecordSummary, Error> = .failure(LLMError.parseFailed("未开始"))
+            for (i, delay) in delays.enumerated() {
+                if i > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+                let r = await llmClient.generateSummary(
+                    transcript: transcriptText, apiUrl: llmURL, apiKey: llmKey,
+                    model: llmModel, customPrompt: llmPrompt
+                )
+                if case .success = r { summaryResult = r; break }
+            }
+            if case .success(let summary) = summaryResult {
+                try? await repository.updateSummary(recordId, summary: summary)
+            } else {
+                try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+            }
+        }
     }
 
 

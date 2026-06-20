@@ -42,6 +42,7 @@ private struct PermissionModifier: ViewModifier {
             if let url = URL(string: asrURL),
                let host = url.host,
                let port = url.port {
+                print("[Perm] 触发局域网权限: \(host):\(port)")
                 let conn = NWConnection(
                     host: NWEndpoint.Host(host),
                     port: NWEndpoint.Port(integerLiteral: UInt16(port)),
@@ -49,7 +50,11 @@ private struct PermissionModifier: ViewModifier {
                 )
                 conn.stateUpdateHandler = { state in
                     switch state {
-                    case .ready, .failed:
+                    case .ready:
+                        print("[Perm] 局域网连接就绪")
+                        conn.cancel()
+                    case .failed(let error):
+                        print("[Perm] 局域网连接失败: \(error.localizedDescription)")
                         conn.cancel()
                     default:
                         break
@@ -60,6 +65,8 @@ private struct PermissionModifier: ViewModifier {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
                     conn.cancel()
                 }
+            } else {
+                print("[Perm] 局域网权限: ASR URL 解析失败，跳过")
             }
         }
     }

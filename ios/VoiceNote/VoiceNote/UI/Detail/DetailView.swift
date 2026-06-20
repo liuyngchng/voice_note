@@ -111,6 +111,15 @@ struct DetailView: View {
                         .disabled(viewModel.isRetryingSummary)
                     }
                     .padding()
+                } else if visit.summaryStatus == .pending {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("等待转写完成...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
                 }
 
                 // 完整转写 — 显示文件名，点击查看内容
@@ -162,6 +171,15 @@ struct DetailView: View {
                             }
                         }
                         .disabled(viewModel.isRetryingTranscript)
+                    }
+                    .padding()
+                } else if visit.transcriptStatus == .pending {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("等待录音完成...")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
                     .padding()
                 }

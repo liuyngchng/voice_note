@@ -31,7 +31,7 @@ final class RecordingViewModel: ObservableObject {
 
     init(container: AppContainer) {
         self.container = container
-        self.recordingManager = RecordingManager(container: container)
+        self.recordingManager = container.recordingManager
     }
 
     func startVisit() {
