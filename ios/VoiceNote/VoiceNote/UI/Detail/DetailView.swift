@@ -34,7 +34,7 @@ struct DetailView: View {
         VStack(spacing: 0) {
             // 选项卡
             Picker("", selection: $selectedTab) {
-                Text("基本信息").tag(0)
+                Text("音频").tag(0)
                 Text("转写").tag(1)
                 Text("总结").tag(2)
             }
@@ -170,7 +170,7 @@ struct DetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if let summary = visit.summary {
-                    GroupBox(label: Text("AI 总结")) {
+                    VStack(alignment: .leading, spacing: 16) {
                         if !summary.topics.isEmpty {
                             summarySection("议题", summary.topics, color: .blue)
                         }
@@ -198,6 +198,9 @@ struct DetailView: View {
                             summarySection("后续", summary.nextSteps, color: .purple)
                         }
                     }
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(10)
                 } else if visit.summaryStatus == .processing {
                     HStack {
                         ProgressView()
@@ -236,7 +239,7 @@ struct DetailView: View {
                             } else {
                                 Image(systemName: "arrow.clockwise")
                             }
-                            Text(viewModel.isRetryingSummary ? "重试中..." : "重新生成总结")
+                            Text(viewModel.isRetryingSummary ? "重试中..." : "重新总结")
                                 .font(.subheadline)
                         }
                     }
@@ -321,14 +324,28 @@ struct DetailView: View {
     }
 
     private func summarySection(_ title: String, _ items: [String], color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: "circle.fill")
-                .font(.subheadline)
-                .foregroundColor(color)
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                Text("• \(item)")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 5)
+                Text(title)
                     .font(.subheadline)
-                    .padding(.leading, 20)
+                    .bold()
+                    .foregroundColor(.primary)
+            }
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 6) {
+                    Text("•")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(width: 14, alignment: .leading)
+                    Text(item)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
