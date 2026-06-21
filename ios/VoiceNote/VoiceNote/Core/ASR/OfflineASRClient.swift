@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import os
 
 /// 离线 ASR 客户端 — 通过 sherpa-onnx C API 调用 SenseVoice 模型
@@ -9,6 +10,9 @@ import os
 /// 并以 kCFRunLoopCommonModes（模式集合，非可运行模式）作为参数。
 /// 这是 onnxruntime 的已知行为，不影响功能。
 /// 本客户端将 num_threads 设为 1，避免创建线程池，从而规避该警告。
+///
+/// FP32 模型约 886MB，低内存设备可能触发内存警告。
+/// 推理进行中收到警告时会延迟释放，确保当前推理能完成。
 final class OfflineASRClient {
     private let inferenceQueue = DispatchQueue(label: "com.voicenote.offline-asr", qos: .utility)
     private var recognizer: OpaquePointer?
@@ -16,8 +20,20 @@ final class OfflineASRClient {
     private var isInitialized = false
     private var initError: String?
 
+    // MARK: - 内存警告管理
+
+    /// Block-based observer 的 token，用于正确移除
+    private var memoryObserver: NSObjectProtocol?
+
+    /// 保护 isInferring / shouldReleaseAfterInference 的锁
+    private let stateLock = NSLock()
+    private var isInferring = false
+    private var shouldReleaseAfterInference = false
+
     deinit {
-        NotificationCenter.default.removeObserver(self)
+        if let observer = memoryObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         reset()
     }
 
@@ -108,6 +124,23 @@ final class OfflineASRClient {
             return .failure(OfflineASRError.notInitialized(initError ?? "未知错误"))
         }
 
+        stateLock.lock()
+        isInferring = true
+        stateLock.unlock()
+
+        defer {
+            var shouldRelease = false
+            stateLock.lock()
+            isInferring = false
+            shouldRelease = shouldReleaseAfterInference
+            shouldReleaseAfterInference = false
+            stateLock.unlock()
+            if shouldRelease {
+                Log.asr("推理完成，执行延迟的模型释放")
+                reset()
+            }
+        }
+
         return await withCheckedContinuation { continuation in
             inferenceQueue.async { [weak self] in
                 guard let self else {
@@ -183,13 +216,30 @@ final class OfflineASRClient {
     // MARK: - 内存警告
 
     private func setupMemoryObserver() {
-        let name = Notification.Name("UIApplicationDidReceiveMemoryWarningNotification")
-        NotificationCenter.default.removeObserver(self, name: name, object: nil)
-        NotificationCenter.default.addObserver(
-            forName: name, object: nil, queue: .main
+        // 正确移除旧的 block-based observer（必须用 token）
+        if let existing = memoryObserver {
+            NotificationCenter.default.removeObserver(existing)
+            memoryObserver = nil
+        }
+        memoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
         ) { [weak self] _ in
-            Log.asr("收到内存警告，释放离线 ASR 模型")
-            self?.reset()
+            guard let self else { return }
+
+            self.stateLock.lock()
+            let inferring = self.isInferring
+            if inferring {
+                self.shouldReleaseAfterInference = true
+            }
+            self.stateLock.unlock()
+
+            if inferring {
+                Log.asr("收到内存警告，推理进行中 — 将在完成后释放模型")
+            } else {
+                Log.asr("收到内存警告，释放离线 ASR 模型")
+                self.reset()
+            }
         }
     }
 }

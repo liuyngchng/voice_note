@@ -169,6 +169,18 @@ struct SettingsView: View {
                 dismissButton: .cancel(Text("好"))
             )
         }
+        .alert(isPresented: $viewModel.showFP32Warning) {
+            Alert(
+                title: Text("内存警告"),
+                message: Text("FP32 模型约 886MB，您的设备内存较小（< 4GB），可能导致闪退。\n\n建议使用 INT8 模型（~229MB）。\n\n确定要切换吗？"),
+                primaryButton: .destructive(Text("确定切换")) {
+                    viewModel.confirmFP32Switch()
+                },
+                secondaryButton: .cancel(Text("取消")) {
+                    viewModel.cancelFP32Switch()
+                }
+            )
+        }
         .fileImporter(
             isPresented: $showModelFileImporter,
             allowedContentTypes: [.bz2],

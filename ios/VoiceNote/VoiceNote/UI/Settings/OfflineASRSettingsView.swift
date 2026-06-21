@@ -17,6 +17,9 @@ struct OfflineASRSettingsView: View {
                 }
             }
             .pickerStyle(.menu)
+            .onChange(of: viewModel.offlineModelQuality) { newQuality in
+                viewModel.checkFP32Switch(newQuality)
+            }
 
             modelStatusSection
         }

@@ -14,7 +14,16 @@ final class SettingsViewModel: ObservableObject {
     @Published var saveConfirmed = false
     @Published var validationError: String?
 
-    // MARK: - 连接测试状态
+    // MARK: - FP32 内存警告
+    @Published var showFP32Warning = false
+
+    /// 设备物理内存是否 < 4GB
+    static var isLowMemoryDevice: Bool {
+        ProcessInfo.processInfo.physicalMemory < 4 * 1024 * 1024 * 1024
+    }
+
+    /// 上一次成功切换的模型质量（用于取消时回退）
+    private var previousModelQuality: ModelQuality
     @Published var wsTestResult: ConnectionTestResult = .idle
     @Published var llmTestResult: ConnectionTestResult = .idle
 
@@ -61,6 +70,7 @@ final class SettingsViewModel: ObservableObject {
         llmModel = d
         asrMode = mode
         offlineModelQuality = quality
+        previousModelQuality = quality
         saved = Snapshot(asrURL: a, llmURL: b, llmKey: c, llmModel: d,
                          asrMode: mode, offlineModelQuality: quality)
     }
@@ -214,5 +224,29 @@ final class SettingsViewModel: ObservableObject {
 
     func deleteModel() async {
         modelDownloadManager?.deleteModel(quality: offlineModelQuality)
+    }
+
+    // MARK: - FP32 内存警告
+
+    /// 当用户切换模型质量时调用。若选中 FP32 且设备内存 < 4GB，弹出警告。
+    func checkFP32Switch(_ newQuality: ModelQuality) {
+        if newQuality == .fp32 && Self.isLowMemoryDevice {
+            showFP32Warning = true
+            // 暂不更新 previousModelQuality，等用户确认
+        } else {
+            previousModelQuality = newQuality
+        }
+    }
+
+    /// 用户确认切换 FP32
+    func confirmFP32Switch() {
+        showFP32Warning = false
+        previousModelQuality = .fp32
+    }
+
+    /// 用户取消切换 FP32，回退到之前的质量
+    func cancelFP32Switch() {
+        showFP32Warning = false
+        offlineModelQuality = previousModelQuality
     }
 }
