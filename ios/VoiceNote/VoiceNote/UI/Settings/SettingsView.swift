@@ -8,7 +8,9 @@ struct SettingsView: View {
     @State private var showBackAlert = false
     @State private var showValidationAlert = false
     @State private var showModelFileImporter = false
+    @State private var showLLMFileImporter = false
     @StateObject private var modelDownloadManager = ModelDownloadManager()
+    @StateObject private var llmModelManager = LLMModelManager()
 
     /// iOS 15.1 以上才支持离线识别（onnxruntime 要求）
     private var supportsOffline: Bool {
@@ -57,15 +59,32 @@ struct SettingsView: View {
                                        showFileImporter: $showModelFileImporter)
             }
 
-            Section(header: Text("LLM API(OpenAI)")) {
-                TextField("API 地址", text: $viewModel.llmURL)
-                    .keyboardType(.URL)
-                    .autocapitalization(.none)
+            // MARK: - LLM 模式选择
+            Section(header: Text("LLM 总结")) {
+                Toggle(isOn: Binding(
+                    get: { viewModel.llmMode == .offline },
+                    set: { viewModel.llmMode = $0 ? .offline : .online }
+                )) {
+                    Text("离线总结")
+                }
 
-                SecureField("API Key", text: $viewModel.llmKey)
+                if viewModel.llmMode == .online {
+                    TextField("API 地址", text: $viewModel.llmURL)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
 
-                TextField("模型名称", text: $viewModel.llmModel)
-                    .autocapitalization(.none)
+                    SecureField("API Key", text: $viewModel.llmKey)
+
+                    TextField("模型名称", text: $viewModel.llmModel)
+                        .autocapitalization(.none)
+                }
+            }
+
+            // MARK: - 离线 LLM 模型设置
+            if viewModel.llmMode == .offline {
+                OfflineLLMSettingsView(viewModel: viewModel,
+                                       downloadManager: llmModelManager,
+                                       showFileImporter: $showLLMFileImporter)
             }
 
             // MARK: - 连接测试
@@ -83,15 +102,17 @@ struct SettingsView: View {
                     }
                 }
 
-                HStack {
-                    Text("LLM API")
-                        .font(.subheadline)
-                    Spacer()
-                    Text(viewModel.llmTestResult.message)
-                        .font(.caption)
-                        .foregroundColor(testResultColor(viewModel.llmTestResult))
-                    Image(systemName: testResultIcon(viewModel.llmTestResult))
-                        .foregroundColor(testResultColor(viewModel.llmTestResult))
+                if viewModel.llmMode == .online {
+                    HStack {
+                        Text("LLM API")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(viewModel.llmTestResult.message)
+                            .font(.caption)
+                            .foregroundColor(testResultColor(viewModel.llmTestResult))
+                        Image(systemName: testResultIcon(viewModel.llmTestResult))
+                            .foregroundColor(testResultColor(viewModel.llmTestResult))
+                    }
                 }
 
                 Button(action: { viewModel.test() }) {
@@ -134,6 +155,7 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             viewModel.modelDownloadManager = modelDownloadManager
+            viewModel.llmModelManager = llmModelManager
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -191,6 +213,19 @@ struct SettingsView: View {
                     Task { await viewModel.importModel(from: url) }
                 case .failure(let error):
                     Log.asr("文件选择取消或失败: \(error.localizedDescription)")
+                }
+            }
+        )
+        .fileImporter(
+            isPresented: $showLLMFileImporter,
+            allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data],
+            onCompletion: { result in
+                switch result {
+                case .success(let url):
+                    Log.llm("用户选择了 LLM 模型: \(url.lastPathComponent)")
+                    Task { await viewModel.importLLMModel(from: url) }
+                case .failure(let error):
+                    Log.llm("模型文件选择取消或失败: \(error.localizedDescription)")
                 }
             }
         )

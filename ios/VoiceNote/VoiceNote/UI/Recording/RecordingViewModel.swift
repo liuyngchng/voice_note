@@ -71,6 +71,7 @@ final class RecordingViewModel: ObservableObject {
             let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
             let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
             let asrMode = ASRMode(rawValue: UserDefaults.standard.string(forKey: "asr_mode") ?? "") ?? .online
+            let llmMode = LLMMode(rawValue: UserDefaults.standard.string(forKey: "llm_mode") ?? "") ?? .online
 
             let record = VoiceRecord(
                 title: finalTitle,
@@ -100,7 +101,8 @@ final class RecordingViewModel: ObservableObject {
                     llmURL: llmURL,
                     llmKey: llmKey,
                     llmModel: llmModel,
-                    asrMode: asrMode
+                    asrMode: asrMode,
+                    llmMode: llmMode
                 )
 
                 // 绑定状态轮询
@@ -200,6 +202,7 @@ final class RecordingViewModel: ObservableObject {
                 // 5. 启动 ASR 处理
                 let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
                 let asrMode = ASRMode(rawValue: UserDefaults.standard.string(forKey: "asr_mode") ?? "") ?? .online
+                let llmMode = LLMMode(rawValue: UserDefaults.standard.string(forKey: "llm_mode") ?? "") ?? .online
                 let llmURL = UserDefaults.standard.string(forKey: "llm_url") ?? "https://api.deepseek.com"
                 let llmKey = UserDefaults.standard.string(forKey: "llm_key") ?? ""
                 let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
@@ -243,26 +246,46 @@ final class RecordingViewModel: ObservableObject {
                             try? await repository.updateTranscriptStatus(recordId, status: .completed)
 
                             // LLM 总结
-                            if !llmURL.isEmpty, !llmKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                try? await repository.updateSummaryStatus(recordId, status: .processing)
-                                let delays: [TimeInterval] = [5, 10, 20, 40, 80]
-                                var summaryResult: Result<RecordSummary, Error> = .failure(LLMError.parseFailed(""))
-                                let llmClient = container.llmClient
-                                for (i, delay) in delays.enumerated() {
-                                    if i > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-                                    let r = await llmClient.generateSummary(
-                                        transcript: text, apiUrl: llmURL, apiKey: llmKey,
-                                        model: llmModel, customPrompt: nil
-                                    )
-                                    if case .success = r { summaryResult = r; break }
-                                }
-                                if case .success(let summary) = summaryResult {
-                                    try? await repository.updateSummary(recordId, summary: summary)
+                            switch llmMode {
+                            case .online:
+                                if !llmURL.isEmpty, !llmKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    try? await repository.updateSummaryStatus(recordId, status: .processing)
+                                    let delays: [TimeInterval] = [5, 10, 20, 40, 80]
+                                    var summaryResult: Result<RecordSummary, Error> = .failure(LLMError.parseFailed(""))
+                                    let llmClient = container.llmClient
+                                    for (i, delay) in delays.enumerated() {
+                                        if i > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+                                        let r = await llmClient.generateSummary(
+                                            transcript: text, apiUrl: llmURL, apiKey: llmKey,
+                                            model: llmModel, customPrompt: nil
+                                        )
+                                        if case .success = r { summaryResult = r; break }
+                                    }
+                                    if case .success(let summary) = summaryResult {
+                                        try? await repository.updateSummary(recordId, summary: summary)
+                                    } else {
+                                        try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                                    }
                                 } else {
                                     try? await repository.updateSummaryStatus(recordId, status: .unavailable)
                                 }
-                            } else {
-                                try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                            case .offline:
+                                let modelInfo = LLMModelManager.savedModelInfo()
+                                if LLMModelManager.isModelDownloaded(modelInfo) {
+                                    try? await repository.updateSummaryStatus(recordId, status: .processing)
+                                    let summaryResult = await container.offlineLLMClient.generateSummary(
+                                        transcript: text,
+                                        modelInfo: modelInfo,
+                                        customPrompt: nil
+                                    )
+                                    if case .success(let summary) = summaryResult {
+                                        try? await repository.updateSummary(recordId, summary: summary)
+                                    } else {
+                                        try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                                    }
+                                } else {
+                                    try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                                }
                             }
                         } else {
                             try? await repository.updateTranscriptStatus(recordId, status: .unavailable)

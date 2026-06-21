@@ -31,6 +31,7 @@ final class RecordingManager: ObservableObject {
     private var currentLlmModel: String = "deepseek-v4-pro"
     private var currentLlmPrompt: String?
     private var currentAsrMode: ASRMode = .online
+    private var currentLlmMode: LLMMode = .online
 
     /// 分段 ASR：累积 PCM 数据（不包含 WAV 头）
     private var pcmBuffer = Data()
@@ -64,7 +65,8 @@ final class RecordingManager: ObservableObject {
         llmKey: String,
         llmModel: String = "deepseek-v4-pro",
         llmPrompt: String? = nil,
-        asrMode: ASRMode = .online
+        asrMode: ASRMode = .online,
+        llmMode: LLMMode = .online
     ) {
         currentRecordId = recordId
         currentAsrURL = asrURL
@@ -73,6 +75,7 @@ final class RecordingManager: ObservableObject {
         currentLlmModel = llmModel
         currentLlmPrompt = llmPrompt
         currentAsrMode = asrMode
+        currentLlmMode = llmMode
 
         pcmBuffer = Data()
         transcriptChunks = [:]
@@ -303,36 +306,68 @@ final class RecordingManager: ObservableObject {
         let llmModel = currentLlmModel
         let llmPrompt = currentLlmPrompt
         let repository = container.recordRepository
-        let llmClient = container.llmClient
+        let llmMode = currentLlmMode
 
-        guard !llmURL.isEmpty, !llmKey.isEmpty else {
-            Log.recording("LLM 总结跳过: Key=\(llmKey.isEmpty ? "未配置" : "已配置"), URL=\(llmURL.isEmpty ? "未配置" : llmURL.prefix(30))")
-            Task { try? await repository.updateSummaryStatus(recordId, status: .unavailable) }
-            return
-        }
-
-        Log.recording("LLM 总结开始: model=\(llmModel), transcript=\(transcriptText.count)字")
-        Task {
-            try? await repository.updateSummaryStatus(recordId, status: .processing)
-            let delays: [TimeInterval] = [5, 10, 20, 40, 80]
-            var summaryResult: Result<RecordSummary, Error> = .failure(LLMError.parseFailed("未开始"))
-            for (i, delay) in delays.enumerated() {
-                if i > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
-                let r = await llmClient.generateSummary(
-                    transcript: transcriptText, apiUrl: llmURL, apiKey: llmKey,
-                    model: llmModel, customPrompt: llmPrompt
-                )
-                if case .success = r { summaryResult = r; break }
-                Log.recording("LLM 第\(i+1)次尝试失败, \(Int(delay))s 后重试...")
+        switch llmMode {
+        case .online:
+            guard !llmURL.isEmpty, !llmKey.isEmpty else {
+                Log.recording("LLM 总结跳过: Key=\(llmKey.isEmpty ? "未配置" : "已配置"), URL=\(llmURL.isEmpty ? "未配置" : llmURL.prefix(30))")
+                Task { try? await repository.updateSummaryStatus(recordId, status: .unavailable) }
+                return
             }
-            if case .success(let summary) = summaryResult {
-                Log.recording("LLM 总结成功: topics=\(summary.topics.count), todos=\(summary.todos.count)")
-                try? await repository.updateSummary(recordId, summary: summary)
-            } else {
-                if case .failure(let error) = summaryResult {
-                    Log.recording("LLM 总结失败: \(error.localizedDescription)")
+
+            Log.recording("LLM 总结开始(在线): model=\(llmModel), transcript=\(transcriptText.count)字")
+            let llmClient = container.llmClient
+            Task {
+                try? await repository.updateSummaryStatus(recordId, status: .processing)
+                let delays: [TimeInterval] = [5, 10, 20, 40, 80]
+                var summaryResult: Result<RecordSummary, Error> = .failure(LLMError.parseFailed("未开始"))
+                for (i, delay) in delays.enumerated() {
+                    if i > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+                    let r = await llmClient.generateSummary(
+                        transcript: transcriptText, apiUrl: llmURL, apiKey: llmKey,
+                        model: llmModel, customPrompt: llmPrompt
+                    )
+                    if case .success = r { summaryResult = r; break }
+                    Log.recording("LLM 第\(i+1)次尝试失败, \(Int(delay))s 后重试...")
                 }
-                try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                if case .success(let summary) = summaryResult {
+                    Log.recording("LLM 总结成功: topics=\(summary.topics.count), todos=\(summary.todos.count)")
+                    try? await repository.updateSummary(recordId, summary: summary)
+                } else {
+                    if case .failure(let error) = summaryResult {
+                        Log.recording("LLM 总结失败: \(error.localizedDescription)")
+                    }
+                    try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                }
+            }
+
+        case .offline:
+            let modelInfo = LLMModelManager.savedModelInfo()
+            guard LLMModelManager.isModelDownloaded(modelInfo) else {
+                Log.recording("离线 LLM 总结跳过: 模型未下载 (\(modelInfo.displayName))")
+                Task { try? await repository.updateSummaryStatus(recordId, status: .unavailable) }
+                return
+            }
+
+            Log.recording("LLM 总结开始(离线): model=\(modelInfo.rawValue), transcript=\(transcriptText.count)字")
+            let offlineClient = container.offlineLLMClient
+            Task {
+                try? await repository.updateSummaryStatus(recordId, status: .processing)
+                let summaryResult = await offlineClient.generateSummary(
+                    transcript: transcriptText,
+                    modelInfo: modelInfo,
+                    customPrompt: llmPrompt
+                )
+                if case .success(let summary) = summaryResult {
+                    Log.recording("离线 LLM 总结成功: topics=\(summary.topics.count), todos=\(summary.todos.count)")
+                    try? await repository.updateSummary(recordId, summary: summary)
+                } else {
+                    if case .failure(let error) = summaryResult {
+                        Log.recording("离线 LLM 总结失败: \(error.localizedDescription)")
+                    }
+                    try? await repository.updateSummaryStatus(recordId, status: .unavailable)
+                }
             }
         }
     }

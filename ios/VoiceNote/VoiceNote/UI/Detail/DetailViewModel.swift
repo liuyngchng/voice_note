@@ -61,14 +61,27 @@ final class DetailViewModel: ObservableObject {
         }
 
         if visit.summaryStatus == .unavailable, summaryError == nil {
-            let key = UserDefaults.standard.string(forKey: "llm_key") ?? ""
-            if key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                summaryError = "未配置 LLM API Key，请在设置中填写"
-            } else if visit.transcriptText?.isEmpty != false
-                        || visit.transcriptText == "暂时无法获取转写内容" {
-                summaryError = "缺少转写文本，无法生成总结"
+            let llmMode = LLMMode(rawValue: UserDefaults.standard.string(forKey: "llm_mode") ?? "") ?? .online
+            if llmMode == .online {
+                let key = UserDefaults.standard.string(forKey: "llm_key") ?? ""
+                if key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    summaryError = "未配置 LLM API Key，请在设置中填写"
+                } else if visit.transcriptText?.isEmpty != false
+                            || visit.transcriptText == "暂时无法获取转写内容" {
+                    summaryError = "缺少转写文本，无法生成总结"
+                } else {
+                    summaryError = "API 调用失败，可尝试手动重新生成"
+                }
             } else {
-                summaryError = "API 调用失败，可尝试手动重新生成"
+                let modelInfo = LLMModelManager.savedModelInfo()
+                if !LLMModelManager.isModelDownloaded(modelInfo) {
+                    summaryError = "离线 LLM 模型未下载，请在设置中下载"
+                } else if visit.transcriptText?.isEmpty != false
+                            || visit.transcriptText == "暂时无法获取转写内容" {
+                    summaryError = "缺少转写文本，无法生成总结"
+                } else {
+                    summaryError = "离线推理失败，可尝试手动重新生成"
+                }
             }
         }
     }
@@ -123,9 +136,6 @@ final class DetailViewModel: ObservableObject {
         guard let id = currentVisitId, !isRetryingTranscript else { return }
 
         let audioPath = visit?.audioFilePath ?? ""
-        let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
-        let asrClient = container.asrClient
-        let repository = container.recordRepository
 
         // 1. 检查音频文件
         guard !audioPath.isEmpty else {
@@ -137,60 +147,120 @@ final class DetailViewModel: ObservableObject {
             return
         }
 
+        // 2. 读取当前 ASR 模式设置（实时读取，确保设置变更生效）
+        let asrMode = ASRMode(rawValue: UserDefaults.standard.string(forKey: "asr_mode") ?? "") ?? .online
+
+        switch asrMode {
+        case .online:
+            retryTranscriptOnline(id: id, audioPath: audioPath)
+        case .offline:
+            retryTranscriptOffline(id: id, audioPath: audioPath)
+        }
+    }
+
+    private func retryTranscriptOnline(id: UUID, audioPath: String) {
+        let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
+        let asrClient = container.asrClient
+        let repository = container.recordRepository
+
         isRetryingTranscript = true
         transcriptError = nil
 
         Task {
-            // 2. 从 WAV 文件读取 PCM 数据
-            var pcmData = Data()
-            if let handle = FileHandle(forReadingAtPath: audioPath) {
-                defer { try? handle.close() }
-                _ = try? handle.read(upToCount: 44)
-                while let chunk = try? handle.read(upToCount: 64_000), !chunk.isEmpty {
-                    pcmData.append(chunk)
-                }
-            }
-
-            guard !pcmData.isEmpty else {
+            let pcmData = Self.readPCMFromWAV(at: audioPath)
+            guard let pcmData, !pcmData.isEmpty else {
                 transcriptError = "音频文件损坏或为空，无法读取 PCM 数据"
                 isRetryingTranscript = false
                 refresh()
                 return
             }
 
-            // 3. 提交 ASR（不设 .processing 避免 UI 抖动；旧内容保持可见）
             let result = await asrClient.processPCMChunk(
                 pcmData: pcmData, serverUrl: asrURL,
                 wavName: "retry-\(id.uuidString.prefix(8))"
             )
 
-            // 4. 处理结果
-            if case .success(let text) = result, !text.isEmpty {
-                let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                    .appendingPathComponent("audio/\(id.uuidString)", isDirectory: true)
-                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let dateStr = Self.localDateString()
-                let fileURL = dir.appendingPathComponent("\(dateStr).txt")
-                try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+            await handleTranscriptResult(id: id, result: result, repository: repository)
+        }
+    }
 
-                try? await repository.updateTranscript(id, text: text, filePath: fileURL.path)
-                try? await repository.updateTranscriptStatus(id, status: .completed)
-                transcriptError = nil
-                // 新成功，删旧文件
-                if let oldPath = visit?.transcriptFilePath, !oldPath.isEmpty, oldPath != fileURL.path {
-                    try? FileManager.default.removeItem(atPath: oldPath)
-                }
-            } else {
-                transcriptError = "ASR 转写失败"
-                if case .failure(let error) = result {
-                    transcriptError = error.localizedDescription
-                }
-                try? await repository.updateTranscriptStatus(id, status: .unavailable)
+    private func retryTranscriptOffline(id: UUID, audioPath: String) {
+        let quality = ModelDownloadManager.savedQuality()
+        guard ModelDownloadManager.isModelDownloaded(quality) else {
+            transcriptError = "离线 ASR 模型未下载，请在设置中下载后重试"
+            return
+        }
+
+        let offlineClient = container.offlineASRClient
+        let repository = container.recordRepository
+
+        isRetryingTranscript = true
+        transcriptError = nil
+
+        Task {
+            // 模型加载放在后台 Task 中，避免阻塞主线程
+            do {
+                try offlineClient.ensureRecognizer(quality: quality)
+            } catch {
+                transcriptError = "离线 ASR 模型加载失败: \(error.localizedDescription)"
+                isRetryingTranscript = false
+                refresh()
+                return
             }
 
-            isRetryingTranscript = false
-            refresh()
+            let pcmData = Self.readPCMFromWAV(at: audioPath)
+            guard let pcmData, !pcmData.isEmpty else {
+                transcriptError = "音频文件损坏或为空，无法读取 PCM 数据"
+                isRetryingTranscript = false
+                refresh()
+                return
+            }
+
+            let result = await offlineClient.processPCMChunk(pcmData: pcmData)
+
+            await handleTranscriptResult(id: id, result: result, repository: repository)
         }
+    }
+
+    /// 从 WAV 文件读取 PCM 数据（跳过 44 字节头部）
+    private static func readPCMFromWAV(at path: String) -> Data? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        _ = try? handle.read(upToCount: 44)
+        var data = Data()
+        while let chunk = try? handle.read(upToCount: 64_000), !chunk.isEmpty {
+            data.append(chunk)
+        }
+        return data
+    }
+
+    /// 统一处理转写结果（在线/离线共用）
+    private func handleTranscriptResult(id: UUID, result: Result<String, Error>, repository: RecordRepository) async {
+        if case .success(let text) = result, !text.isEmpty {
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("audio/\(id.uuidString)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let dateStr = Self.localDateString()
+            let fileURL = dir.appendingPathComponent("\(dateStr).txt")
+            try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+
+            try? await repository.updateTranscript(id, text: text, filePath: fileURL.path)
+            try? await repository.updateTranscriptStatus(id, status: .completed)
+            transcriptError = nil
+            // 新成功，删旧文件
+            if let oldPath = visit?.transcriptFilePath, !oldPath.isEmpty, oldPath != fileURL.path {
+                try? FileManager.default.removeItem(atPath: oldPath)
+            }
+        } else {
+            transcriptError = "ASR 转写失败"
+            if case .failure(let error) = result {
+                transcriptError = error.localizedDescription
+            }
+            try? await repository.updateTranscriptStatus(id, status: .unavailable)
+        }
+
+        isRetryingTranscript = false
+        refresh()
     }
 
     func retrySummary() {
@@ -208,43 +278,82 @@ final class DetailViewModel: ObservableObject {
             return
         }
 
-        // 2. 检查 LLM 配置
-        let llmURL = UserDefaults.standard.string(forKey: "llm_url") ?? "https://api.deepseek.com"
-        let llmKey = UserDefaults.standard.string(forKey: "llm_key") ?? ""
-        let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
+        // 2. 读取 LLM 模式
+        let llmMode = LLMMode(rawValue: UserDefaults.standard.string(forKey: "llm_mode") ?? "") ?? .online
 
-        guard !llmURL.isEmpty, !llmKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            summaryError = "未配置 LLM API Key，请在设置中填写"
-            return
-        }
+        switch llmMode {
+        case .online:
+            // 检查在线 LLM 配置
+            let llmURL = UserDefaults.standard.string(forKey: "llm_url") ?? "https://api.deepseek.com"
+            let llmKey = UserDefaults.standard.string(forKey: "llm_key") ?? ""
+            let llmModel = UserDefaults.standard.string(forKey: "llm_model") ?? "deepseek-v4-pro"
 
-        let llmClient = container.llmClient
-        let repository = container.recordRepository
-
-        isRetryingSummary = true
-        summaryError = nil
-
-        // 3. 提交 LLM（不设 .processing 避免 UI 抖动；旧内容保持可见）
-        Task {
-            let summaryResult = await llmClient.generateSummary(
-                transcript: transcript, apiUrl: llmURL, apiKey: llmKey,
-                model: llmModel, customPrompt: nil
-            )
-
-            // 4. 处理结果
-            if case .success(let summary) = summaryResult {
-                try? await repository.updateSummary(id, summary: summary)
-                summaryError = nil
-            } else {
-                summaryError = "AI 总结生成失败"
-                if case .failure(let error) = summaryResult {
-                    summaryError = error.localizedDescription
-                }
-                try? await repository.updateSummaryStatus(id, status: .unavailable)
+            guard !llmURL.isEmpty, !llmKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                summaryError = "未配置 LLM API Key，请在设置中填写"
+                return
             }
 
-            isRetryingSummary = false
-            refresh()
+            let llmClient = container.llmClient
+            let repository = container.recordRepository
+
+            isRetryingSummary = true
+            summaryError = nil
+
+            Task {
+                let summaryResult = await llmClient.generateSummary(
+                    transcript: transcript, apiUrl: llmURL, apiKey: llmKey,
+                    model: llmModel, customPrompt: nil
+                )
+
+                if case .success(let summary) = summaryResult {
+                    try? await repository.updateSummary(id, summary: summary)
+                    summaryError = nil
+                } else {
+                    summaryError = "AI 总结生成失败"
+                    if case .failure(let error) = summaryResult {
+                        summaryError = error.localizedDescription
+                    }
+                    try? await repository.updateSummaryStatus(id, status: .unavailable)
+                }
+
+                isRetryingSummary = false
+                refresh()
+            }
+
+        case .offline:
+            let modelInfo = LLMModelManager.savedModelInfo()
+            guard LLMModelManager.isModelDownloaded(modelInfo) else {
+                summaryError = "离线模型未下载，请在设置中下载后重试"
+                return
+            }
+
+            let offlineClient = container.offlineLLMClient
+            let repository = container.recordRepository
+
+            isRetryingSummary = true
+            summaryError = nil
+
+            Task {
+                let summaryResult = await offlineClient.generateSummary(
+                    transcript: transcript,
+                    modelInfo: modelInfo,
+                    customPrompt: nil
+                )
+
+                if case .success(let summary) = summaryResult {
+                    try? await repository.updateSummary(id, summary: summary)
+                    summaryError = nil
+                } else {
+                    summaryError = "离线总结生成失败"
+                    if case .failure(let error) = summaryResult {
+                        summaryError = error.localizedDescription
+                    }
+                    try? await repository.updateSummaryStatus(id, status: .unavailable)
+                }
+
+                isRetryingSummary = false
+                refresh()
+            }
         }
     }
 }

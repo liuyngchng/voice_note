@@ -64,6 +64,14 @@ struct OfflineASRSettingsView: View {
             Text("\(viewModel.offlineModelQuality.rawValue.uppercased())")
                 .font(.caption)
                 .foregroundColor(.secondary)
+            Button {
+                Task { await viewModel.deleteModel() }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.borderless)
         }
     }
 
