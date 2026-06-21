@@ -71,17 +71,15 @@ struct OfflineLLMSettingsView: View {
     }
 
     private var modelNotDownloadedRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
-                Text("模型未下载")
-                    .font(.subheadline)
+                Text("\(viewModel.llmModelInfo.displayName) 模型未下载")
+                    .font(.body)
             }
-            Text("需要离线大模型才能本地生成总结")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            downloadHintSection
+            downloadAddressRow
+            Divider()
             actionButtonsRow
         }
     }
@@ -118,90 +116,78 @@ struct OfflineLLMSettingsView: View {
             Text(error)
                 .font(.caption)
                 .foregroundColor(.secondary)
-            downloadHintSection
+            downloadAddressRow
+            Divider()
             actionButtonsRow
         }
     }
 
-    // MARK: - 下载地址提示
+    // MARK: - 下载地址
 
-    private var downloadHintSection: some View {
+    /// 可能有多条地址（ModelScope / GitHub），逐行显示
+    private var downloadAddressRow: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("💡 下载地址（可在电脑下载后通过「上传」导入手机）：")
-                .font(.caption2)
-                .foregroundColor(.secondary)
+            Text("下载地址")
+                .font(.subheadline)
+                .foregroundColor(.primary)
 
             if let msURL = viewModel.llmModelInfo.modelscopeDownloadURL {
-                HStack(spacing: 4) {
-                    Text("ModelScope: \(msURL)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.blue)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                    Button {
-                        UIPasteboard.general.string = msURL
-                        copyToast = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            copyToast = false
-                        }
-                    } label: {
-                        Image(systemName: copyToast ? "doc.on.doc.fill" : "doc.on.doc")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderless)
-                }
+                urlRow(label: "ModelScope", url: msURL)
             }
 
             if let ghURL = viewModel.llmModelInfo.githubDownloadURL {
-                HStack(spacing: 4) {
-                    Text("GitHub: \(ghURL)")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.blue)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                    Button {
-                        UIPasteboard.general.string = ghURL
-                        copyToast = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            copyToast = false
-                        }
-                    } label: {
-                        Image(systemName: copyToast ? "doc.on.doc.fill" : "doc.on.doc")
-                            .font(.caption2)
-                    }
-                    .buttonStyle(.borderless)
-                }
+                urlRow(label: "GitHub", url: ghURL)
             }
 
             if viewModel.llmModelInfo.modelscopeDownloadURL == nil
                 && viewModel.llmModelInfo.githubDownloadURL == nil {
                 Text("注：自定义模型需手动上传 GGUF 文件")
-                    .font(.caption2)
+                    .font(.subheadline)
                     .foregroundColor(.secondary)
             }
 
             if copyToast {
                 Text("已复制 ✓")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundColor(.green)
             }
+        }
+    }
+
+    private func urlRow(label: String, url: String) -> some View {
+        HStack(spacing: 4) {
+            Text("\(label): \(url)")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.blue)
+                .lineLimit(2)
+                .truncationMode(.middle)
+            Button {
+                UIPasteboard.general.string = url
+                copyToast = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
+                    copyToast = false
+                }
+            } label: {
+                Image(systemName: copyToast ? "doc.on.doc.fill" : "doc.on.doc")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
         }
     }
 
     // MARK: - 操作按钮
 
     private var actionButtonsRow: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
             if viewModel.llmModelInfo.modelscopeDownloadURL != nil {
                 Button {
                     Task { await viewModel.startLLMFromModelScope() }
                 } label: {
-                    Label("ModelScope", systemImage: "square.and.arrow.down")
+                    Label("下载", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.borderless)
-                .font(.caption)
+                .font(.subheadline)
                 .disabled(downloadManager.isDownloading)
             }
 
@@ -209,10 +195,10 @@ struct OfflineLLMSettingsView: View {
                 Button {
                     Task { await viewModel.startLLMFromGitHub() }
                 } label: {
-                    Label("GitHub", systemImage: "square.and.arrow.down")
+                    Label("下载", systemImage: "square.and.arrow.down")
                 }
                 .buttonStyle(.borderless)
-                .font(.caption)
+                .font(.subheadline)
                 .disabled(downloadManager.isDownloading)
             }
 
@@ -224,7 +210,7 @@ struct OfflineLLMSettingsView: View {
                 Label("上传", systemImage: "square.and.arrow.up")
             }
             .buttonStyle(.borderless)
-            .font(.caption)
+            .font(.subheadline)
             .disabled(downloadManager.isDownloading)
         }
     }

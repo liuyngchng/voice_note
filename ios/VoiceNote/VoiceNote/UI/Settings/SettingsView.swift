@@ -87,45 +87,47 @@ struct SettingsView: View {
                                        showFileImporter: $showLLMFileImporter)
             }
 
-            // MARK: - 连接测试
-            Section(header: Text("连接测试")) {
-                if viewModel.asrMode == .online {
-                    HStack {
-                        Text("FunASR WebSocket")
-                            .font(.subheadline)
-                        Spacer()
-                        Text(viewModel.wsTestResult.message)
-                            .font(.caption)
-                            .foregroundColor(testResultColor(viewModel.wsTestResult))
-                        Image(systemName: testResultIcon(viewModel.wsTestResult))
-                            .foregroundColor(testResultColor(viewModel.wsTestResult))
-                    }
-                }
-
-                if viewModel.llmMode == .online {
-                    HStack {
-                        Text("LLM API")
-                            .font(.subheadline)
-                        Spacer()
-                        Text(viewModel.llmTestResult.message)
-                            .font(.caption)
-                            .foregroundColor(testResultColor(viewModel.llmTestResult))
-                        Image(systemName: testResultIcon(viewModel.llmTestResult))
-                            .foregroundColor(testResultColor(viewModel.llmTestResult))
-                    }
-                }
-
-                Button(action: { viewModel.test() }) {
-                    HStack {
-                        Text("开始测试")
-                            .foregroundColor(viewModel.isTesting ? .secondary : .accentColor)
-                        Spacer()
-                        if viewModel.isTesting {
-                            ProgressView()
+            // MARK: - 连接测试（仅在线模式需要）
+            if viewModel.asrMode == .online || viewModel.llmMode == .online {
+                Section(header: Text("连接测试")) {
+                    if viewModel.asrMode == .online {
+                        HStack {
+                            Text("FunASR WebSocket")
+                                .font(.subheadline)
+                            Spacer()
+                            Text(viewModel.wsTestResult.message)
+                                .font(.caption)
+                                .foregroundColor(testResultColor(viewModel.wsTestResult))
+                            Image(systemName: testResultIcon(viewModel.wsTestResult))
+                                .foregroundColor(testResultColor(viewModel.wsTestResult))
                         }
                     }
+
+                    if viewModel.llmMode == .online {
+                        HStack {
+                            Text("LLM API")
+                                .font(.subheadline)
+                            Spacer()
+                            Text(viewModel.llmTestResult.message)
+                                .font(.caption)
+                                .foregroundColor(testResultColor(viewModel.llmTestResult))
+                            Image(systemName: testResultIcon(viewModel.llmTestResult))
+                                .foregroundColor(testResultColor(viewModel.llmTestResult))
+                        }
+                    }
+
+                    Button(action: { viewModel.test() }) {
+                        HStack {
+                            Text("开始测试")
+                                .foregroundColor(viewModel.isTesting ? .secondary : .accentColor)
+                            Spacer()
+                            if viewModel.isTesting {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(viewModel.isTesting)
                 }
-                .disabled(viewModel.isTesting)
             }
 
             // 版本号
