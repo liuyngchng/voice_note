@@ -53,3 +53,6 @@ ios/.build/
 # CocoaPods
 ios/Pods/
 ios/Podfile.lock
+
+# 离线 ASR 框架（预编译二进制，不提交 git）
+ios/VoiceNote/Libraries/
