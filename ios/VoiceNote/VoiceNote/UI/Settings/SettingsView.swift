@@ -50,7 +50,8 @@ struct SettingsView: View {
 
             // MARK: - 离线模型设置
             if supportsOffline, viewModel.asrMode == .offline {
-                OfflineASRSettingsView(viewModel: viewModel)
+                OfflineASRSettingsView(viewModel: viewModel,
+                                       downloadManager: modelDownloadManager)
             }
 
             Section(header: Text("LLM API(OpenAI)")) {

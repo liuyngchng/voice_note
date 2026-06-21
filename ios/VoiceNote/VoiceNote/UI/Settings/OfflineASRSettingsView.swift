@@ -1,9 +1,13 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 离线 ASR 设置组件 — 模型质量选择 + 下载/删除
 /// 嵌入在 SettingsView 中使用
 struct OfflineASRSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
+    @ObservedObject var downloadManager: ModelDownloadManager
+    @State private var showFileImporter = false
+    @State private var copyToast = false
 
     var body: some View {
         Section(header: Text("离线模型")) {
@@ -16,13 +20,26 @@ struct OfflineASRSettingsView: View {
 
             modelStatusSection
         }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.bz2],
+            onCompletion: { result in
+                switch result {
+                case .success(let url):
+                    Log.asr("用户选择了文件: \(url.lastPathComponent)")
+                    Task { await viewModel.importModel(from: url) }
+                case .failure(let error):
+                    Log.asr("文件选择取消或失败: \(error.localizedDescription)")
+                }
+            }
+        )
     }
 
     // MARK: - 模型状态
 
     @ViewBuilder
     private var modelStatusSection: some View {
-        switch viewModel.modelDownloadState {
+        switch downloadManager.downloadState {
         case .idle:
             if viewModel.isModelDownloaded {
                 modelReadyRow
@@ -38,9 +55,8 @@ struct OfflineASRSettingsView: View {
 
         case .completed:
             modelReadyRow
-            // 如果切换了质量，显示下载按钮
             if !viewModel.isModelDownloaded {
-                downloadButton
+                actionButtonsRow
             }
 
         case .failed(let error):
@@ -72,15 +88,17 @@ struct OfflineASRSettingsView: View {
             Text("需要 SenseVoice 模型才能离线使用语音识别")
                 .font(.caption)
                 .foregroundColor(.secondary)
-            downloadButton
+            downloadHintSection
+            actionButtonsRow
         }
     }
 
     private func downloadingRow(_ progress: Double) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isImport = downloadManager.activeOperation == .import_
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 ProgressView()
-                Text("下载中...")
+                Text(isImport ? "导入中..." : "下载中...")
                 Spacer()
                 Text("\(Int(progress * 100))%")
                     .font(.system(.caption, design: .monospaced))
@@ -88,8 +106,9 @@ struct OfflineASRSettingsView: View {
             }
             ProgressView(value: progress)
             Button(action: { viewModel.cancelDownload() }) {
-                Text("取消下载").foregroundColor(.red)
+                Text("取消").foregroundColor(.red)
             }
+            .buttonStyle(.borderless)
             .font(.caption)
         }
     }
@@ -116,17 +135,69 @@ struct OfflineASRSettingsView: View {
             HStack {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-                Text("下载失败")
+                Text("安装失败")
                     .font(.subheadline)
                     .foregroundColor(.red)
             }
             Text(error)
                 .font(.caption)
                 .foregroundColor(.secondary)
-            Button("重试") {
-                Task { await viewModel.startDownload() }
+            downloadHintSection
+            HStack(spacing: 12) {
+                retryDownloadButton
+                Spacer()
+                importButton
             }
-            .font(.caption)
+        }
+    }
+
+    // MARK: - 下载地址提示
+
+    /// 当前质量对应的下载地址
+    private var modelDownloadURL: String {
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/\(viewModel.offlineModelQuality.archiveFilename)"
+    }
+
+    private var downloadHintSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("💡 下载地址（可在电脑下载后通过「上传」导入手机）：")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            HStack(spacing: 4) {
+                Text(modelDownloadURL)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                Button {
+                    UIPasteboard.general.string = modelDownloadURL
+                    Log.asr("下载链接已复制到剪贴板")
+                    copyToast = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        copyToast = false
+                    }
+                } label: {
+                    Image(systemName: copyToast ? "doc.on.doc.fill" : "doc.on.doc")
+                        .font(.caption2)
+                }
+                .buttonStyle(.borderless)
+            }
+            if copyToast {
+                Text("已复制 ✓")
+                    .font(.caption2)
+                    .foregroundColor(.green)
+            }
+        }
+    }
+
+    // MARK: - 操作按钮
+
+    private var actionButtonsRow: some View {
+        HStack(spacing: 12) {
+            downloadButton
+            Spacer()
+            importButton
         }
     }
 
@@ -134,9 +205,30 @@ struct OfflineASRSettingsView: View {
         Button {
             Task { await viewModel.startDownload() }
         } label: {
-            Label("下载模型",
-                  systemImage: "arrow.down.circle")
+            Label("下载", systemImage: "square.and.arrow.down")
         }
+        .buttonStyle(.borderless)  // 防止 Form 整行点击劫持
         .font(.subheadline)
+        .disabled(downloadManager.isDownloading)
+    }
+
+    private var retryDownloadButton: some View {
+        Button("重试下载") {
+            Task { await viewModel.startDownload() }
+        }
+        .buttonStyle(.borderless)
+        .font(.caption)
+        .disabled(downloadManager.isDownloading)
+    }
+
+    private var importButton: some View {
+        Button {
+            showFileImporter = true
+        } label: {
+            Label("上传", systemImage: "square.and.arrow.up")
+        }
+        .buttonStyle(.borderless)
+        .font(.subheadline)
+        .disabled(downloadManager.isDownloading)
     }
 }

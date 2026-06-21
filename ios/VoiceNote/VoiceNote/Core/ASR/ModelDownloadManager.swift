@@ -7,6 +7,9 @@ import os
 final class ModelDownloadManager: ObservableObject {
     @Published var downloadProgress: Double = 0
     @Published var downloadState: DownloadState = .idle
+    /// 当前操作类型：下载 or 导入（UI 据此显示不同文案）
+    enum ActiveOperation: String { case download, import_ }
+    @Published var activeOperation: ActiveOperation = .download
 
     enum DownloadState: Equatable {
         case idle
@@ -20,7 +23,7 @@ final class ModelDownloadManager: ObservableObject {
 
     private var currentTask: URLSessionDownloadTask?
     private var downloadSession: URLSession?
-    private var isDownloading = false  // 防重复点击
+    @Published var isDownloading = false  // 防重复点击（UI 绑定）
 
     deinit {
         downloadSession?.invalidateAndCancel()
@@ -102,14 +105,13 @@ final class ModelDownloadManager: ObservableObject {
 
     /// 下载模型（tar.bz2 归档），解压并提取模型文件和 tokens.txt
     func downloadModel(quality: ModelQuality) async throws {
-        // 防重复点击
         guard !isDownloading else {
-            Log.asr("下载已在進行中，忽略重复请求")
+            Log.asr("操作已在進行中，忽略重复请求")
             return
         }
         isDownloading = true
+        activeOperation = .download
 
-        // 检查磁盘空间
         guard Self.hasSufficientDiskSpace(for: quality) else {
             let msg = "磁盘空间不足，需要至少 \(quality.estimatedSizeMB) MB"
             Log.asr("下载失败: \(msg)")
@@ -119,27 +121,20 @@ final class ModelDownloadManager: ObservableObject {
         }
         Log.asr("磁盘空间检查通过，需要 ~\(quality.estimatedSizeMB)MB")
 
-        // 确保目录存在
         let fm = FileManager.default
-        try? fm.createDirectory(at: Self.modelsDirectory,
-                                withIntermediateDirectories: true)
+        try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
 
         let archiveFilename = quality.archiveFilename
         let tempDir = fm.temporaryDirectory.appendingPathComponent("model-download")
         try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
-
         let archiveURL = tempDir.appendingPathComponent(archiveFilename)
-        let tarURL = tempDir.appendingPathComponent("archive.tar")
 
         defer {
-            // 清理临时文件
-            try? fm.removeItem(at: archiveURL)
-            try? fm.removeItem(at: tarURL)
             try? fm.removeItem(at: tempDir)
             Log.asrDebug("临时文件已清理")
         }
 
-        // 阶段1: 下载 tar.bz2
+        // 下载 tar.bz2
         Log.asr("开始下载模型: \(quality.rawValue) 来自 \(Self.baseURL)/\(archiveFilename)")
         downloadState = .downloading(progress: 0)
         do {
@@ -156,11 +151,70 @@ final class ModelDownloadManager: ObservableObject {
             downloadState = .failed(msg)
             throw error
         }
+        Log.asr("归档下载完成: \(archiveFilename)")
 
-        let archiveSize = (try? archiveURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        Log.asr("归档下载完成: \(archiveFilename) (\(archiveSize / 1_048_576)MB)")
+        // 共用：解压 → 提取 → 验证
+        try await processArchive(at: archiveURL, quality: quality)
+    }
 
-        // 阶段2: 解压 bzip2 → tar
+    /// 从本地文件导入模型（用户提前下载好的 tar.bz2）
+    func importModel(from sourceURL: URL, quality: ModelQuality) async throws {
+        guard !isDownloading else {
+            Log.asr("操作已在進行中，忽略重复请求")
+            return
+        }
+        isDownloading = true
+        activeOperation = .import_
+
+        guard Self.hasSufficientDiskSpace(for: quality) else {
+            let msg = "磁盘空间不足，需要至少 \(quality.estimatedSizeMB) MB"
+            Log.asr("导入失败: \(msg)")
+            downloadState = .failed(msg)
+            isDownloading = false
+            throw DownloadError.insufficientDiskSpace
+        }
+        Log.asr("磁盘空间检查通过，需要 ~\(quality.estimatedSizeMB)MB")
+
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
+
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("model-import")
+        try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let archiveURL = tempDir.appendingPathComponent("uploaded.tar.bz2")
+
+        defer {
+            try? fm.removeItem(at: tempDir)
+            Log.asrDebug("临时文件已清理")
+        }
+
+        // 复制用户选择的文件到临时目录（文件 App 提供的 URL 可能有时效性）
+        Log.asr("开始导入文件: \(sourceURL.lastPathComponent)")
+        downloadState = .downloading(progress: 0)
+        do {
+            try? fm.removeItem(at: archiveURL)
+            try fm.copyItem(at: sourceURL, to: archiveURL)
+        } catch {
+            isDownloading = false
+            let msg = "文件复制失败: \(error.localizedDescription)"
+            Log.asr(msg)
+            downloadState = .failed(msg)
+            throw DownloadError.fileImportFailed(error.localizedDescription)
+        }
+
+        let fileSize = (try? archiveURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        Log.asr("导入文件就绪: \(sourceURL.lastPathComponent) (\(fileSize / 1_048_576)MB)")
+
+        // 共用：解压 → 提取 → 验证
+        try await processArchive(at: archiveURL, quality: quality)
+    }
+
+    // MARK: - 共用处理流程（解压 → 提取 → 验证）
+
+    private func processArchive(at archiveURL: URL, quality: ModelQuality) async throws {
+        let fm = FileManager.default
+        let tarURL = archiveURL.deletingPathExtension().appendingPathExtension("tar")
+
+        // 解压 bzip2 → tar
         Log.asr("开始解压 bzip2...")
         downloadState = .extracting(progress: 0)
         do {
@@ -172,11 +226,9 @@ final class ModelDownloadManager: ObservableObject {
             downloadState = .failed(msg)
             throw DownloadError.extractionFailed(error.localizedDescription)
         }
+        Log.asr("bzip2 解压完成")
 
-        let tarSize = (try? tarURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        Log.asr("bzip2 解压完成，tar 大小: \(tarSize / 1_048_576)MB")
-
-        // 阶段3: 从 tar 中提取 model.onnx/model.int8.onnx + tokens.txt
+        // 从 tar 中提取 model 文件 + tokens.txt
         Log.asr("开始从 tar 提取模型文件...")
         downloadState = .extracting(progress: 0.5)
         do {
@@ -191,17 +243,20 @@ final class ModelDownloadManager: ObservableObject {
 
         // 验证
         guard Self.isModelDownloaded(quality) else {
-            let msg = "下载完成但验证失败，文件缺失"
+            let msg = "完成但验证失败，文件缺失"
             Log.asr(msg)
             downloadState = .failed(msg)
             isDownloading = false
             throw DownloadError.verificationFailed
         }
 
+        // 清理 tar（已不需要）
+        try? fm.removeItem(at: tarURL)
+
         isDownloading = false
         downloadState = .completed(Date())
         let modelSize = Self.downloadedModelSize(quality)
-        Log.asr("模型下载并验证完成: \(quality.rawValue) (模型 \(modelSize / 1_048_576)MB)")
+        Log.asr("模型安装完成: \(quality.rawValue) (模型 \(modelSize / 1_048_576)MB)")
     }
 
     // MARK: - 下载归档文件（带进度）
@@ -227,11 +282,8 @@ final class ModelDownloadManager: ObservableObject {
 
             delegate.onCompletion = { [weak self] result in
                 Task { @MainActor [weak self] in
-                    self?.downloadSession?.invalidateAndCancel()
-                    self?.downloadSession = nil
                     switch result {
                     case .success(let tempURL):
-                        defer { try? FileManager.default.removeItem(at: tempURL) }
                         do {
                             try? FileManager.default.removeItem(at: targetURL)
                             try FileManager.default.copyItem(at: tempURL, to: targetURL)
@@ -241,7 +293,13 @@ final class ModelDownloadManager: ObservableObject {
                             Log.asr("复制下载文件失败: \(error.localizedDescription)")
                             continuation.resume(throwing: error)
                         }
+                        // 文件复制完成后再清理 session 和临时文件
+                        try? FileManager.default.removeItem(at: tempURL)
+                        self?.downloadSession?.finishTasksAndInvalidate()
+                        self?.downloadSession = nil
                     case .failure(let error):
+                        self?.downloadSession?.invalidateAndCancel()
+                        self?.downloadSession = nil
                         let nsError = error as NSError
                         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
                             continuation.resume(throwing: CancellationError())
@@ -370,7 +428,7 @@ final class ModelDownloadManager: ObservableObject {
                 // 跳过 padding（数据已读取 fileSize 字节，还需跳过 padding - fileSize）
                 let padding = Int(paddedSize - fileSize)
                 if padding > 0 {
-                    try? fileHandle.read(upToCount: padding)
+                    _ = try? fileHandle.read(upToCount: padding)
                 }
             } else {
                 // 不需要此文件，跳过
@@ -434,6 +492,7 @@ enum DownloadError: LocalizedError {
     case insufficientDiskSpace
     case extractionFailed(String)
     case verificationFailed
+    case fileImportFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -442,6 +501,7 @@ enum DownloadError: LocalizedError {
         case .insufficientDiskSpace: return "磁盘空间不足"
         case .extractionFailed(let msg): return "解压错误: \(msg)"
         case .verificationFailed: return "下载完成但文件验证失败，请重试"
+        case .fileImportFailed(let msg): return "文件导入失败: \(msg)"
         }
     }
 }
@@ -471,7 +531,18 @@ private final class DownloadProgressDelegate: NSObject, URLSessionDownloadDelega
     func urlSession(_ session: URLSession,
                     downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        onCompletion?(.success(location))
+        // 临时文件在回调返回后立即被系统删除，必须马上复制到我们的缓存目录
+        let fm = FileManager.default
+        let cacheDir = fm.temporaryDirectory.appendingPathComponent("download-cache")
+        try? fm.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let cachedURL = cacheDir.appendingPathComponent(location.lastPathComponent)
+        try? fm.removeItem(at: cachedURL)
+        do {
+            try fm.copyItem(at: location, to: cachedURL)
+            onCompletion?(.success(cachedURL))
+        } catch {
+            onCompletion?(.failure(error))
+        }
     }
 
     func urlSession(_ session: URLSession,

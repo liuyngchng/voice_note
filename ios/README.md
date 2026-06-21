@@ -166,6 +166,23 @@ App 下载后自动解压并提取 `model.int8.onnx`（或 `model.onnx`）和 `t
 5. INT8 版本文件名包含 `int8`，FP32 不包含
 6. 更新 `ASRTypes.swift` 中的 `archiveFilename` 和 `estimatedSizeMB`
 
+### 开发者下载脚本
+
+项目根目录提供了下载脚本，可在电脑上提前下载模型：
+
+```bash
+# 下载两种精度
+bash scripts/download_models.sh
+
+# 只下载 INT8（推荐，158MB）
+bash scripts/download_models.sh int8
+
+# 只下载 FP32（845MB）
+bash scripts/download_models.sh fp32
+```
+
+模型文件和 `tokens.txt` 会输出到 `models/sense-voice/` 目录，可传输到手机后用 App「上传」按钮导入。
+
 ## 权限
 
 | 权限 | Info.plist Key | 用途 |

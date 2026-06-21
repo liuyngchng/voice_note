@@ -199,6 +199,15 @@ final class SettingsViewModel: ObservableObject {
         }
     }
 
+    func importModel(from url: URL) async {
+        guard let manager = modelDownloadManager else { return }
+        do {
+            try await manager.importModel(from: url, quality: offlineModelQuality)
+        } catch {
+            // 错误状态已由 ModelDownloadManager 设置
+        }
+    }
+
     func cancelDownload() {
         modelDownloadManager?.cancelDownload()
     }
