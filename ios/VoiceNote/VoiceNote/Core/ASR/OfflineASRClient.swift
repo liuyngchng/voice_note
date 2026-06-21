@@ -3,6 +3,12 @@ import os
 
 /// 离线 ASR 客户端 — 通过 sherpa-onnx C API 调用 SenseVoice 模型
 /// 提供与 FunASRClient 兼容的 processPCMChunk 接口
+///
+/// 关于 kCFRunLoopCommonModes 警告:
+/// onnxruntime 内部线程池在创建线程时可能调用 CFRunLoopRunSpecific，
+/// 并以 kCFRunLoopCommonModes（模式集合，非可运行模式）作为参数。
+/// 这是 onnxruntime 的已知行为，不影响功能。
+/// 本客户端将 num_threads 设为 1，避免创建线程池，从而规避该警告。
 final class OfflineASRClient {
     private let inferenceQueue = DispatchQueue(label: "com.voicenote.offline-asr", qos: .utility)
     private var recognizer: OpaquePointer?
@@ -83,7 +89,7 @@ final class OfflineASRClient {
         config.model_config.sense_voice.use_itn = 1
 
         config.model_config.tokens = UnsafePointer(tokensStr)
-        config.model_config.num_threads = 2
+        config.model_config.num_threads = 1  // 单线程，避免 onnxruntime 线程池触发 CFRunLoop 警告
         config.model_config.provider = UnsafePointer(providerStr)
         config.model_config.debug = 0
 

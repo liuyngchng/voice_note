@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 struct OfflineASRSettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
     @ObservedObject var downloadManager: ModelDownloadManager
-    @State private var showFileImporter = false
+    @Binding var showFileImporter: Bool
     @State private var copyToast = false
 
     var body: some View {
@@ -20,19 +20,6 @@ struct OfflineASRSettingsView: View {
 
             modelStatusSection
         }
-        .fileImporter(
-            isPresented: $showFileImporter,
-            allowedContentTypes: [.bz2],
-            onCompletion: { result in
-                switch result {
-                case .success(let url):
-                    Log.asr("用户选择了文件: \(url.lastPathComponent)")
-                    Task { await viewModel.importModel(from: url) }
-                case .failure(let error):
-                    Log.asr("文件选择取消或失败: \(error.localizedDescription)")
-                }
-            }
-        )
     }
 
     // MARK: - 模型状态

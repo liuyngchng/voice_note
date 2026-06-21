@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var viewModel: SettingsViewModel
@@ -6,6 +7,7 @@ struct SettingsView: View {
 
     @State private var showBackAlert = false
     @State private var showValidationAlert = false
+    @State private var showModelFileImporter = false
     @StateObject private var modelDownloadManager = ModelDownloadManager()
 
     /// iOS 15.1 以上才支持离线识别（onnxruntime 要求）
@@ -51,7 +53,8 @@ struct SettingsView: View {
             // MARK: - 离线模型设置
             if supportsOffline, viewModel.asrMode == .offline {
                 OfflineASRSettingsView(viewModel: viewModel,
-                                       downloadManager: modelDownloadManager)
+                                       downloadManager: modelDownloadManager,
+                                       showFileImporter: $showModelFileImporter)
             }
 
             Section(header: Text("LLM API(OpenAI)")) {
@@ -166,6 +169,19 @@ struct SettingsView: View {
                 dismissButton: .cancel(Text("好"))
             )
         }
+        .fileImporter(
+            isPresented: $showModelFileImporter,
+            allowedContentTypes: [.bz2],
+            onCompletion: { result in
+                switch result {
+                case .success(let url):
+                    Log.asr("用户选择了文件: \(url.lastPathComponent)")
+                    Task { await viewModel.importModel(from: url) }
+                case .failure(let error):
+                    Log.asr("文件选择取消或失败: \(error.localizedDescription)")
+                }
+            }
+        )
     }
 
     // MARK: - 测试结果辅助
