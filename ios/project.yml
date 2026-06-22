@@ -1,0 +1,26 @@
+name: SmartBadge
+options:
+  bundleIdPrefix: com.smartbadge
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "14.2"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.7"
+
+targets:
+  SmartBadge:
+    type: application
+    platform: iOS
+    sources:
+      - path: SmartBadge
+        type: group
+    settings:
+      base:
+        INFOPLIST_FILE: SmartBadge/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: com.smartbadge.app
+        DEVELOPMENT_TEAM: ""
+        GENERATE_INFOPLIST_FILE: false
+    info:
+      path: SmartBadge/Info.plist

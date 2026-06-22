@@ -29,3 +29,37 @@ bin/
 
 # Gradle wrapper (keep the jar, ignore properties if it contains sensitive data)
 # gradle/wrapper/gradle-wrapper.properties
+
+# ===== iOS / Xcode =====
+# Xcode 用户数据
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# 编译产物
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# XcodeGen 生成的工程文件（project.yml 是源）
+ios/*.xcodeproj
+ios/*.xcworkspace
+
+# Swift Package Manager
+.swiftpm/
+ios/.build/
+
+# CocoaPods
+ios/Pods/
+ios/Podfile.lock
+
+# 离线 ASR 框架（预编译二进制，不提交 git）
+ios/VoiceNote/Libraries/
+
+# 离线 ASR 模型文件（体积大，不提交 git）
+models/
+
+# ===== Claude Code =====
+.claude/settings.local.json
+.claude/plans/
