@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "SmartBadge"
+rootProject.name = "VoiceNote"
 include(":app")

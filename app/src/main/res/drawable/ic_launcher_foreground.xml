@@ -4,12 +4,34 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Microphone body -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M54,30 C41.85,30 32,39.85 32,52 C32,58.35 34.75,64.05 39.1,67.95 L38,78 L70,78 L68.9,67.95 C73.25,64.05 76,58.35 76,52 C76,39.85 66.15,30 54,30 Z M54,36 C62.84,36 70,43.16 70,52 C70,57.25 67.6,61.95 64,64.9 L63,72 L45,72 L44,64.9 C40.4,61.95 38,57.25 38,52 C38,43.16 45.16,36 54,36 Z"/>
+        android:pathData="M42,38 L42,52 C42,58.62 47.38,64 54,64 C60.62,64 66,58.62 66,52 L66,38 C66,31.38 60.62,26 54,26 C47.38,26 42,31.38 42,38 Z"/>
+    <!-- Microphone base/stand -->
     <path
-        android:pathData="M46,50 L52,56 L62,46"
-        android:strokeWidth="3"
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,66 L48,74 L46,74 L46,78 L62,78 L62,74 L60,74 L60,66 Z"/>
+    <!-- Sound waves left -->
+    <path
         android:strokeColor="#FFFFFF"
-        android:fillColor="#00000000"/>
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M38,42 C34,46 34,52 38,56"/>
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M32,38 C26,44 26,54 32,60"/>
+    <!-- Sound waves right -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M70,42 C74,46 74,52 70,56"/>
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:fillColor="#00000000"
+        android:pathData="M76,38 C82,44 82,54 76,60"/>
 </vector>

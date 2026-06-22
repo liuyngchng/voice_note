@@ -18,7 +18,7 @@ val localProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.smartbadge.app"
+    namespace = "com.voicenote.app"
     compileSdk = 34
 
     signingConfigs {
@@ -31,11 +31,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.smartbadge.app"
+        applicationId = "com.voicenote.app"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "2.0.0"
         buildConfigField("String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\"")
     }
 
@@ -59,6 +59,13 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 }
 
@@ -104,4 +111,7 @@ dependencies {
 
     // Core
     implementation(libs.core.ktx)
+
+    // Commons Compress (tar.bz2 extraction for model downloads)
+    implementation(libs.commons.compress)
 }

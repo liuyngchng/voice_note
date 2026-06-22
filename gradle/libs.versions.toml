@@ -16,6 +16,7 @@ lifecycle = "2.8.4"
 navigation = "2.7.7"
 datastore = "1.1.1"
 core-ktx = "1.13.1"
+commons-compress = "1.26.2"
 
 [libraries]
 # Compose BOM
@@ -59,6 +60,9 @@ datastore-preferences = { module = "androidx.datastore:datastore-preferences", v
 
 # Core
 core-ktx = { module = "androidx.core:core-ktx", version.ref = "core-ktx" }
+
+# Commons
+commons-compress = { module = "org.apache.commons:commons-compress", version.ref = "commons-compress" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
