@@ -19,8 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -68,7 +67,6 @@ fun RecordingScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    val listState = rememberLazyListState()
     var showPermissionDialog by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -98,12 +96,6 @@ fun RecordingScreen(
         checkAndRequestPermissions()
     }
 
-    // Auto-scroll transcript
-    LaunchedEffect(uiState.transcript) {
-        if (uiState.transcript.isNotEmpty()) {
-            listState.animateScrollToItem(Int.MAX_VALUE)
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -255,29 +247,27 @@ fun RecordingScreen(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                 )
 
-                LazyColumn(
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                    state = listState
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    item {
-                        if (uiState.transcript.isBlank()) {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().height(200.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    "等待语音输入...",
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                )
-                            }
-                        } else {
-                            Text(
-                                uiState.transcript,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(4.dp)
-                            )
-                        }
+                    val displayText = if (uiState.transcript.isBlank()) {
+                        "等待语音输入..."
+                    } else {
+                        val t = uiState.transcript
+                        if (t.length > 30) "…${t.takeLast(30)}" else t
                     }
+                    Text(
+                        displayText,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (uiState.transcript.isBlank())
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                        else
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
                 }
 
                 // Stop button

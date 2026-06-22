@@ -1,3 +1,5 @@
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Properties
 
 plugins {
@@ -7,6 +9,8 @@ plugins {
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
 }
+
+val buildTimestamp: String = SimpleDateFormat("yyyyMMddHHmmss").format(Date())
 
 // 从 local.properties 读取签名信息
 val localProperties = Properties().apply {
@@ -32,6 +36,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+        buildConfigField("String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\"")
     }
 
     buildTypes {
@@ -53,6 +58,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
