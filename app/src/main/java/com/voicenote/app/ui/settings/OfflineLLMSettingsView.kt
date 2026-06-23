@@ -21,7 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -64,40 +64,47 @@ fun OfflineLLMSettingsView(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ModeChip(
-                label = "在线",
-                selected = llmMode == "online",
-                onClick = { onLlmModeChange("online") },
-                modifier = Modifier.weight(1f)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                "离线",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (llmMode == "offline") FontWeight.Bold else FontWeight.Normal,
+                color = if (llmMode == "offline") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
-            ModeChip(
-                label = "离线",
-                selected = llmMode == "offline",
-                onClick = { onLlmModeChange("offline") },
-                modifier = Modifier.weight(1f)
+            Spacer(modifier = Modifier.padding(start = 12.dp))
+            Switch(
+                checked = llmMode == "online",
+                onCheckedChange = { checked -> onLlmModeChange(if (checked) "online" else "offline") }
+            )
+            Spacer(modifier = Modifier.padding(start = 12.dp))
+            Text(
+                "在线",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (llmMode == "online") FontWeight.Bold else FontWeight.Normal,
+                color = if (llmMode == "online") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
         }
 
         if (llmMode == "online") {
             Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
+            ScrollableOutlinedField(
                 value = llmUrl,
                 onValueChange = onLlmUrlChange,
-                label = { Text("API 地址") },
-                placeholder = { Text("https://api.deepseek.com") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp)
+                label = "API 地址",
+                placeholder = "https://api.deepseek.com",
+                modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
+            ScrollableOutlinedField(
                 value = llmKey,
                 onValueChange = onLlmKeyChange,
-                label = { Text("API Key") },
+                label = "API Key",
+                placeholder = "",
                 modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp),
                 visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = { keyVisible = !keyVisible }) {
@@ -109,14 +116,12 @@ fun OfflineLLMSettingsView(
                 }
             )
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
+            ScrollableOutlinedField(
                 value = llmModel,
                 onValueChange = onLlmModelChange,
-                label = { Text("模型") },
-                placeholder = { Text("gpt-4o-mini") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(8.dp)
+                label = "模型",
+                placeholder = "gpt-4o-mini",
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
@@ -237,30 +242,6 @@ fun OfflineLLMSettingsView(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ModeChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(40.dp),
-        shape = RoundedCornerShape(8.dp),
-        colors = if (selected)
-            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-        else
-            ButtonDefaults.outlinedButtonColors()
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-        )
     }
 }
 

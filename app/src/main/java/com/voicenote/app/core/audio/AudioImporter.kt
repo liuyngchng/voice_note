@@ -98,7 +98,8 @@ class AudioImporter @Inject constructor(
         return when (settings.asrMode) {
             "offline" -> {
                 try {
-                    offlineASRClient.ensureRecognizer(ModelQuality.INT8)
+                    val quality = ModelQuality.fromString(settings.offlineModelQuality)
+                    offlineASRClient.ensureRecognizer(quality)
                     // Read WAV PCM data
                     val file = File(audioFilePath)
                     val pcmData = file.inputStream().use { input ->

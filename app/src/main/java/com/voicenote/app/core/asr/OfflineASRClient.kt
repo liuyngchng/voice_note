@@ -36,6 +36,8 @@ class OfflineASRClient @Inject constructor(
         if (isInitialized && currentQuality == quality) return
         if (isInitialized) reset()
 
+        check(isNativeAvailable) { "sherpa-onnx 原生库未加载，无法使用离线 ASR" }
+
         val modelFile = File(downloadManager.modelFilePath(quality))
         val tokensFile = File(downloadManager.tokensFilePath())
 
@@ -127,10 +129,12 @@ class OfflineASRClient @Inject constructor(
 
     companion object {
         private const val TAG = "OfflineASRClient"
+        private var isNativeAvailable = false
 
         init {
             try {
                 System.loadLibrary("sherpa_onnx_jni")
+                isNativeAvailable = true
             } catch (_: UnsatisfiedLinkError) {
                 Log.w(TAG, "sherpa-onnx native library not available")
             }

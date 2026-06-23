@@ -1,8 +1,5 @@
 package com.voicenote.app.ui.home
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Settings
@@ -34,7 +30,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -42,37 +37,15 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.voicenote.app.core.audio.AudioImporter
-import com.voicenote.app.core.di.SettingsDataStore
 import com.voicenote.app.domain.model.VoiceRecord
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface HomeEntryPoint {
-    fun audioImporter(): AudioImporter
-    fun settingsDataStore(): SettingsDataStore
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,36 +57,6 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var isImporting by remember { mutableStateOf(false) }
-
-    val entryPoint = remember {
-        EntryPointAccessors.fromApplication(context.applicationContext, HomeEntryPoint::class.java)
-    }
-    val audioImporter = remember { entryPoint.audioImporter() }
-    val settingsDataStore = remember { entryPoint.settingsDataStore() }
-
-    val filePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            isImporting = true
-            scope.launch {
-                val settings = settingsDataStore.settingsFlow.first()
-                withContext(Dispatchers.IO) {
-                    audioImporter.importAudio(uri, settings)
-                }.onSuccess { recordId ->
-                    withContext(Dispatchers.Main) {
-                        isImporting = false
-                        onRecordClick(recordId)
-                    }
-                }.onFailure {
-                    isImporting = false
-                }
-            }
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -180,26 +123,6 @@ fun HomeScreen(
                         Icon(Icons.Default.Mic, contentDescription = "开始录音", tint = MaterialTheme.colorScheme.onSecondary)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("开始录音", color = MaterialTheme.colorScheme.onSecondary)
-                    }
-                }
-
-                // Import audio button
-                item {
-                    OutlinedButton(
-                        onClick = { filePickerLauncher.launch(arrayOf("audio/*")) },
-                        enabled = !isImporting,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth().height(48.dp)
-                    ) {
-                        if (isImporting) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("导入中...")
-                        } else {
-                            Icon(Icons.Default.FileOpen, contentDescription = "导入音频")
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("导入音频")
-                        }
                     }
                 }
 

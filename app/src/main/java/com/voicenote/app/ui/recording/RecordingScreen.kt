@@ -1,13 +1,8 @@
 package com.voicenote.app.ui.recording
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -41,7 +35,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -59,7 +52,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.voicenote.app.core.audio.AudioImporter
 import com.voicenote.app.core.di.SettingsDataStore
@@ -89,7 +81,6 @@ fun RecordingScreen(
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var showPermissionDialog by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
 
     val entryPoint = remember {
@@ -118,33 +109,6 @@ fun RecordingScreen(
             }
         }
     }
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        if (permissions.values.all { it }) {
-            // permissions granted, proceed
-        } else {
-            showPermissionDialog = true
-        }
-    }
-
-    fun checkAndRequestPermissions() {
-        val needed = listOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.POST_NOTIFICATIONS
-        ).filter {
-            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
-        }
-        if (needed.isNotEmpty()) {
-            permissionLauncher.launch(needed.toTypedArray())
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        checkAndRequestPermissions()
-    }
-
 
     Scaffold(
         topBar = {
@@ -215,10 +179,7 @@ fun RecordingScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Button(
-                    onClick = {
-                        checkAndRequestPermissions()
-                        viewModel.startRecording()
-                    },
+                    onClick = { viewModel.startRecording() },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     enabled = !uiState.isStarting,
                     shape = RoundedCornerShape(12.dp)
@@ -371,19 +332,6 @@ fun RecordingScreen(
         }
     }
 
-    // Permission dialog
-    if (showPermissionDialog) {
-        AlertDialog(
-            onDismissRequest = { showPermissionDialog = false },
-            title = { Text("权限不足") },
-            text = { Text("需要录音权限才能正常使用语音笔记功能，请在系统设置中开启。") },
-            confirmButton = {
-                TextButton(onClick = { showPermissionDialog = false }) {
-                    Text("知道了")
-                }
-            }
-        )
-    }
 }
 
 private fun formatDuration(seconds: Long): String {
