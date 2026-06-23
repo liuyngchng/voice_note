@@ -139,24 +139,25 @@ fun SettingsScreen(
                 Text("保存")
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Test connection button
-            OutlinedButton(
-                onClick = viewModel::testConnection,
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                enabled = !uiState.isTesting,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                if (uiState.isTesting) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("正在测试连接...")
-                } else {
-                    Text("测试连接")
+            // Test connection button (only when at least one service is online)
+            if (uiState.asrMode == "online" || uiState.llmMode == "online") {
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = viewModel::testConnection,
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = !uiState.isTesting,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (uiState.isTesting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在测试连接...")
+                    } else {
+                        Text("测试连接")
+                    }
                 }
             }
 

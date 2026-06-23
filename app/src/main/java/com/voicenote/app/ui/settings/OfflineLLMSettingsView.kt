@@ -2,6 +2,7 @@ package com.voicenote.app.ui.settings
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,17 +11,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -60,27 +62,21 @@ fun OfflineLLMSettingsView(
     var keyVisible by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-        Text("AI 总结 (OpenAI 兼容)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "离线",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (llmMode == "offline") FontWeight.Bold else FontWeight.Normal,
-                color = if (llmMode == "offline") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                "AI 总结",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(modifier = Modifier.padding(start = 12.dp))
             Switch(
                 checked = llmMode == "online",
                 onCheckedChange = { checked -> onLlmModeChange(if (checked) "online" else "offline") }
             )
-            Spacer(modifier = Modifier.padding(start = 12.dp))
+            Spacer(modifier = Modifier.padding(start = 8.dp))
             Text(
                 "在线",
                 style = MaterialTheme.typography.bodyMedium,
@@ -137,14 +133,26 @@ fun OfflineLLMSettingsView(
                 "custom" to LLMModelInfo.CUSTOM
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column {
                 models.forEach { (key, info) ->
-                    ModelChip(
-                        label = info.displayName,
-                        selected = llmModelInfo == key,
-                        onClick = { onLlmModelInfoChange(key) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onLlmModelInfoChange(key) }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = llmModelInfo == key,
+                            onClick = { onLlmModelInfoChange(key) }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            info.displayName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = if (llmModelInfo == key) FontWeight.Bold else FontWeight.Normal
+                        )
+                    }
                 }
             }
 
@@ -170,28 +178,29 @@ fun OfflineLLMSettingsView(
                             Text("模型已就绪 (${modelManager.downloadedModelSize(info) / 1_048_576}MB)", color = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.weight(1f))
                             OutlinedButton(onClick = { modelManager.deleteModel(info) }) {
-                                Text("删除模型")
+                                Text("删除")
                             }
                         }
                     } else {
-                        Button(
-                            onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    modelManager.downloadModel(info)
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("下载模型 (~${info.estimatedSizeMB}MB)")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("上传模型")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        modelManager.downloadModel(info)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("下载 (~${info.estimatedSizeMB}MB)", style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedButton(
+                                onClick = { filePicker.launch(arrayOf("*/*")) },
+                                modifier = Modifier.height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("上传", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
@@ -210,7 +219,7 @@ fun OfflineLLMSettingsView(
                             modelManager.deleteModel(info)
                             modelManager.resetState()
                         }) {
-                            Text("删除模型")
+                            Text("删除")
                         }
                     }
                 }
@@ -218,25 +227,26 @@ fun OfflineLLMSettingsView(
                     Column {
                         Text("失败: ${downloadState.error ?: "未知错误"}", color = MaterialTheme.colorScheme.error)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                modelManager.resetState()
-                                scope.launch(Dispatchers.IO) {
-                                    modelManager.downloadModel(info)
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("重试下载")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("上传模型")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    modelManager.resetState()
+                                    scope.launch(Dispatchers.IO) {
+                                        modelManager.downloadModel(info)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("重试", style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedButton(
+                                onClick = { filePicker.launch(arrayOf("*/*")) },
+                                modifier = Modifier.height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("上传", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
@@ -245,26 +255,3 @@ fun OfflineLLMSettingsView(
     }
 }
 
-@Composable
-private fun ModelChip(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Button(
-        onClick = onClick,
-        modifier = modifier.height(40.dp),
-        shape = RoundedCornerShape(8.dp),
-        colors = if (selected)
-            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-        else
-            ButtonDefaults.outlinedButtonColors()
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-        )
-    }
-}

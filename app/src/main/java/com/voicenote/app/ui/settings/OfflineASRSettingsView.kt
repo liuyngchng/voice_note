@@ -78,13 +78,6 @@ fun OfflineASRSettingsView(
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                "离线",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (asrMode == "offline") FontWeight.Bold else FontWeight.Normal,
-                color = if (asrMode == "offline") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-            )
-            Spacer(modifier = Modifier.padding(start = 8.dp))
             Switch(
                 checked = asrMode == "online",
                 onCheckedChange = { checked -> onAsrModeChange(if (checked) "online" else "offline") }
@@ -173,28 +166,29 @@ fun OfflineASRSettingsView(
                             Text("模型已就绪", color = MaterialTheme.colorScheme.primary)
                             Spacer(modifier = Modifier.weight(1f))
                             OutlinedButton(onClick = { downloadManager.deleteModel(quality) }) {
-                                Text("删除模型")
+                                Text("删除")
                             }
                         }
                     } else {
-                        Button(
-                            onClick = {
-                                scope.launch(Dispatchers.IO) {
-                                    downloadManager.downloadModel(quality)
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("下载模型 (~${quality.estimatedSizeMB}MB)")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("上传模型")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        downloadManager.downloadModel(quality)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("下载 (~${quality.estimatedSizeMB}MB)", style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedButton(
+                                onClick = { filePicker.launch(arrayOf("*/*")) },
+                                modifier = Modifier.height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("上传", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
@@ -220,7 +214,7 @@ fun OfflineASRSettingsView(
                             downloadManager.deleteModel(quality)
                             downloadManager.resetState()
                         }) {
-                            Text("删除模型")
+                            Text("删除")
                         }
                     }
                 }
@@ -228,25 +222,26 @@ fun OfflineASRSettingsView(
                     Column {
                         Text("失败: ${downloadState.error ?: "未知错误"}", color = MaterialTheme.colorScheme.error)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                downloadManager.resetState()
-                                scope.launch(Dispatchers.IO) {
-                                    downloadManager.downloadModel(quality)
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("重试下载")
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedButton(
-                            onClick = { filePicker.launch(arrayOf("*/*")) },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text("上传模型")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    downloadManager.resetState()
+                                    scope.launch(Dispatchers.IO) {
+                                        downloadManager.downloadModel(quality)
+                                    }
+                                },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("重试", style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedButton(
+                                onClick = { filePicker.launch(arrayOf("*/*")) },
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("上传", style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }

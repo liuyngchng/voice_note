@@ -8,14 +8,14 @@ enum class LLMModelInfo(
     val modelscopePageURL: String?
 ) {
     QWEN2_5_1_5B(
-        displayName = "Qwen2.5-1.5B (~986MB)",
+        displayName = "Qwen2.5-1.5B",
         estimatedSizeMB = 986,
         modelFilename = "qwen2.5-1.5b-instruct-q4_k_m.gguf",
         modelscopeDownloadURL = "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf",
         modelscopePageURL = "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
     ),
     QWEN2_5_0_5B(
-        displayName = "Qwen2.5-0.5B (~352MB)",
+        displayName = "Qwen2.5-0.5B",
         estimatedSizeMB = 352,
         modelFilename = "qwen2.5-0.5b-instruct-q4_k_m.gguf",
         modelscopeDownloadURL = "https://modelscope.cn/models/qwen/Qwen2.5-0.5B-Instruct-gguf/resolve/master/qwen2.5-0.5b-instruct-q4_k_m.gguf",

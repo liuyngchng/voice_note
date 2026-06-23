@@ -122,30 +122,33 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = state.copy(isTesting = true, testResults = emptyList(), showResults = false)
 
         viewModelScope.launch {
-            // Always test online connections
-            val asrDeferred = async {
-                val result = connectivityChecker.checkAsrConnection(state.asrUrl)
-                TestResult(
-                    name = "语音识别 (FunASR)",
-                    success = result.isSuccess,
-                    message = result.getOrElse { it.message ?: "未知错误" }
-                )
-            }
+            val asrDeferred = if (state.asrMode == "online") {
+                async {
+                    val result = connectivityChecker.checkAsrConnection(state.asrUrl)
+                    TestResult(
+                        name = "语音识别",
+                        success = result.isSuccess,
+                        message = result.getOrElse { it.message ?: "未知错误" }
+                    )
+                }
+            } else null
 
-            val llmDeferred = async {
-                val result = connectivityChecker.checkLlmConnection(
-                    state.llmUrl,
-                    state.llmKey,
-                    state.llmModel
-                )
-                TestResult(
-                    name = "AI 总结 (LLM)",
-                    success = result.isSuccess,
-                    message = result.getOrElse { it.message ?: "未知错误" }
-                )
-            }
+            val llmDeferred = if (state.llmMode == "online") {
+                async {
+                    val result = connectivityChecker.checkLlmConnection(
+                        state.llmUrl,
+                        state.llmKey,
+                        state.llmModel
+                    )
+                    TestResult(
+                        name = "AI 总结",
+                        success = result.isSuccess,
+                        message = result.getOrElse { it.message ?: "未知错误" }
+                    )
+                }
+            } else null
 
-            val results = listOf(asrDeferred.await(), llmDeferred.await())
+            val results = listOfNotNull(asrDeferred?.await(), llmDeferred?.await())
 
             _uiState.value = _uiState.value.copy(
                 isTesting = false,
