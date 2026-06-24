@@ -70,8 +70,12 @@ fun OfflineLLMSettingsView(
     val downloadState by modelManager.downloadState.collectAsState()
     var keyVisible by remember { mutableStateOf(false) }
 
+    // Only reset state when model changes if no operation is in progress
     LaunchedEffect(llmModelInfo) {
-        modelManager.resetState()
+        val status = modelManager.downloadState.value.status
+        if (status == LLMDownloadStatus.IDLE || status == LLMDownloadStatus.COMPLETED || status == LLMDownloadStatus.FAILED) {
+            modelManager.resetState()
+        }
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -159,6 +163,10 @@ fun OfflineLLMSettingsView(
             )
             Spacer(modifier = Modifier.height(4.dp))
 
+            val isBusy = downloadState.status != LLMDownloadStatus.IDLE
+                && downloadState.status != LLMDownloadStatus.COMPLETED
+                && downloadState.status != LLMDownloadStatus.FAILED
+
             val models = listOf(
                 "qwen2_5_0_5b_q4km" to LLMModelInfo.QWEN2_5_0_5B,
                 "qwen2_5_1_5b_q4km" to LLMModelInfo.QWEN2_5_1_5B,
@@ -170,7 +178,7 @@ fun OfflineLLMSettingsView(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onLlmModelInfoChange(key) }
+                            .then(if (!isBusy) Modifier.clickable { onLlmModelInfoChange(key) } else Modifier)
                             .padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {

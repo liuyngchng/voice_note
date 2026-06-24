@@ -64,8 +64,12 @@ fun OfflineASRSettingsView(
     val context = LocalContext.current
     val quality = if (modelQuality == "fp32") ModelQuality.FP32 else ModelQuality.INT8
 
+    // Only reset state when quality changes if no operation is in progress
     LaunchedEffect(modelQuality) {
-        asrModelManager.resetState()
+        val status = asrModelManager.downloadState.value.status
+        if (status == DownloadStatus.IDLE || status == DownloadStatus.COMPLETED || status == DownloadStatus.FAILED) {
+            asrModelManager.resetState()
+        }
     }
 
     val totalRamGB = remember {
@@ -132,11 +136,16 @@ fun OfflineASRSettingsView(
                 fontWeight = FontWeight.Medium
             )
             Spacer(modifier = Modifier.height(8.dp))
+            val isBusy = downloadState.status != DownloadStatus.IDLE
+                && downloadState.status != DownloadStatus.COMPLETED
+                && downloadState.status != DownloadStatus.FAILED
+
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = modelQuality == "int8",
                     onClick = { onModelQualityChange("int8") },
                     label = { Text("INT8") },
+                    enabled = !isBusy,
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -146,6 +155,7 @@ fun OfflineASRSettingsView(
                     selected = modelQuality == "fp32",
                     onClick = { onModelQualityChange("fp32") },
                     label = { Text("FP32") },
+                    enabled = !isBusy,
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
