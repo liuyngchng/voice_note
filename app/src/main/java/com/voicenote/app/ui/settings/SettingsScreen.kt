@@ -1,6 +1,7 @@
 package com.voicenote.app.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -109,6 +110,14 @@ fun SettingsScreen(
             }
         }
     ) { padding ->
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -209,6 +218,7 @@ fun SettingsScreen(
                 textAlign = TextAlign.Center
             )
         }
+        } // end else !isLoading
     }
 
     // ── Test results dialog ────────────────────────────────────────────────

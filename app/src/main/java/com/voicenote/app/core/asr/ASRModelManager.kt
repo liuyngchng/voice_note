@@ -127,27 +127,33 @@ class ASRModelManager @Inject constructor(
         var foundTokens = false
 
         Log.i(TAG, "开始解压: ${archiveFile.name} (${archiveFile.length() / 1_048_576}MB), 目标模型: $targetModelFile")
+        android.util.Log.e("REC_CRASH", "EXTRACT: starting, archive=${archiveFile.length()} bytes, target=$targetModelFile")
 
         BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archiveFile))).use { bzIn ->
             TarArchiveInputStream(bzIn).use { tarIn ->
                 var entry = tarIn.nextTarEntry
                 while (entry != null) {
                     val shortName = entry.name.substringAfterLast("/").ifBlank { entry.name }
+                    android.util.Log.e("REC_CRASH", "EXTRACT: tar entry: $shortName (size=${entry.realSize})")
 
                     when {
                         shortName == targetModelFile -> {
                             Log.i(TAG, "正在提取模型: $targetModelFile (entry size=${entry.realSize})")
-                            FileOutputStream(File(modelsDir, targetModelFile)).use { out ->
+                            val outFile = File(modelsDir, targetModelFile)
+                            FileOutputStream(outFile).use { out ->
                                 tarIn.copyTo(out)
                             }
                             foundModel = true
+                            android.util.Log.e("REC_CRASH", "EXTRACT: model extracted, file size=${outFile.length()} bytes")
                             Log.i(TAG, "模型提取完成: $targetModelFile")
                         }
                         shortName == "tokens.txt" -> {
-                            FileOutputStream(File(modelsDir, "tokens.txt")).use { out ->
+                            val outFile = File(modelsDir, "tokens.txt")
+                            FileOutputStream(outFile).use { out ->
                                 tarIn.copyTo(out)
                             }
                             foundTokens = true
+                            android.util.Log.e("REC_CRASH", "EXTRACT: tokens.txt extracted, size=${outFile.length()}")
                             Log.i(TAG, "tokens.txt 提取完成")
                         }
                     }
@@ -158,6 +164,7 @@ class ASRModelManager @Inject constructor(
             }
         }
 
+        android.util.Log.e("REC_CRASH", "EXTRACT: done, foundModel=$foundModel, foundTokens=$foundTokens")
         if (!foundModel) throw Exception("归档中未找到 $targetModelFile")
         if (!foundTokens) throw Exception("归档中未找到 tokens.txt")
     }
@@ -167,18 +174,23 @@ class ASRModelManager @Inject constructor(
             _downloadState.value = DownloadState(DownloadStatus.UPLOADING, 0f)
 
             val (fileName, fileSize) = queryFileInfo(sourceUri)
+            android.util.Log.e("REC_CRASH", "UPLOAD: fileName=$fileName, fileSize=$fileSize")
             val isArchive = fileName?.endsWith(".tar.bz2") == true || fileName?.endsWith(".tar.gz") == true
 
             if (isArchive) {
+                android.util.Log.e("REC_CRASH", "UPLOAD: archive detected, calling uploadArchive")
                 uploadArchive(quality, sourceUri, fileName!!, fileSize)
             } else {
+                android.util.Log.e("REC_CRASH", "UPLOAD: single file, calling uploadSingleFile")
                 uploadSingleFile(quality, sourceUri, fileSize)
             }
 
             _downloadState.value = DownloadState(DownloadStatus.COMPLETED, 1f)
+            android.util.Log.e("REC_CRASH", "UPLOAD: uploadModel COMPLETED for ${quality.name}")
             Log.i(TAG, "模型上传完成: ${quality.name}")
             Result.success(Unit)
         } catch (e: Exception) {
+            android.util.Log.e("REC_CRASH", "UPLOAD: uploadModel FAILED: ${e.message}", e)
             Log.e(TAG, "上传失败: ${e.message}", e)
             _downloadState.value = DownloadState(DownloadStatus.FAILED, 0f, e.message)
             Result.failure(e)
@@ -205,6 +217,7 @@ class ASRModelManager @Inject constructor(
 
         try {
             // Copy archive to temp with progress
+            android.util.Log.e("REC_CRASH", "UPLOAD: copying archive to temp, fileSize=$fileSize")
             var copiedBytes = 0L
             context.contentResolver.openInputStream(sourceUri)?.use { input ->
                 FileOutputStream(archiveFile).use { output ->
@@ -220,21 +233,25 @@ class ASRModelManager @Inject constructor(
                 }
             } ?: throw Exception("无法读取文件")
 
+            android.util.Log.e("REC_CRASH", "UPLOAD: copy done, copiedBytes=$copiedBytes, archiveFile.length=${archiveFile.length()}")
             if (!fileName.endsWith(".tar.bz2")) {
                 throw Exception("仅支持 .tar.bz2 归档格式")
             }
 
             Log.i(TAG, "上传归档文件: $fileName (${archiveFile.length()} bytes)")
 
-            // Extract — same path as download
+            // Extract
+            android.util.Log.e("REC_CRASH", "UPLOAD: starting extraction")
             _downloadState.value = DownloadState(DownloadStatus.EXTRACTING, 0.5f)
             extractArchive(archiveFile, quality)
+            android.util.Log.e("REC_CRASH", "UPLOAD: extraction done")
 
             if (!isModelDownloaded(quality)) {
                 throw Exception("归档中未找到模型文件 ${quality.modelFilename}")
             }
 
             Log.i(TAG, "归档上传完成: model=${quality.modelFilename}, tokens=${File(tokensFilePath()).exists()}")
+            android.util.Log.e("REC_CRASH", "UPLOAD: archive upload complete, modelSize=${File(modelFilePath(quality)).length()}, tokensExists=${File(tokensFilePath()).exists()}")
         } finally {
             archiveFile.delete()
             tempDir.deleteRecursively()

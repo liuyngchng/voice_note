@@ -22,14 +22,15 @@ data class TestResult(
 )
 
 data class SettingsUiState(
+    val isLoading: Boolean = true,
     val asrUrl: String = "",
     val llmUrl: String = "",
     val llmKey: String = "",
     val llmModel: String = "",
     val llmPrompt: String = "",
-    val asrMode: String = "online",
+    val asrMode: String = "offline",
     val offlineModelQuality: String = "int8",
-    val llmMode: String = "online",
+    val llmMode: String = "offline",
     val llmModelInfo: String = "qwen2_5_0_5b_q4km",
     val isTesting: Boolean = false,
     val testResults: List<TestResult> = emptyList(),
@@ -50,6 +51,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.settingsFlow.collect { settings ->
                 _uiState.value = _uiState.value.copy(
+                    isLoading = false,
                     asrUrl = settings.asrUrl,
                     llmUrl = settings.llmUrl,
                     llmKey = settings.llmKey,
