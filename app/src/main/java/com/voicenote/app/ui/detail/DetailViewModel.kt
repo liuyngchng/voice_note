@@ -19,6 +19,7 @@ import com.voicenote.app.core.llm.LLMModelInfo
 import com.voicenote.app.core.llm.OfflineLLMClient
 import com.voicenote.app.domain.model.ProcessingStatus
 import com.voicenote.app.domain.model.VoiceRecord
+import com.voicenote.app.domain.model.VoiceRecordSummary
 import com.voicenote.app.domain.repository.VoiceRecordRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.util.Log
 import java.io.File
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -72,6 +74,8 @@ class DetailViewModel @Inject constructor(
 
     private var mediaPlayer: MediaPlayer? = null
     private var positionUpdateJob: Job? = null
+    private var retryTranscriptJob: Job? = null
+    private var retrySummaryJob: Job? = null
 
     fun loadRecord(recordId: Long) {
         viewModelScope.launch {
@@ -125,11 +129,16 @@ class DetailViewModel @Inject constructor(
             mediaPlayer = MediaPlayer().apply {
                 try {
                     setDataSource(filePath)
-                    setOnPreparedListener {
+                    setOnPreparedListener { mp ->
+                        if (mp.duration <= 0) {
+                            _uiState.value = _uiState.value.copy(error = "录音文件无效")
+                            releasePlayer()
+                            return@setOnPreparedListener
+                        }
                         start()
                         _uiState.value = _uiState.value.copy(
                             playbackState = PlaybackState.PLAYING,
-                            playbackDurationFormatted = formatDuration(it.duration / 1000L)
+                            playbackDurationFormatted = formatDuration(mp.duration / 1000L)
                         )
                         startPositionUpdates()
                     }
@@ -202,9 +211,10 @@ class DetailViewModel @Inject constructor(
                 type = "audio/wav"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(Intent.createChooser(intent, "分享录音文件"))
+            val chooser = Intent.createChooser(intent, "分享录音文件")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(error = "分享失败")
         }
@@ -282,12 +292,13 @@ class DetailViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
+        retryTranscriptJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRetryingTranscript = true, error = null)
             recordRepository.updateTranscriptStatus(record.id, ProcessingStatus.PROCESSING)
 
             try {
                 val settings = settingsDataStore.settingsFlow.first()
+                Log.i(TAG, "retryTranscript: asrMode=${settings.asrMode}, quality=${settings.offlineModelQuality}, url=${settings.asrUrl}")
                 val result = when (settings.asrMode) {
                     "offline" -> runOfflineASR(audioPath, settings.offlineModelQuality)
                     else -> funASRClient.processFile(audioPath, settings.asrUrl)
@@ -322,12 +333,15 @@ class DetailViewModel @Inject constructor(
                     isRetryingTranscript = false,
                     error = e.message ?: "转写重试失败"
                 )
+            } finally {
+                retryTranscriptJob = null
             }
         }
     }
 
     private suspend fun runOfflineASR(audioPath: String, qualityStr: String): Result<String> = withContext(Dispatchers.IO) {
         try {
+            Log.i(TAG, "runOfflineASR: audioPath=$audioPath, quality=$qualityStr")
             val quality = ModelQuality.fromString(qualityStr)
             offlineASRClient.ensureRecognizer(quality)
             val pcmData = File(audioPath).inputStream().use { input ->
@@ -352,7 +366,7 @@ class DetailViewModel @Inject constructor(
             return
         }
 
-        viewModelScope.launch {
+        retrySummaryJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRetryingSummary = true, error = null)
             recordRepository.updateSummaryStatus(record.id, ProcessingStatus.PROCESSING)
 
@@ -401,7 +415,35 @@ class DetailViewModel @Inject constructor(
                     isRetryingSummary = false,
                     error = e.message ?: "总结重试失败"
                 )
+            } finally {
+                retrySummaryJob = null
             }
+        }
+    }
+
+    fun cancelRetryTranscript() {
+        retryTranscriptJob?.cancel()
+        retryTranscriptJob = null
+        _uiState.value = _uiState.value.copy(isRetryingTranscript = false)
+        try { offlineASRClient.reset() } catch (_: Exception) {}
+        viewModelScope.launch {
+            recordRepository.updateTranscriptStatus(
+                _uiState.value.record?.id ?: return@launch,
+                ProcessingStatus.UNAVAILABLE
+            )
+        }
+    }
+
+    fun cancelRetrySummary() {
+        retrySummaryJob?.cancel()
+        retrySummaryJob = null
+        _uiState.value = _uiState.value.copy(isRetryingSummary = false)
+        try { offlineLLMClient.reset() } catch (_: Exception) {}
+        viewModelScope.launch {
+            recordRepository.updateSummaryStatus(
+                _uiState.value.record?.id ?: return@launch,
+                ProcessingStatus.UNAVAILABLE
+            )
         }
     }
 
@@ -424,12 +466,65 @@ class DetailViewModel @Inject constructor(
                 type = "text/plain"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            context.startActivity(Intent.createChooser(intent, "分享转写文件"))
+            val chooser = Intent.createChooser(intent, "分享转写文件")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(error = "分享失败")
         }
+    }
+
+    fun shareSummary() {
+        val record = _uiState.value.record ?: return
+        val summary = record.summary ?: return
+        val text = buildSummaryText(record.title, summary)
+        if (text.isBlank()) return
+
+        val context = getApplication<Application>()
+        try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            val chooser = Intent.createChooser(intent, "分享总结")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(error = "分享失败")
+        }
+    }
+
+    private fun buildSummaryText(title: String, s: VoiceRecordSummary): String {
+        val sb = StringBuilder()
+        sb.appendLine("【$title · AI 总结】")
+        sb.appendLine()
+        if (s.topics.isNotEmpty()) {
+            sb.appendLine("议题：")
+            s.topics.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        if (s.conclusions.isNotEmpty()) {
+            sb.appendLine("结论：")
+            s.conclusions.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        if (s.todos.isNotEmpty()) {
+            sb.appendLine("待办：")
+            s.todos.forEach { todo ->
+                val extra = buildString {
+                    if (todo.owner.isNotBlank()) append(" @${todo.owner}")
+                    if (todo.deadline.isNotBlank()) append(" ${todo.deadline}")
+                }
+                sb.appendLine("  • ${todo.task}$extra")
+            }
+            sb.appendLine()
+        }
+        if (s.nextSteps.isNotBlank()) {
+            sb.appendLine("后续：")
+            sb.appendLine("  ${s.nextSteps}")
+        }
+        return sb.toString().trimEnd()
     }
 
     private suspend fun refreshRecord(recordId: Long) {
@@ -444,7 +539,7 @@ class DetailViewModel @Inject constructor(
         positionUpdateJob = viewModelScope.launch {
             while (isActive) {
                 mediaPlayer?.let { mp ->
-                    if (mp.isPlaying) {
+                    if (mp.isPlaying && mp.duration > 0) {
                         _uiState.value = _uiState.value.copy(
                             playbackProgress = mp.currentPosition.toFloat() / mp.duration.toFloat(),
                             playbackPositionFormatted = formatDuration(mp.currentPosition / 1000L)
@@ -468,6 +563,7 @@ class DetailViewModel @Inject constructor(
     }
 
     companion object {
+        private const val TAG = "DetailViewModel"
         private const val FALLBACK_TEXT = "服务暂时不可用，请采用离线方式"
         private val transcriptDateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
             .withZone(ZoneId.systemDefault())

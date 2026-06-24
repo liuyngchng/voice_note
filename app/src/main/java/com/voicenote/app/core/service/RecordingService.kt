@@ -53,7 +53,10 @@ class RecordingService : Service() {
     @Inject lateinit var recordRepository: VoiceRecordRepositoryImpl
     @Inject lateinit var audioFileManager: AudioFileManager
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+            Log.e("RecordingService", "Unhandled coroutine exception: ${e.message}", e)
+        })
     private var recordingJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
@@ -101,23 +104,33 @@ class RecordingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.e("REC_CRASH", "SVC: onCreate")
         createNotificationChannel()
+        android.util.Log.e("REC_CRASH", "SVC: onCreate done, injected fields: audioCapture=${::audioCapture.isInitialized}, audioFileManager=${::audioFileManager.isInitialized}")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        android.util.Log.e("REC_CRASH", "SVC: onStartCommand, action=${intent?.action}")
         when (intent?.action) {
             ACTION_START -> {
+                android.util.Log.e("REC_CRASH", "SVC: ACTION_START, parsing extras")
                 val recordId = intent.getLongExtra(EXTRA_RECORD_ID, 0)
                 val asrUrl = intent.getStringExtra(EXTRA_ASR_URL) ?: ""
                 val llmUrl = intent.getStringExtra(EXTRA_LLM_URL) ?: ""
                 val llmKey = intent.getStringExtra(EXTRA_LLM_KEY) ?: ""
                 val llmModel = intent.getStringExtra(EXTRA_LLM_MODEL) ?: "gpt-4o-mini"
                 val llmPrompt = intent.getStringExtra(EXTRA_LLM_PROMPT)
-                val asrMode = ASRMode.fromString(intent.getStringExtra(EXTRA_ASR_MODE) ?: "online")
-                val llmMode = LLMMode.fromString(intent.getStringExtra(EXTRA_LLM_MODE) ?: "online")
-                val llmModelInfo = LLMModelInfo.fromString(intent.getStringExtra(EXTRA_LLM_MODEL_INFO) ?: "qwen2_5_0_5b_q4km")
+                val asrModeStr = intent.getStringExtra(EXTRA_ASR_MODE) ?: "online"
+                val llmModeStr = intent.getStringExtra(EXTRA_LLM_MODE) ?: "online"
+                val llmModelInfoStr = intent.getStringExtra(EXTRA_LLM_MODEL_INFO) ?: "qwen2_5_0_5b_q4km"
                 val offlineModelQuality = intent.getStringExtra(EXTRA_OFFLINE_MODEL_QUALITY) ?: "int8"
+                android.util.Log.e("REC_CRASH", "SVC: extras parsed — recordId=$recordId, asrMode=$asrModeStr, llmMode=$llmModeStr")
+                val asrMode = ASRMode.fromString(asrModeStr)
+                val llmMode = LLMMode.fromString(llmModeStr)
+                val llmModelInfo = LLMModelInfo.fromString(llmModelInfoStr)
+                android.util.Log.e("REC_CRASH", "SVC: calling startRecording")
                 startRecording(recordId, asrUrl, llmUrl, llmKey, llmModel, llmPrompt, asrMode, llmMode, llmModelInfo, offlineModelQuality)
+                android.util.Log.e("REC_CRASH", "SVC: startRecording returned")
             }
             ACTION_STOP -> stopRecording()
         }
@@ -138,60 +151,82 @@ class RecordingService : Service() {
         llmModelInfo: LLMModelInfo = LLMModelInfo.QWEN2_5_0_5B,
         offlineModelQualityStr: String = "int8"
     ) {
-        currentRecordId = recordId
-        currentAsrMode = asrMode
-        currentLlmMode = llmMode
-        currentLlmModelInfo = llmModelInfo
-        currentOfflineModelQuality = ModelQuality.fromString(offlineModelQualityStr)
-        _isRecording.value = true
-        mutableTranscript.clear()
-        offlinePcmBuffer.clear()
-        _transcriptState.value = ""
-        _durationSeconds.value = 0
+        android.util.Log.e("REC_CRASH", "SVC: startRecording entered, asrMode=$asrMode")
+        try {
+            currentRecordId = recordId
+            currentAsrMode = asrMode
+            currentLlmMode = llmMode
+            currentLlmModelInfo = llmModelInfo
+            currentOfflineModelQuality = ModelQuality.fromString(offlineModelQualityStr)
+            _isRecording.value = true
+            mutableTranscript.clear()
+            offlinePcmBuffer.clear()
+            _transcriptState.value = ""
+            _durationSeconds.value = 0
+            android.util.Log.e("REC_CRASH", "SVC: state vars set, acquiring wake lock")
 
-        // Acquire wake lock to keep CPU awake during recording
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "VoiceNote:RecordingWakeLock"
-        ).apply { acquire() }
+            // Acquire wake lock to keep CPU awake during recording
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "VoiceNote:RecordingWakeLock"
+            ).apply { acquire() }
+            android.util.Log.e("REC_CRASH", "SVC: wake lock acquired, SDK=${Build.VERSION.SDK_INT}")
 
-        // Start foreground
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, buildNotification("录音中..."), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, buildNotification("录音中..."))
-        }
+            // Start foreground
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                android.util.Log.e("REC_CRASH", "SVC: calling startForeground with MICROPHONE type")
+                startForeground(NOTIFICATION_ID, buildNotification("录音中..."), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                android.util.Log.e("REC_CRASH", "SVC: calling startForeground (pre-Q)")
+                startForeground(NOTIFICATION_ID, buildNotification("录音中..."))
+            }
+            android.util.Log.e("REC_CRASH", "SVC: startForeground OK")
 
-        // Initialize audio file recording
-        audioFileManager.startNewRecording(recordId, java.time.Instant.now())
+            // Initialize audio file recording
+            android.util.Log.e("REC_CRASH", "SVC: starting audio file")
+            audioFileManager.startNewRecording(recordId, java.time.Instant.now())
+            android.util.Log.e("REC_CRASH", "SVC: audio file started")
 
-        // Duration counter
-        var batteryWarned = false
-        durationJob = serviceScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(1000)
-                _durationSeconds.value += 1
-                if (!batteryWarned && _durationSeconds.value >= 3600L) {
-                    batteryWarned = true
-                    updateNotification("电量提醒：已持续录音1小时，请注意电量")
+            // Duration counter
+            var batteryWarned = false
+            durationJob = serviceScope.launch {
+                while (true) {
+                    kotlinx.coroutines.delay(1000)
+                    _durationSeconds.value += 1
+                    if (!batteryWarned && _durationSeconds.value >= 3600L) {
+                        batteryWarned = true
+                        updateNotification("电量提醒：已持续录音1小时，请注意电量")
+                    }
                 }
             }
-        }
+            android.util.Log.e("REC_CRASH", "SVC: duration counter launched, dispatching ASR mode")
 
-        when (asrMode) {
-            ASRMode.ONLINE -> startOnlineASR(asrUrl)
-            ASRMode.OFFLINE -> startOfflineASR()
-        }
+            when (asrMode) {
+                ASRMode.ONLINE -> startOnlineASR(asrUrl)
+                ASRMode.OFFLINE -> startOfflineASR()
+            }
 
-        // Launch summary generation (waits for recordingJob to complete)
-        startSummaryGeneration(asrUrl, llmUrl, llmKey, llmModel, llmPrompt)
+            android.util.Log.e("REC_CRASH", "SVC: ASR started, launching summary gen")
+            // Launch summary generation (waits for recordingJob to complete)
+            startSummaryGeneration(asrUrl, llmUrl, llmKey, llmModel, llmPrompt)
+            android.util.Log.e("REC_CRASH", "SVC: startRecording complete")
+        } catch (e: Exception) {
+            android.util.Log.e("REC_CRASH", "SVC: startRecording FAILED: ${e.message}", e)
+            Log.e("RecordingService", "Failed to start recording: ${e.message}", e)
+            _isRecording.value = false
+            releaseWakeLock()
+            stopSelf()
+        }
     }
 
     private fun startOnlineASR(asrUrl: String) {
+        android.util.Log.e("REC_CRASH", "SVC: startOnlineASR, url=$asrUrl")
         val asrFlow = funASRClient.connect(asrUrl)
+        android.util.Log.e("REC_CRASH", "SVC: online ASR connected, launching recordingJob")
 
         recordingJob = serviceScope.launch {
+            android.util.Log.e("REC_CRASH", "SVC: recordingJob coroutine started")
             launch {
                 asrFlow.collect { event ->
                     _asrEvents.emit(event)
@@ -213,37 +248,57 @@ class RecordingService : Service() {
 
             kotlinx.coroutines.delay(300)
             funASRClient.sendHandshake()
+            android.util.Log.e("REC_CRASH", "SVC: online handshake sent, starting audio capture")
 
             audioCapture.startCapture().collect { audioData ->
                 audioFileManager.writeAudioChunk(audioData)
                 funASRClient.sendAudio(audioData)
             }
         }
+        android.util.Log.e("REC_CRASH", "SVC: startOnlineASR done, recordingJob launched")
     }
 
     private fun startOfflineASR() {
-        recordingJob = serviceScope.launch {
-            try {
-                val quality = currentOfflineModelQuality
-                offlineASRClient.ensureRecognizer(quality)
+        android.util.Log.e("REC_CRASH", "SVC: startOfflineASR, quality=${currentOfflineModelQuality.name}")
 
+        android.util.Log.e("REC_CRASH", "SVC: launching offline recordingJob")
+        recordingJob = serviceScope.launch {
+            // Init recognizer on IO thread — keep heavy JNI model load off main thread
+            var asrReady = false
+            try {
+                Log.i("RecordingService", "Starting offline ASR with quality=${currentOfflineModelQuality.name}")
+                android.util.Log.e("REC_CRASH", "SVC: calling ensureRecognizer (on IO thread)")
+                offlineASRClient.ensureRecognizer(currentOfflineModelQuality)
+                asrReady = true
+                Log.i("RecordingService", "Offline ASR recognizer ready")
+                android.util.Log.e("REC_CRASH", "SVC: ensureRecognizer OK")
+            } catch (e: Exception) {
+                android.util.Log.e("REC_CRASH", "SVC: ensureRecognizer FAILED: ${e.message}", e)
+                Log.e("RecordingService", "Offline ASR init failed: ${e.message}", e)
+            }
+
+            try {
+                android.util.Log.e("REC_CRASH", "SVC: offline recordingJob started, asrReady=$asrReady")
                 var chunkStart = 0L
                 val chunkIntervalMs = 30_000L
 
+                android.util.Log.e("REC_CRASH", "SVC: offline calling audioCapture.startCapture()")
                 audioCapture.startCapture().collect { audioData ->
                     audioFileManager.writeAudioChunk(audioData)
-                    offlinePcmBuffer.add(audioData)
 
-                    val elapsed = _durationSeconds.value * 1000
-                    if (elapsed - chunkStart >= chunkIntervalMs) {
-                        chunkStart = elapsed
-                        val merged = concatenateChunks(offlinePcmBuffer)
-                        offlinePcmBuffer.clear()
+                    if (asrReady) {
+                        offlinePcmBuffer.add(audioData)
+                        val elapsed = _durationSeconds.value * 1000
+                        if (elapsed - chunkStart >= chunkIntervalMs) {
+                            chunkStart = elapsed
+                            val merged = concatenateChunks(offlinePcmBuffer)
+                            offlinePcmBuffer.clear()
 
-                        val result = offlineASRClient.processPCMChunk(merged)
-                        result.onSuccess { text ->
-                            mutableTranscript.append(text)
-                            _transcriptState.value = mutableTranscript.toString()
+                            val result = offlineASRClient.processPCMChunk(merged)
+                            result.onSuccess { text ->
+                                mutableTranscript.append(text)
+                                _transcriptState.value = mutableTranscript.toString()
+                            }
                         }
                     }
                 }
@@ -270,16 +325,36 @@ class RecordingService : Service() {
         serviceScope.launch {
             recordingJob?.join()
 
+            // Step 1: Process remaining PCM buffer, then unload ASR model
+            if (currentAsrMode == ASRMode.OFFLINE) {
+                if (offlinePcmBuffer.isNotEmpty()) {
+                    Log.i("RecordingService", "Pipeline: processing remaining PCM buffer (${offlinePcmBuffer.size} chunks)")
+                    val merged = concatenateChunks(offlinePcmBuffer)
+                    offlinePcmBuffer.clear()
+                    val result = offlineASRClient.processPCMChunk(merged)
+                    result.onSuccess { text ->
+                        mutableTranscript.append(text)
+                        _transcriptState.value = mutableTranscript.toString()
+                    }
+                }
+                Log.i("RecordingService", "Pipeline: unloading ASR model before summary")
+                offlineASRClient.reset()
+            }
+
             val audioFilePath = audioFileManager.finalizeRecording()
             recordRepository.updateAudioFilePath(currentRecordId, audioFilePath, java.time.Instant.now())
 
             var transcript = mutableTranscript.toString()
             val fallbackText = "服务暂时不可用，请采用离线方式"
 
+            Log.i("RecordingService", "startSummaryGeneration: transcript.length=${transcript.length}, asrMode=$currentAsrMode, audioFilePath=$audioFilePath")
+
             if (transcript.isBlank() && audioFilePath.isNotBlank() && currentAsrMode == ASRMode.ONLINE && asrUrl.isNotBlank()) {
                 recordRepository.updateTranscriptStatus(currentRecordId, com.voicenote.app.domain.model.ProcessingStatus.PROCESSING)
                 val retryResult = retryAsrWithBackoff(audioFilePath, asrUrl)
                 transcript = retryResult.getOrDefault(fallbackText)
+            } else if (transcript.isBlank() && currentAsrMode == ASRMode.OFFLINE) {
+                transcript = "离线转写未完成，请检查模型是否正确安装"
             } else if (transcript.isBlank()) {
                 transcript = fallbackText
             }
@@ -288,7 +363,7 @@ class RecordingService : Service() {
             recordRepository.updateTranscriptWithFile(currentRecordId, transcript, transcriptFilePath)
             recordRepository.updateTranscriptStatus(
                 currentRecordId,
-                if (transcript == fallbackText) com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE
+                if (transcript.isBlank() || transcript == fallbackText || transcript == "离线转写未完成，请检查模型是否正确安装") com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE
                 else com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
             )
 
@@ -340,21 +415,6 @@ class RecordingService : Service() {
                 }
             }
             ASRMode.OFFLINE -> {
-                // Process remaining PCM buffer
-                if (offlinePcmBuffer.isNotEmpty()) {
-                    serviceScope.launch {
-                        val merged = concatenateChunks(offlinePcmBuffer)
-                        offlinePcmBuffer.clear()
-                        val result = offlineASRClient.processPCMChunk(merged)
-                        result.onSuccess { text ->
-                            mutableTranscript.append(text)
-                            _transcriptState.value = mutableTranscript.toString()
-                        }
-                        offlineASRClient.reset()
-                    }
-                } else {
-                    offlineASRClient.reset()
-                }
                 recordingJob?.cancel()
             }
         }

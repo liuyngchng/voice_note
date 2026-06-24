@@ -13,7 +13,7 @@ import javax.inject.Singleton
 
 @Singleton
 class OfflineASRClient @Inject constructor(
-    private val downloadManager: ModelDownloadManager
+    private val asrModelManager: ASRModelManager
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
     private val stateLock = Mutex()
@@ -38,8 +38,10 @@ class OfflineASRClient @Inject constructor(
 
         check(isNativeAvailable) { "sherpa-onnx 原生库未加载，无法使用离线 ASR" }
 
-        val modelFile = File(downloadManager.modelFilePath(quality))
-        val tokensFile = File(downloadManager.tokensFilePath())
+        val modelFile = File(asrModelManager.modelFilePath(quality))
+        val tokensFile = File(asrModelManager.tokensFilePath())
+
+        Log.i(TAG, "ensureRecognizer: quality=${quality.name}, model=${modelFile.absolutePath} exists=${modelFile.exists()} size=${modelFile.length()}, tokens=${tokensFile.absolutePath} exists=${tokensFile.exists()}")
 
         check(modelFile.exists() && modelFile.length() > 1_000_000) {
             "离线模型未下载 (${quality.name})，请先在设置中下载"
@@ -53,8 +55,8 @@ class OfflineASRClient @Inject constructor(
     }
 
     private fun initRecognizer(quality: ModelQuality) {
-        val modelPath = downloadManager.modelFilePath(quality)
-        val tokensPath = downloadManager.tokensFilePath()
+        val modelPath = asrModelManager.modelFilePath(quality)
+        val tokensPath = asrModelManager.tokensFilePath()
 
         recognizerPtr = nativeCreateRecognizer(modelPath, tokensPath)
         check(recognizerPtr != 0L) { "创建 SenseVoice 识别器失败" }

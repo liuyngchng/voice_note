@@ -2,6 +2,7 @@ package com.voicenote.app.core.llm
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,7 @@ data class LLMDownloadState(
     val error: String? = null
 )
 
-enum class LLMDownloadStatus { IDLE, DOWNLOADING, COMPLETED, FAILED }
+enum class LLMDownloadStatus { IDLE, DOWNLOADING, UPLOADING, COMPLETED, FAILED }
 
 @Singleton
 class LLMModelManager @Inject constructor(
@@ -108,23 +109,31 @@ class LLMModelManager @Inject constructor(
 
     suspend fun uploadModel(info: LLMModelInfo, sourceUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            _downloadState.value = LLMDownloadState(LLMDownloadStatus.DOWNLOADING, 0f)
+            _downloadState.value = LLMDownloadState(LLMDownloadStatus.UPLOADING, 0f)
+
+            // Query actual file size from content resolver
+            var totalBytes = 0L
+            context.contentResolver.query(sourceUri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (idx >= 0) totalBytes = cursor.getLong(idx)
+                }
+            }
 
             val targetFile = File(modelFilePath(info))
             targetFile.parentFile?.mkdirs()
 
             context.contentResolver.openInputStream(sourceUri)?.use { input ->
                 FileOutputStream(targetFile).use { output ->
-                    val totalBytes = input.available().toLong()
                     var copiedBytes = 0L
-                    val buffer = ByteArray(8192)
+                    val buffer = ByteArray(32768)
                     var bytesRead: Int
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         output.write(buffer, 0, bytesRead)
                         copiedBytes += bytesRead
                         if (totalBytes > 0) {
                             _downloadState.value = LLMDownloadState(
-                                LLMDownloadStatus.DOWNLOADING,
+                                LLMDownloadStatus.UPLOADING,
                                 copiedBytes.toFloat() / totalBytes
                             )
                         }

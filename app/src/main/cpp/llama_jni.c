@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <stdlib.h>
 #include <string.h>
 #include <android/log.h>
 
@@ -10,9 +11,9 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-static llama_model *g_model = NULL;
-static llama_context *g_ctx = NULL;
-static const llama_vocab *g_vocab = NULL;
+static struct llama_model *g_model = NULL;
+static struct llama_context *g_ctx = NULL;
+static const struct llama_vocab *g_vocab = NULL;
 static int g_is_loaded = 0;
 
 JNIEXPORT jboolean JNICALL
@@ -35,11 +36,11 @@ Java_com_voicenote_app_core_llm_LlamaBridge_loadModel(
 
     llama_backend_init();
 
-    llama_model_params model_params = llama_model_default_params();
+    struct llama_model_params model_params = llama_model_default_params();
     model_params.n_gpu_layers = gpu_layers;
     model_params.use_mmap = true;
 
-    g_model = llama_load_model_from_file(c_path, model_params);
+    g_model = llama_model_load_from_file(c_path, model_params);
     (*env)->ReleaseStringUTFChars(env, path, c_path);
 
     if (!g_model) {
@@ -50,13 +51,13 @@ Java_com_voicenote_app_core_llm_LlamaBridge_loadModel(
 
     g_vocab = llama_model_get_vocab(g_model);
 
-    llama_context_params ctx_params = llama_context_default_params();
+    struct llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = ctx_len;
     ctx_params.n_batch = 512;
     ctx_params.n_threads = 4;
     ctx_params.n_threads_batch = 4;
 
-    g_ctx = llama_new_context_with_model(g_model, ctx_params);
+    g_ctx = llama_init_from_model(g_model, ctx_params);
     if (!g_ctx) {
         LOGE("Failed to create context");
         llama_model_free(g_model);
@@ -85,12 +86,12 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
 
     // Build chat messages
     int n_msg = c_system ? 2 : 1;
-    llama_chat_message messages[2];
+    struct llama_chat_message messages[2];
     if (c_system) {
-        messages[0] = (llama_chat_message){"system", c_system};
-        messages[1] = (llama_chat_message){"user", c_prompt};
+        messages[0] = (struct llama_chat_message){"system", c_system};
+        messages[1] = (struct llama_chat_message){"user", c_prompt};
     } else {
-        messages[0] = (llama_chat_message){"user", c_prompt};
+        messages[0] = (struct llama_chat_message){"user", c_prompt};
     }
 
     // Apply chat template
@@ -143,9 +144,9 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
     }
 
     // Sampler
-    llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
+    struct llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
     sparams.no_perf = true;
-    llama_sampler *smpl = llama_sampler_chain_init(sparams);
+    struct llama_sampler *smpl = llama_sampler_chain_init(sparams);
     if (temperature <= 0.0f) {
         llama_sampler_chain_add(smpl, llama_sampler_init_greedy());
     } else {

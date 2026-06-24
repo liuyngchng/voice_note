@@ -33,6 +33,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +69,10 @@ fun OfflineLLMSettingsView(
 ) {
     val downloadState by modelManager.downloadState.collectAsState()
     var keyVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(llmModelInfo) {
+        modelManager.resetState()
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
 
@@ -180,11 +185,13 @@ fun OfflineLLMSettingsView(
                             fontWeight = if (llmModelInfo == key) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.weight(1f)
                         )
-                        Text(
-                            "${info.estimatedSizeMB}MB",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (key != "custom") {
+                            Text(
+                                "${info.estimatedSizeMB}MB",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                     if (index < models.lastIndex) {
                         HorizontalDivider(modifier = Modifier.padding(start = 48.dp))
@@ -215,6 +222,7 @@ fun OfflineLLMSettingsView(
                         )
                     } else {
                         DownloadActionsCard(
+                            showDownload = info != LLMModelInfo.CUSTOM,
                             onDownload = {
                                 scope.launch(Dispatchers.IO) { modelManager.downloadModel(info) }
                             },
@@ -223,8 +231,10 @@ fun OfflineLLMSettingsView(
                     }
                 }
 
-                LLMDownloadStatus.DOWNLOADING -> {
+                LLMDownloadStatus.DOWNLOADING,
+                LLMDownloadStatus.UPLOADING -> {
                     DownloadProgressCard(
+                        isUploading = downloadState.status == LLMDownloadStatus.UPLOADING,
                         isExtracting = false,
                         progress = downloadState.progress
                     )
@@ -242,6 +252,7 @@ fun OfflineLLMSettingsView(
 
                 LLMDownloadStatus.FAILED -> {
                     DownloadFailedCard(
+                        showRetry = info != LLMModelInfo.CUSTOM,
                         error = downloadState.error,
                         onRetry = {
                             modelManager.resetState()
@@ -300,6 +311,7 @@ private fun ModelReadyCard(
 
 @Composable
 private fun DownloadActionsCard(
+    showDownload: Boolean = true,
     onDownload: () -> Unit,
     onUpload: () -> Unit
 ) {
@@ -307,14 +319,16 @@ private fun DownloadActionsCard(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Button(
-            onClick = onDownload,
-            modifier = Modifier.weight(1f).height(48.dp),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("下载")
+        if (showDownload) {
+            Button(
+                onClick = onDownload,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("下载")
+            }
         }
         OutlinedButton(
             onClick = onUpload,
@@ -329,7 +343,7 @@ private fun DownloadActionsCard(
 }
 
 @Composable
-private fun DownloadProgressCard(isExtracting: Boolean, progress: Float) {
+private fun DownloadProgressCard(isUploading: Boolean, isExtracting: Boolean, progress: Float) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(
@@ -340,7 +354,11 @@ private fun DownloadProgressCard(isExtracting: Boolean, progress: Float) {
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (isExtracting) "正在解压模型..." else "正在下载模型...",
+                    when {
+                        isUploading -> "正在复制模型..."
+                        isExtracting -> "正在解压模型..."
+                        else -> "正在下载模型..."
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
                 if (!isExtracting) {
@@ -367,6 +385,7 @@ private fun DownloadProgressCard(isExtracting: Boolean, progress: Float) {
 
 @Composable
 private fun DownloadFailedCard(
+    showRetry: Boolean = true,
     error: String?,
     onRetry: () -> Unit,
     onUpload: () -> Unit
@@ -390,12 +409,14 @@ private fun DownloadFailedCard(
         }
         Spacer(modifier = Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(
-                onClick = onRetry,
-                modifier = Modifier.weight(1f).height(48.dp),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text("重试")
+            if (showRetry) {
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("重试")
+                }
             }
             OutlinedButton(
                 onClick = onUpload,

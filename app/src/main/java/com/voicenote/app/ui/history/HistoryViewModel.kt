@@ -55,4 +55,17 @@ class HistoryViewModel @Inject constructor(
             }
         }
     }
+
+    fun deleteRecord(id: Long) {
+        viewModelScope.launch {
+            recordRepository.deleteRecord(id)
+        }
+    }
+
+    fun deleteAll() {
+        viewModelScope.launch {
+            val ids = _uiState.value.records.map { it.id }
+            ids.forEach { recordRepository.deleteRecord(it) }
+        }
+    }
 }

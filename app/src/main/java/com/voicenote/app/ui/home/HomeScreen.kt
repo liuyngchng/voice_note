@@ -142,15 +142,21 @@ fun HomeScreen(
 
                 if (uiState.recentRecords.isEmpty()) {
                     item {
-                        Box(
+                        Column(
                             modifier = Modifier.fillMaxWidth().height(120.dp),
-                            contentAlignment = Alignment.Center
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
                         ) {
                             Text(
                                 "暂无录音记录",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                                textAlign = TextAlign.Center
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "点击右上角 + 新建录音",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                             )
                         }
                     }

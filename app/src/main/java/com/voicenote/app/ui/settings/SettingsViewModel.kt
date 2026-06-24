@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.voicenote.app.core.di.AppSettings
 import com.voicenote.app.core.di.SettingsDataStore
+import com.voicenote.app.core.llm.LLMModelInfo
 import com.voicenote.app.core.network.ConnectivityChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
@@ -32,7 +33,8 @@ data class SettingsUiState(
     val llmModelInfo: String = "qwen2_5_0_5b_q4km",
     val isTesting: Boolean = false,
     val testResults: List<TestResult> = emptyList(),
-    val showResults: Boolean = false
+    val showResults: Boolean = false,
+    val saveCount: Int = 0
 )
 
 @HiltViewModel
@@ -114,7 +116,19 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.updateOfflineModelQuality(state.offlineModelQuality)
             settingsDataStore.updateLlmMode(state.llmMode)
             settingsDataStore.updateLlmModelInfo(state.llmModelInfo)
+            _uiState.value = _uiState.value.copy(saveCount = _uiState.value.saveCount + 1)
         }
+    }
+
+    fun buildSaveSummary(): String {
+        val s = _uiState.value
+        val asr = if (s.asrMode == "offline") "离线(${s.offlineModelQuality.uppercase()})" else "在线"
+        val llm = when {
+            s.llmMode == "online" && s.llmModel.isNotBlank() -> "在线(${s.llmModel})"
+            s.llmMode == "online" -> "在线"
+            else -> "离线(${LLMModelInfo.fromString(s.llmModelInfo).displayName})"
+        }
+        return "已保存 · 语音识别: $asr · AI 总结: $llm"
     }
 
     fun testConnection() {

@@ -177,12 +177,15 @@ fun DetailScreen(
                             record = record,
                             isRetrying = uiState.isRetryingTranscript,
                             onRetry = viewModel::retryTranscript,
+                            onCancel = viewModel::cancelRetryTranscript,
                             onShareTranscript = viewModel::shareTranscript
                         )
                         2 -> SummaryTab(
                             record = record,
                             isRetrying = uiState.isRetryingSummary,
-                            onRetry = viewModel::retrySummary
+                            onRetry = viewModel::retrySummary,
+                            onCancel = viewModel::cancelRetrySummary,
+                            onShare = viewModel::shareSummary
                         )
                     }
                 }
@@ -276,21 +279,23 @@ private fun AudioTab(
             Card(shape = RoundedCornerShape(12.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     // Progress
-                    if (playbackState != PlaybackState.IDLE) {
-                        Slider(
-                            value = playbackProgress,
-                            onValueChange = onSeek,
-                            modifier = Modifier.fillMaxWidth()
+                    Slider(
+                        value = if (playbackState != PlaybackState.IDLE) playbackProgress else 0f,
+                        onValueChange = if (playbackState != PlaybackState.IDLE) onSeek else ({}),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            if (playbackState != PlaybackState.IDLE) playbackPositionFormatted else "00:00",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(playbackPositionFormatted, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                            Text(playbackDurationFormatted, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(playbackDurationFormatted, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
 
                     // Controls
                     Row(
@@ -344,6 +349,7 @@ private fun TranscriptTab(
     record: VoiceRecord,
     isRetrying: Boolean,
     onRetry: () -> Unit,
+    onCancel: () -> Unit,
     onShareTranscript: () -> Unit
 ) {
     Column(
@@ -367,25 +373,37 @@ private fun TranscriptTab(
                 }
             }
             com.voicenote.app.domain.model.ProcessingStatus.PROCESSING -> {
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("正在转写...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在转写...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    }
+                    TextButton(onClick = onCancel) {
+                        Text("取消", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
             com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE -> {
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("转写失败", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                        Text("服务暂时不可用，请采用离线方式", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            text.ifBlank { "服务暂时不可用，请重试" },
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 }
             }
             com.voicenote.app.domain.model.ProcessingStatus.COMPLETED -> {
+                // Transcript text content
                 if (text.isNotBlank()) {
                     Card(
                         shape = RoundedCornerShape(12.dp),
@@ -393,24 +411,51 @@ private fun TranscriptTab(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    fileName,
+                                    "转写内容",
                                     style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            HorizontalDivider()
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(text, style = MaterialTheme.typography.bodyMedium)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                            )
                         }
                     }
                 } else {
-                    Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("无有效内容", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                fileName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -456,7 +501,9 @@ private fun TranscriptTab(
 private fun SummaryTab(
     record: VoiceRecord,
     isRetrying: Boolean,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onCancel: () -> Unit,
+    onShare: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -467,19 +514,31 @@ private fun SummaryTab(
     ) {
         when (record.summaryStatus) {
             com.voicenote.app.domain.model.ProcessingStatus.PENDING -> {
+                val msg = if (record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE) {
+                    "转写未完成，无法生成总结"
+                } else {
+                    "等待转写完成..."
+                }
                 Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("等待转写完成...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Text(msg, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                 }
             }
             com.voicenote.app.domain.model.ProcessingStatus.PROCESSING -> {
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("正在生成总结...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("正在生成总结...", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    }
+                    TextButton(onClick = onCancel) {
+                        Text("取消", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
             com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE -> {
@@ -571,15 +630,19 @@ private fun SummaryTab(
             }
         }
 
-        // Retry button
-        if (record.summaryStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
+        // Action buttons (retry / start / export)
+        val showActions = record.summaryStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
             || record.summaryStatus == com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE
-        ) {
+            || (record.summaryStatus == com.voicenote.app.domain.model.ProcessingStatus.PENDING
+                && record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED)
+
+        if (showActions) {
             HorizontalDivider()
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center
             ) {
+                val btnLabel = if (record.summaryStatus == com.voicenote.app.domain.model.ProcessingStatus.PENDING) "开始总结" else "重新总结"
                 TextButton(onClick = onRetry, enabled = !isRetrying) {
                     if (isRetrying) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -588,7 +651,17 @@ private fun SummaryTab(
                     } else {
                         Icon(Icons.Default.Replay, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("重新总结")
+                        Text(btnLabel)
+                    }
+                }
+
+                if (record.summaryStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
+                    && record.summary != null) {
+                    Spacer(modifier = Modifier.width(16.dp))
+                    TextButton(onClick = onShare) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("导出")
                     }
                 }
             }

@@ -2,7 +2,7 @@ package com.voicenote.app.core.network
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
-import com.voicenote.app.core.asr.ModelDownloadManager
+import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.llm.LLMModelInfo
 import com.voicenote.app.core.llm.LLMModelManager
@@ -23,7 +23,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ConnectivityChecker @Inject constructor(
-    private val modelDownloadManager: ModelDownloadManager,
+    private val asrModelManager: ASRModelManager,
     private val llmModelManager: LLMModelManager
 ) {
 
@@ -120,8 +120,8 @@ class ConnectivityChecker @Inject constructor(
 
     fun checkAsrOffline(quality: String): Result<String> {
         val q = if (quality == "fp32") ModelQuality.FP32 else ModelQuality.INT8
-        val modelFile = File(modelDownloadManager.modelFilePath(q))
-        val tokensFile = File(modelDownloadManager.tokensFilePath())
+        val modelFile = File(asrModelManager.modelFilePath(q))
+        val tokensFile = File(asrModelManager.tokensFilePath())
 
         return when {
             !modelFile.exists() || modelFile.length() < 1_000_000 ->

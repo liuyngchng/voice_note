@@ -45,7 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.voicenote.app.core.asr.DownloadStatus
-import com.voicenote.app.core.asr.ModelDownloadManager
+import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.asr.ModelQuality
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,14 +58,14 @@ fun OfflineASRSettingsView(
     onAsrModeChange: (String) -> Unit,
     onAsrUrlChange: (String) -> Unit,
     onModelQualityChange: (String) -> Unit,
-    downloadManager: ModelDownloadManager
+    asrModelManager: ASRModelManager
 ) {
-    val downloadState by downloadManager.downloadState.collectAsState()
+    val downloadState by asrModelManager.downloadState.collectAsState()
     val context = LocalContext.current
     val quality = if (modelQuality == "fp32") ModelQuality.FP32 else ModelQuality.INT8
 
     LaunchedEffect(modelQuality) {
-        downloadManager.resetState()
+        asrModelManager.resetState()
     }
 
     val totalRamGB = remember {
@@ -187,13 +187,13 @@ fun OfflineASRSettingsView(
             Spacer(modifier = Modifier.height(16.dp))
 
             // ── Download / status section ─────────────────────────────────
-            val isDownloaded = downloadManager.isModelDownloaded(quality)
+            val isDownloaded = asrModelManager.isModelDownloaded(quality)
             val scope = rememberCoroutineScope()
             val filePicker = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenDocument()
             ) { uri ->
                 uri?.let {
-                    scope.launch(Dispatchers.IO) { downloadManager.uploadModel(quality, it) }
+                    scope.launch(Dispatchers.IO) { asrModelManager.uploadModel(quality, it) }
                 }
             }
 
@@ -201,12 +201,12 @@ fun OfflineASRSettingsView(
                 DownloadStatus.IDLE -> {
                     if (isDownloaded) {
                         ModelReadyCard(
-                            onDelete = { downloadManager.deleteModel(quality) }
+                            onDelete = { asrModelManager.deleteModel(quality) }
                         )
                     } else {
                         DownloadActionsCard(
                             onDownload = {
-                                scope.launch(Dispatchers.IO) { downloadManager.downloadModel(quality) }
+                                scope.launch(Dispatchers.IO) { asrModelManager.downloadModel(quality) }
                             },
                             onUpload = { filePicker.launch(arrayOf("*/*")) }
                         )
@@ -214,8 +214,10 @@ fun OfflineASRSettingsView(
                 }
 
                 DownloadStatus.DOWNLOADING,
+                DownloadStatus.UPLOADING,
                 DownloadStatus.EXTRACTING -> {
                     DownloadProgressCard(
+                        isUploading = downloadState.status == DownloadStatus.UPLOADING,
                         isExtracting = downloadState.status == DownloadStatus.EXTRACTING,
                         progress = downloadState.progress
                     )
@@ -224,8 +226,8 @@ fun OfflineASRSettingsView(
                 DownloadStatus.COMPLETED -> {
                     ModelReadyCard(
                         onDelete = {
-                            downloadManager.deleteModel(quality)
-                            downloadManager.resetState()
+                            asrModelManager.deleteModel(quality)
+                            asrModelManager.resetState()
                         }
                     )
                 }
@@ -234,8 +236,8 @@ fun OfflineASRSettingsView(
                     DownloadFailedCard(
                         error = downloadState.error,
                         onRetry = {
-                            downloadManager.resetState()
-                            scope.launch(Dispatchers.IO) { downloadManager.downloadModel(quality) }
+                            asrModelManager.resetState()
+                            scope.launch(Dispatchers.IO) { asrModelManager.downloadModel(quality) }
                         },
                         onUpload = { filePicker.launch(arrayOf("*/*")) }
                     )
@@ -308,7 +310,7 @@ private fun DownloadActionsCard(
 }
 
 @Composable
-private fun DownloadProgressCard(isExtracting: Boolean, progress: Float) {
+private fun DownloadProgressCard(isUploading: Boolean, isExtracting: Boolean, progress: Float) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(
@@ -319,7 +321,11 @@ private fun DownloadProgressCard(isExtracting: Boolean, progress: Float) {
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    if (isExtracting) "正在解压模型..." else "正在下载模型...",
+                    when {
+                        isUploading -> "正在复制模型..."
+                        isExtracting -> "正在解压模型..."
+                        else -> "正在下载模型..."
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
                 if (!isExtracting) {
@@ -332,8 +338,14 @@ private fun DownloadProgressCard(isExtracting: Boolean, progress: Float) {
                 }
             }
         }
-        if (!isExtracting) {
-            Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+        if (isExtracting) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().height(6.dp),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+        } else {
             LinearProgressIndicator(
                 progress = { progress },
                 modifier = Modifier.fillMaxWidth().height(6.dp),

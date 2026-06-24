@@ -21,6 +21,9 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +36,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -44,7 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.voicenote.app.BuildConfig
-import com.voicenote.app.core.asr.ModelDownloadManager
+import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.llm.LLMModelManager
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -54,7 +58,7 @@ import dagger.hilt.components.SingletonComponent
 @EntryPoint
 @InstallIn(SingletonComponent::class)
 interface SettingsEntryPoint {
-    fun modelDownloadManager(): ModelDownloadManager
+    fun asrModelManager(): ASRModelManager
     fun llmModelManager(): LLMModelManager
 }
 
@@ -69,8 +73,15 @@ fun SettingsScreen(
     val entryPoint = remember {
         EntryPointAccessors.fromApplication(context.applicationContext, SettingsEntryPoint::class.java)
     }
-    val downloadManager = remember { entryPoint.modelDownloadManager() }
+    val asrModelManager = remember { entryPoint.asrModelManager() }
     val llmModelManager = remember { entryPoint.llmModelManager() }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.saveCount) {
+        if (uiState.saveCount > 0) {
+            snackbarHostState.showSnackbar(viewModel.buildSaveSummary())
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -86,6 +97,16 @@ fun SettingsScreen(
                     titleContentColor = MaterialTheme.colorScheme.onSurface
                 )
             )
+        },
+        snackbarHost = {
+            SnackbarHost(hostState = snackbarHostState) { data ->
+                Snackbar(
+                    snackbarData = data,
+                    containerColor = MaterialTheme.colorScheme.inverseSurface,
+                    contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
         }
     ) { padding ->
         Column(
@@ -110,7 +131,7 @@ fun SettingsScreen(
                         onAsrModeChange = viewModel::updateAsrMode,
                         onAsrUrlChange = viewModel::updateAsrUrl,
                         onModelQualityChange = viewModel::updateOfflineModelQuality,
-                        downloadManager = downloadManager
+                        asrModelManager = asrModelManager
                     )
                 }
             }

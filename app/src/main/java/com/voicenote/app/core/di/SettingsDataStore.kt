@@ -20,9 +20,9 @@ data class AppSettings(
     val llmKey: String = "",
     val llmModel: String = "deepseek-v4-pro",
     val llmPrompt: String = "",
-    val asrMode: String = "online",
+    val asrMode: String = "offline",
     val offlineModelQuality: String = "int8",
-    val llmMode: String = "online",
+    val llmMode: String = "offline",
     val llmModelInfo: String = "qwen2_5_0_5b_q4km"
 )
 
@@ -49,9 +49,9 @@ class SettingsDataStore @Inject constructor(
             llmKey = prefs[Keys.LLM_KEY] ?: "",
             llmModel = prefs[Keys.LLM_MODEL] ?: "deepseek-v4-pro",
             llmPrompt = prefs[Keys.LLM_PROMPT] ?: "",
-            asrMode = prefs[Keys.ASR_MODE] ?: "online",
+            asrMode = prefs[Keys.ASR_MODE] ?: "offline",
             offlineModelQuality = prefs[Keys.OFFLINE_MODEL_QUALITY] ?: "int8",
-            llmMode = prefs[Keys.LLM_MODE] ?: "online",
+            llmMode = prefs[Keys.LLM_MODE] ?: "offline",
             llmModelInfo = prefs[Keys.LLM_MODEL_INFO] ?: "qwen2_5_0_5b_q4km"
         )
     }

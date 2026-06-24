@@ -29,7 +29,9 @@ class AudioCapture @Inject constructor() {
     }
 
     fun startCapture(): Flow<ByteArray> = flow {
+        android.util.Log.e("REC_CRASH", "AUDIO: startCapture flow entered")
         try {
+            android.util.Log.e("REC_CRASH", "AUDIO: creating AudioRecord, bufferSize=$bufferSize")
             audioRecord = AudioRecord(
                 MediaRecorder.AudioSource.MIC,
                 SAMPLE_RATE,
@@ -37,11 +39,13 @@ class AudioCapture @Inject constructor() {
                 AUDIO_FORMAT,
                 bufferSize
             ).also {
+                android.util.Log.e("REC_CRASH", "AUDIO: AudioRecord created, state=${it.state}")
                 if (it.state != AudioRecord.STATE_INITIALIZED) {
-                    throw IllegalStateException("AudioRecord initialization failed")
+                    throw IllegalStateException("AudioRecord initialization failed, state=${it.state}")
                 }
                 it.startRecording()
                 isRecording = true
+                android.util.Log.e("REC_CRASH", "AUDIO: AudioRecord started, reading loop begin")
             }
 
             val buffer = ByteArray(bufferSize)
@@ -52,6 +56,7 @@ class AudioCapture @Inject constructor() {
                 }
             }
         } finally {
+            android.util.Log.e("REC_CRASH", "AUDIO: startCapture flow ending, calling stopCapture")
             stopCapture()
         }
     }.flowOn(Dispatchers.IO)

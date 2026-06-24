@@ -108,11 +108,10 @@ class OfflineLLMClient @Inject constructor(
         } finally {
             stateLock.withLock {
                 isInferring = false
-                if (shouldReleaseAfterInference) {
-                    shouldReleaseAfterInference = false
-                    Log.i(TAG, "推理完成，执行延迟的模型释放")
-                    reset()
-                }
+                shouldReleaseAfterInference = false
+                // Always release model after inference to free memory
+                Log.i(TAG, "推理完成，释放 LLM 模型")
+                reset()
             }
         }
     }
