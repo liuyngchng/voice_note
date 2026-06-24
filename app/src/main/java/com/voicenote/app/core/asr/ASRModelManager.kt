@@ -340,12 +340,15 @@ class ASRModelManager @Inject constructor(
     }
 
     fun deleteModel(quality: ModelQuality) {
-        File(modelFilePath(quality)).delete()
+        val modelPath = modelFilePath(quality)
+        val deleted = File(modelPath).delete()
+        android.util.Log.e("REC_CRASH", "DELETE: asr model=${quality.name}, path=$modelPath, deleted=$deleted")
 
         val otherQuality = if (quality == ModelQuality.INT8) ModelQuality.FP32 else ModelQuality.INT8
         if (!isModelDownloaded(otherQuality)) {
-            File(tokensFilePath()).delete()
-            modelsDir.deleteRecursively()
+            val tokensDeleted = File(tokensFilePath()).delete()
+            val dirDeleted = modelsDir.deleteRecursively()
+            android.util.Log.e("REC_CRASH", "DELETE: no other model, tokensDeleted=$tokensDeleted, dirDeleted=$dirDeleted")
         }
 
         _downloadState.value = DownloadState()
