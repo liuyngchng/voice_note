@@ -75,43 +75,60 @@ class OfflineLLMClient @Inject constructor(
         transcript: String,
         modelInfo: LLMModelInfo,
         customPrompt: String? = null
-    ): Result<VoiceRecordSummary> = withContext(Dispatchers.IO) {
-        try {
-            ensureModel(modelInfo)
-        } catch (e: Exception) {
-            return@withContext Result.failure(e)
+    ): Result<VoiceRecordSummary> {
+        // Atomically check and acquire inference lock — prevents concurrent native calls
+        val canStart = stateLock.withLock {
+            if (isInferring) false
+            else { isInferring = true; true }
+        }
+        if (!canStart) {
+            Log.w(TAG, "generateSummary rejected: inference already in progress")
+            return Result.failure(Exception("推理正在进行中，请稍后再试"))
         }
 
-        stateLock.withLock { isInferring = true }
+        var modelLoaded = false
 
-        return@withContext try {
-            val prompt = customPrompt?.takeIf { it.isNotBlank() } ?: DEFAULT_PROMPT
-            val systemPrompt = "你是一个语音笔记助手，负责用简洁的文字总结转写文本。"
+        return withContext(Dispatchers.IO) {
+            try {
+                try {
+                    ensureModel(modelInfo)
+                    modelLoaded = true
+                } catch (e: Exception) {
+                    return@withContext Result.failure(e)
+                }
 
-            val rawOutput = LlamaBridge.generate(
-                "$prompt\n\n$transcript",
-                systemPrompt,
-                512,
-                0.3f
-            )
+                val prompt = customPrompt?.takeIf { it.isNotBlank() } ?: DEFAULT_PROMPT
+                val systemPrompt = "你是一个语音笔记助手，负责用简洁的文字总结转写文本。"
 
-            if (rawOutput.isNullOrBlank()) {
-                Result.failure(Exception("离线 LLM 返回空结果"))
-            } else {
-                Log.i(TAG, "离线推理完成: ${rawOutput.length} chars")
-                val summary = parseSummary(rawOutput)
-                Result.success(summary)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "离线推理失败: ${e.message}", e)
-            Result.failure(e)
-        } finally {
-            stateLock.withLock {
-                isInferring = false
-                shouldReleaseAfterInference = false
-                // Always release model after inference to free memory
-                Log.i(TAG, "推理完成，释放 LLM 模型")
-                reset()
+                val promptText = "$prompt\n\n$transcript"
+                Log.i(TAG, "开始离线推理: promptLen=${promptText.length}, maxTokens=256, temp=0.3")
+
+                val rawOutput = LlamaBridge.generate(
+                    promptText,
+                    systemPrompt,
+                    256,
+                    0.3f
+                )
+
+                if (rawOutput.isNullOrBlank()) {
+                    Result.failure(Exception("离线 LLM 返回空结果"))
+                } else {
+                    Log.i(TAG, "离线推理完成: ${rawOutput.length} chars")
+                    val summary = parseSummary(rawOutput)
+                    Result.success(summary)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "离线推理失败: ${e.message}", e)
+                Result.failure(e)
+            } finally {
+                stateLock.withLock {
+                    isInferring = false
+                    shouldReleaseAfterInference = false
+                    if (modelLoaded) {
+                        Log.i(TAG, "推理完成，释放 LLM 模型")
+                    }
+                    reset()
+                }
             }
         }
     }

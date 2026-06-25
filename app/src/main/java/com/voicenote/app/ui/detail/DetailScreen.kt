@@ -1,9 +1,7 @@
 package com.voicenote.app.ui.detail
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,17 +23,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -64,6 +59,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -111,6 +107,15 @@ fun DetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = viewModel::showDeleteConfirm) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "删除记录",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -170,15 +175,15 @@ fun DetailScreen(
                             onSeek = viewModel::seekTo,
                             onSkipBack = viewModel::skipBack,
                             onSkipForward = viewModel::skipForward,
-                            onShare = viewModel::shareAudio,
-                            onDelete = viewModel::showDeleteConfirm
+                            onShare = viewModel::shareAudio
                         )
                         1 -> TranscriptTab(
                             record = record,
                             isRetrying = uiState.isRetryingTranscript,
                             onRetry = viewModel::retryTranscript,
                             onCancel = viewModel::cancelRetryTranscript,
-                            onShareTranscript = viewModel::shareTranscript
+                            onShareTranscript = viewModel::shareTranscript,
+                            onPreview = viewModel::openTranscriptPreview
                         )
                         2 -> SummaryTab(
                             record = record,
@@ -218,6 +223,32 @@ fun DetailScreen(
             }
         )
     }
+
+    // Transcript preview dialog
+    if (uiState.showTranscriptPreview) {
+        val transcriptText = uiState.record?.transcriptText.orEmpty()
+        AlertDialog(
+            onDismissRequest = viewModel::dismissTranscriptPreview,
+            title = { Text("转写内容") },
+            text = {
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            transcriptText.ifBlank { "转写内容为空" },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissTranscriptPreview) {
+                    Text("关闭")
+                }
+            }
+        )
+    }
 }
 
 // MARK: - Tab 0: 音频 (basic info + playback)
@@ -233,14 +264,13 @@ private fun AudioTab(
     onSeek: (Float) -> Unit,
     onSkipBack: () -> Unit,
     onSkipForward: () -> Unit,
-    onShare: () -> Unit,
-    onDelete: () -> Unit
+    onShare: () -> Unit
 ) {
     val timeFormatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss").withZone(ZoneId.systemDefault())
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -280,8 +310,9 @@ private fun AudioTab(
                 Column(modifier = Modifier.padding(16.dp)) {
                     // Progress
                     Slider(
-                        value = if (playbackState != PlaybackState.IDLE) playbackProgress else 0f,
-                        onValueChange = if (playbackState != PlaybackState.IDLE) onSeek else ({}),
+                        value = playbackProgress,
+                        onValueChange = onSeek,
+                        enabled = playbackState != PlaybackState.IDLE,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(
@@ -324,16 +355,13 @@ private fun AudioTab(
                         }
                     }
 
-                    // Share / Delete
+                    // Share
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
                         IconButton(onClick = onShare) {
                             Icon(Icons.Default.Share, contentDescription = "分享录音")
-                        }
-                        IconButton(onClick = onDelete) {
-                            Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -350,21 +378,17 @@ private fun TranscriptTab(
     isRetrying: Boolean,
     onRetry: () -> Unit,
     onCancel: () -> Unit,
-    onShareTranscript: () -> Unit
+    onShareTranscript: () -> Unit,
+    onPreview: () -> Unit
 ) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         val text = record.transcriptText
-        val fileName = if (record.transcriptFilePath.isNotBlank()) {
-            File(record.transcriptFilePath).name
-        } else {
-            "转写内容.txt"
-        }
 
         when (record.transcriptStatus) {
             com.voicenote.app.domain.model.ProcessingStatus.PENDING -> {
@@ -403,59 +427,39 @@ private fun TranscriptTab(
                 }
             }
             com.voicenote.app.domain.model.ProcessingStatus.COMPLETED -> {
-                // Transcript text content
-                if (text.isNotBlank()) {
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    "转写内容",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                            )
-                        }
-                    }
+                val fileName = if (record.transcriptFilePath.isNotBlank()) {
+                    File(record.transcriptFilePath).name
                 } else {
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    "转写内容.txt"
+                }
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth().clickable { onPreview() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                fileName,
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            fileName,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = "查看内容",
+                            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
+                        )
                     }
                 }
             }
@@ -507,7 +511,7 @@ private fun SummaryTab(
 ) {
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)

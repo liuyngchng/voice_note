@@ -211,7 +211,10 @@ fun OfflineASRSettingsView(
                 DownloadStatus.IDLE -> {
                     if (isDownloaded) {
                         ModelReadyCard(
-                            onDelete = { asrModelManager.deleteModel(quality) }
+                            onDelete = {
+                                asrModelManager.deleteModel(quality)
+                                android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         )
                     } else {
                         DownloadActionsCard(
@@ -238,6 +241,7 @@ fun OfflineASRSettingsView(
                         onDelete = {
                             asrModelManager.deleteModel(quality)
                             asrModelManager.resetState()
+                            android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
@@ -333,7 +337,7 @@ private fun DownloadProgressCard(isUploading: Boolean, isExtracting: Boolean, pr
                 Text(
                     when {
                         isUploading -> "正在复制模型..."
-                        isExtracting -> "正在解压模型..."
+                        isExtracting -> "正在提取模型..."
                         else -> "正在下载模型..."
                     },
                     style = MaterialTheme.typography.bodyMedium

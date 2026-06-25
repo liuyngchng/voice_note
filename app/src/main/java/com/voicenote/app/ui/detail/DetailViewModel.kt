@@ -52,7 +52,6 @@ data class DetailUiState(
     val isDeleting: Boolean = false,
     val isDeleted: Boolean = false,
     val showTranscriptPreview: Boolean = false,
-    val aiSummaryExpanded: Boolean = false,
     val isRetryingTranscript: Boolean = false,
     val isRetryingSummary: Boolean = false
 )
@@ -226,10 +225,6 @@ class DetailViewModel @Inject constructor(
 
     fun dismissTranscriptPreview() {
         _uiState.value = _uiState.value.copy(showTranscriptPreview = false)
-    }
-
-    fun toggleAiSummary() {
-        _uiState.value = _uiState.value.copy(aiSummaryExpanded = !_uiState.value.aiSummaryExpanded)
     }
 
     fun showDeleteConfirm() {
@@ -438,7 +433,7 @@ class DetailViewModel @Inject constructor(
         retrySummaryJob?.cancel()
         retrySummaryJob = null
         _uiState.value = _uiState.value.copy(isRetryingSummary = false)
-        try { offlineLLMClient.reset() } catch (_: Exception) {}
+        Log.i(TAG, "cancelRetrySummary: job cancelled, model cleanup handled by generateSummary finally block")
         viewModelScope.launch {
             recordRepository.updateSummaryStatus(
                 _uiState.value.record?.id ?: return@launch,

@@ -222,37 +222,46 @@ class RecordingService : Service() {
 
     private fun startOnlineASR(asrUrl: String) {
         android.util.Log.e("REC_CRASH", "SVC: startOnlineASR, url=$asrUrl")
-        val asrFlow = funASRClient.connect(asrUrl)
-        android.util.Log.e("REC_CRASH", "SVC: online ASR connected, launching recordingJob")
 
         recordingJob = serviceScope.launch {
-            android.util.Log.e("REC_CRASH", "SVC: recordingJob coroutine started")
-            launch {
-                asrFlow.collect { event ->
-                    _asrEvents.emit(event)
-                    when (event) {
-                        is AsrEvent.Partial -> {
-                            mutableTranscript.append(event.text)
-                            _transcriptState.value = mutableTranscript.toString()
+            var asrConnected = false
+            try {
+                val asrFlow = funASRClient.connect(asrUrl)
+                asrConnected = true
+                android.util.Log.e("REC_CRASH", "SVC: online ASR connected")
+
+                launch {
+                    asrFlow.collect { event ->
+                        _asrEvents.emit(event)
+                        when (event) {
+                            is AsrEvent.Partial -> {
+                                mutableTranscript.append(event.text)
+                                _transcriptState.value = mutableTranscript.toString()
+                            }
+                            is AsrEvent.Final -> {
+                                _transcriptState.value = mutableTranscript.toString()
+                            }
+                            is AsrEvent.Error -> {
+                                Log.e("RecordingService", "ASR error: ${event.message}")
+                            }
+                            else -> {}
                         }
-                        is AsrEvent.Final -> {
-                            _transcriptState.value = mutableTranscript.toString()
-                        }
-                        is AsrEvent.Error -> {
-                            Log.e("RecordingService", "ASR error: ${event.message}")
-                        }
-                        else -> {}
                     }
                 }
+
+                kotlinx.coroutines.delay(300)
+                funASRClient.sendHandshake()
+            } catch (e: Exception) {
+                android.util.Log.e("REC_CRASH", "SVC: online ASR connect failed: ${e.message}", e)
+                Log.e("RecordingService", "Online ASR unavailable: ${e.message}", e)
             }
 
-            kotlinx.coroutines.delay(300)
-            funASRClient.sendHandshake()
-            android.util.Log.e("REC_CRASH", "SVC: online handshake sent, starting audio capture")
-
+            android.util.Log.e("REC_CRASH", "SVC: starting audio capture, asrConnected=$asrConnected")
             audioCapture.startCapture().collect { audioData ->
                 audioFileManager.writeAudioChunk(audioData)
-                funASRClient.sendAudio(audioData)
+                if (asrConnected) {
+                    funASRClient.sendAudio(audioData)
+                }
             }
         }
         android.util.Log.e("REC_CRASH", "SVC: startOnlineASR done, recordingJob launched")
@@ -337,8 +346,10 @@ class RecordingService : Service() {
                         _transcriptState.value = mutableTranscript.toString()
                     }
                 }
-                Log.i("RecordingService", "Pipeline: unloading ASR model before summary")
-                offlineASRClient.reset()
+                if (offlineASRClient.isAvailable) {
+                    Log.i("RecordingService", "Pipeline: unloading ASR model before summary")
+                    offlineASRClient.reset()
+                }
             }
 
             val audioFilePath = audioFileManager.finalizeRecording()
@@ -389,6 +400,8 @@ class RecordingService : Service() {
                             if (summaryResult.isFailure) {
                                 recordRepository.updateSummaryStatus(currentRecordId, com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE)
                             }
+                        } else {
+                            recordRepository.updateSummaryStatus(currentRecordId, com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE)
                         }
                     }
                 }

@@ -129,7 +129,7 @@ fun HistoryScreen(
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::search,
-                placeholder = { Text("搜索标题、备注或内容") },
+                placeholder = { Text("搜索") },
                 leadingIcon = {
                     Icon(Icons.Default.Search, contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))

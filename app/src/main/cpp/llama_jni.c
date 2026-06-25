@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 #include <android/log.h>
 
 // llama.cpp C API — available via linked static library
@@ -21,7 +22,7 @@ Java_com_voicenote_app_core_llm_LlamaBridge_loadModel(
     JNIEnv *env, jclass clazz, jstring path, jint gpu_layers, jint ctx_len) {
 
     if (g_is_loaded) {
-        // unload existing model first
+        LOGE("loadModel called while already loaded — unloading first");
         if (g_ctx) { llama_free(g_ctx); g_ctx = NULL; }
         if (g_model) { llama_model_free(g_model); g_model = NULL; }
         g_vocab = NULL;
@@ -32,7 +33,21 @@ Java_com_voicenote_app_core_llm_LlamaBridge_loadModel(
     const char *c_path = (*env)->GetStringUTFChars(env, path, NULL);
     if (!c_path) return JNI_FALSE;
 
-    LOGI("Loading model: %s, gpuLayers=%d, ctxLen=%d", c_path, gpu_layers, ctx_len);
+    // Log model file size
+    FILE *fp = fopen(c_path, "rb");
+    long fsize = 0;
+    if (fp) {
+        fseek(fp, 0, SEEK_END);
+        fsize = ftell(fp);
+        fclose(fp);
+    }
+    LOGI("Loading model: %s, fileSize=%ldMB, gpuLayers=%d, ctxLen=%d", c_path, fsize / 1048576, gpu_layers, ctx_len);
+
+    if (fsize < 100 * 1048576) {
+        LOGE("Model file too small (%ldMB), possibly corrupt or incomplete", fsize / 1048576);
+        (*env)->ReleaseStringUTFChars(env, path, c_path);
+        return JNI_FALSE;
+    }
 
     llama_backend_init();
 
@@ -50,6 +65,13 @@ Java_com_voicenote_app_core_llm_LlamaBridge_loadModel(
     }
 
     g_vocab = llama_model_get_vocab(g_model);
+    if (!g_vocab) {
+        LOGE("Failed to get vocab");
+        llama_model_free(g_model);
+        g_model = NULL;
+        llama_backend_free();
+        return JNI_FALSE;
+    }
 
     struct llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx = ctx_len;
@@ -62,17 +84,18 @@ Java_com_voicenote_app_core_llm_LlamaBridge_loadModel(
         LOGE("Failed to create context");
         llama_model_free(g_model);
         g_model = NULL;
+        g_vocab = NULL;
         llama_backend_free();
         return JNI_FALSE;
     }
 
     g_is_loaded = 1;
-    LOGI("Model loaded successfully");
+    LOGI("Model loaded successfully: n_ctx=%d", llama_n_ctx(g_ctx));
     return JNI_TRUE;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_voicenote_app_core_llm_LlamaBridge_generate(
+Java_com_voicenote_app_core_llm_LlamaBridge_generateNative(
     JNIEnv *env, jclass clazz, jstring prompt, jstring system_prompt,
     jint max_tokens, jfloat temperature) {
 
@@ -99,15 +122,28 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
     int estimated_len = -(int)strlen(c_prompt) - 512;
     if (c_system) estimated_len -= (int)strlen(c_system);
 
-    int buf_size = llama_n_ctx(g_ctx) - estimated_len;
+    int n_ctx = llama_n_ctx(g_ctx);
+    int buf_size = n_ctx - estimated_len;
     if (buf_size <= 0) buf_size = 4096;
 
     char *formatted = malloc(buf_size);
+    if (!formatted) {
+        LOGE("malloc failed for formatted buffer (%d bytes)", buf_size);
+        (*env)->ReleaseStringUTFChars(env, prompt, c_prompt);
+        if (c_system) (*env)->ReleaseStringUTFChars(env, system_prompt, c_system);
+        return NULL;
+    }
     int new_len = llama_chat_apply_template(tmpl, messages, n_msg, 1,
                                             formatted, buf_size);
     if (new_len < 0) {
         free(formatted);
         formatted = malloc(-new_len);
+        if (!formatted) {
+            LOGE("malloc failed for formatted buffer v2 (%d bytes)", -new_len);
+            (*env)->ReleaseStringUTFChars(env, prompt, c_prompt);
+            if (c_system) (*env)->ReleaseStringUTFChars(env, system_prompt, c_system);
+            return NULL;
+        }
         new_len = llama_chat_apply_template(tmpl, messages, n_msg, 1,
                                             formatted, -new_len);
     }
@@ -122,10 +158,15 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
     }
 
     // Tokenize
-    int n_ctx = llama_n_ctx(g_ctx);
-    llama_token *tokens = malloc(sizeof(llama_token) * (n_ctx > 512 ? n_ctx : 512));
+    int token_capacity = n_ctx > 512 ? n_ctx : 512;
+    llama_token *tokens = malloc(sizeof(llama_token) * token_capacity);
+    if (!tokens) {
+        LOGE("malloc failed for tokens buffer (%d)", token_capacity);
+        free(formatted);
+        return NULL;
+    }
     int n_tokens = llama_tokenize(g_vocab, formatted, new_len, tokens,
-                                  n_ctx > 512 ? n_ctx : 512, 1, 1);
+                                  token_capacity, 1, 1);
     free(formatted);
 
     if (n_tokens < 0) {
@@ -137,7 +178,7 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
     if (n_tokens + max_tokens > n_ctx) {
         max_tokens = n_ctx - n_tokens;
         if (max_tokens <= 0) {
-            LOGE("Prompt exceeds context length");
+            LOGE("Prompt exceeds context length (n_tokens=%d, n_ctx=%d)", n_tokens, n_ctx);
             free(tokens);
             return NULL;
         }
@@ -155,6 +196,7 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
     }
 
     // Prefill
+    LOGI("Starting prefill: n_tokens=%d, max_tokens=%d", n_tokens, max_tokens);
     llama_batch batch = llama_batch_get_one(tokens, n_tokens);
     if (llama_decode(g_ctx, batch) != 0) {
         LOGE("Prefill decode failed");
@@ -166,6 +208,11 @@ Java_com_voicenote_app_core_llm_LlamaBridge_generate(
 
     // Autoregressive generation
     char *result = malloc(max_tokens * 4 + 1);
+    if (!result) {
+        LOGE("malloc failed for result buffer (%d bytes)", max_tokens * 4 + 1);
+        llama_sampler_free(smpl);
+        return NULL;
+    }
     int result_len = 0;
     llama_token eos_token = llama_vocab_eos(g_vocab);
     llama_token eot_token = llama_vocab_eot(g_vocab);

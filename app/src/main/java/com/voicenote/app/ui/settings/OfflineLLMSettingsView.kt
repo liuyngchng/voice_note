@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -68,6 +69,7 @@ fun OfflineLLMSettingsView(
     modelManager: LLMModelManager
 ) {
     val downloadState by modelManager.downloadState.collectAsState()
+    val context = LocalContext.current
     var keyVisible by remember { mutableStateOf(false) }
 
     // Only reset state when model changes if no operation is in progress
@@ -226,7 +228,10 @@ fun OfflineLLMSettingsView(
                     if (isDownloaded) {
                         ModelReadyCard(
                             sizeMB = modelManager.downloadedModelSize(info) / 1_048_576,
-                            onDelete = { modelManager.deleteModel(info) }
+                            onDelete = {
+                                modelManager.deleteModel(info)
+                                android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         )
                     } else {
                         DownloadActionsCard(
@@ -254,6 +259,7 @@ fun OfflineLLMSettingsView(
                         onDelete = {
                             modelManager.deleteModel(info)
                             modelManager.resetState()
+                            android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     )
                 }
@@ -364,7 +370,7 @@ private fun DownloadProgressCard(isUploading: Boolean, isExtracting: Boolean, pr
                 Text(
                     when {
                         isUploading -> "正在复制模型..."
-                        isExtracting -> "正在解压模型..."
+                        isExtracting -> "正在提取模型..."
                         else -> "正在下载模型..."
                     },
                     style = MaterialTheme.typography.bodyMedium

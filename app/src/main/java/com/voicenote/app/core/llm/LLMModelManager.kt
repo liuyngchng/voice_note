@@ -109,16 +109,26 @@ class LLMModelManager @Inject constructor(
 
     suspend fun uploadModel(info: LLMModelInfo, sourceUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            _downloadState.value = LLMDownloadState(LLMDownloadStatus.UPLOADING, 0f)
-
-            // Query actual file size from content resolver
+            // Query file info
             var totalBytes = 0L
+            var fileName: String? = null
             context.contentResolver.query(sourceUri, null, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val idx = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (idx >= 0) totalBytes = cursor.getLong(idx)
+                    val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIdx >= 0) fileName = cursor.getString(nameIdx)
+                    val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (sizeIdx >= 0) totalBytes = cursor.getLong(sizeIdx)
                 }
             }
+
+            // Validate format before copying
+            if (fileName != null && !fileName.endsWith(".gguf")) {
+                val msg = "不支持的文件格式：$fileName。请上传 .gguf 格式的模型文件。"
+                _downloadState.value = LLMDownloadState(LLMDownloadStatus.FAILED, 0f, msg)
+                return@withContext Result.failure(Exception(msg))
+            }
+
+            _downloadState.value = LLMDownloadState(LLMDownloadStatus.UPLOADING, 0f)
 
             val targetFile = File(modelFilePath(info))
             targetFile.parentFile?.mkdirs()

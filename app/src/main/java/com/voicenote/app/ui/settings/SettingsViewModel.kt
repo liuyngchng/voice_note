@@ -2,6 +2,7 @@ package com.voicenote.app.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.voicenote.app.core.di.AppSettings
 import com.voicenote.app.core.di.SettingsDataStore
 import com.voicenote.app.core.llm.LLMModelInfo
@@ -108,6 +109,7 @@ class SettingsViewModel @Inject constructor(
 
     fun save() {
         val state = _uiState.value
+        Log.i(TAG, "save: asrMode=${state.asrMode}, asrUrl=${state.asrUrl}, offlineQuality=${state.offlineModelQuality}, llmMode=${state.llmMode}, llmUrl=${state.llmUrl}, llmModel=${state.llmModel}, llmModelInfo=${state.llmModelInfo}")
         viewModelScope.launch {
             settingsDataStore.updateAsrUrl(state.asrUrl)
             settingsDataStore.updateLlmUrl(state.llmUrl)
@@ -119,6 +121,7 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.updateLlmMode(state.llmMode)
             settingsDataStore.updateLlmModelInfo(state.llmModelInfo)
             _uiState.value = _uiState.value.copy(saveCount = _uiState.value.saveCount + 1)
+            Log.i(TAG, "save: all settings persisted, saveCount=${_uiState.value.saveCount}")
         }
     }
 
@@ -176,5 +179,9 @@ class SettingsViewModel @Inject constructor(
 
     fun dismissResults() {
         _uiState.value = _uiState.value.copy(showResults = false, testResults = emptyList())
+    }
+
+    companion object {
+        private const val TAG = "SettingsViewModel"
     }
 }

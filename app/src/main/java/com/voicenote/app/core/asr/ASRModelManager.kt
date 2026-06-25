@@ -126,11 +126,15 @@ class ASRModelManager @Inject constructor(
         var foundModel = false
         var foundTokens = false
 
-        Log.i(TAG, "开始解压: ${archiveFile.name} (${archiveFile.length() / 1_048_576}MB), 目标模型: $targetModelFile")
-        android.util.Log.e("REC_CRASH", "EXTRACT: starting, archive=${archiveFile.length()} bytes, target=$targetModelFile")
+        val isCompressed = archiveFile.name.endsWith(".tar.bz2") || archiveFile.name.endsWith(".tar.gz") || archiveFile.name.endsWith(".bz2")
+        Log.i(TAG, "开始解压: ${archiveFile.name} (${archiveFile.length() / 1_048_576}MB), compressed=$isCompressed, 目标模型: $targetModelFile")
+        android.util.Log.e("REC_CRASH", "EXTRACT: starting, archive=${archiveFile.length()} bytes, compressed=$isCompressed, target=$targetModelFile")
 
-        BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archiveFile))).use { bzIn ->
-            TarArchiveInputStream(bzIn).use { tarIn ->
+        val rawInput = BufferedInputStream(FileInputStream(archiveFile))
+        val decompressedInput = if (isCompressed) BZip2CompressorInputStream(rawInput) else rawInput
+
+        decompressedInput.use { input ->
+            TarArchiveInputStream(input).use { tarIn ->
                 var entry = tarIn.nextTarEntry
                 while (entry != null) {
                     val shortName = entry.name.substringAfterLast("/").ifBlank { entry.name }
@@ -171,11 +175,19 @@ class ASRModelManager @Inject constructor(
 
     suspend fun uploadModel(quality: ModelQuality, sourceUri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            _downloadState.value = DownloadState(DownloadStatus.UPLOADING, 0f)
-
             val (fileName, fileSize) = queryFileInfo(sourceUri)
             android.util.Log.e("REC_CRASH", "UPLOAD: fileName=$fileName, fileSize=$fileSize")
-            val isArchive = fileName?.endsWith(".tar.bz2") == true || fileName?.endsWith(".tar.gz") == true
+
+            val isArchive = fileName?.endsWith(".tar.bz2") == true || fileName?.endsWith(".tar.gz") == true || fileName?.endsWith(".tar") == true
+            val isModel = fileName?.endsWith(".onnx") == true
+
+            if (!isArchive && !isModel) {
+                val msg = "不支持的文件格式：${fileName ?: "未知"}。请上传 .tar.bz2、.tar.gz、.tar 归档或 .onnx 模型文件。"
+                _downloadState.value = DownloadState(DownloadStatus.FAILED, 0f, msg)
+                return@withContext Result.failure(Exception(msg))
+            }
+
+            _downloadState.value = DownloadState(DownloadStatus.UPLOADING, 0f)
 
             if (isArchive) {
                 android.util.Log.e("REC_CRASH", "UPLOAD: archive detected, calling uploadArchive")
@@ -234,8 +246,8 @@ class ASRModelManager @Inject constructor(
             } ?: throw Exception("无法读取文件")
 
             android.util.Log.e("REC_CRASH", "UPLOAD: copy done, copiedBytes=$copiedBytes, archiveFile.length=${archiveFile.length()}")
-            if (!fileName.endsWith(".tar.bz2")) {
-                throw Exception("仅支持 .tar.bz2 归档格式")
+            if (!fileName.endsWith(".tar.bz2") && !fileName.endsWith(".tar")) {
+                throw Exception("仅支持 .tar.bz2 或 .tar 归档格式")
             }
 
             Log.i(TAG, "上传归档文件: $fileName (${archiveFile.length()} bytes)")

@@ -107,10 +107,10 @@ class OfflineASRClient @Inject constructor(
         if (recognizerPtr != 0L) {
             nativeDestroyRecognizer(recognizerPtr)
             recognizerPtr = 0
+            isInitialized = false
+            currentQuality = null
+            Log.i(TAG, "离线 ASR 模型已释放")
         }
-        isInitialized = false
-        currentQuality = null
-        Log.i(TAG, "离线 ASR 模型已释放")
     }
 
     val isAvailable: Boolean get() = isInitialized
