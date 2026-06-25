@@ -198,6 +198,9 @@ class FunASRClient @Inject constructor() {
                             val resultText = json.get("text")?.asString ?: ""
                             if (resultText.isNotBlank()) {
                                 transcript.append(resultText)
+                                // Server won't close the connection after offline result,
+                                // so we must close it ourselves to trigger onClosed → resume
+                                webSocket.close(1000, "result received")
                             }
                         } catch (_: Exception) {}
                     }
