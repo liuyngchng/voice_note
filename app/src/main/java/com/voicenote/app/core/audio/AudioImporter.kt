@@ -49,8 +49,8 @@ class AudioImporter @Inject constructor(
             val importedDir = File(context.filesDir, "audio/imported")
             importedDir.mkdirs()
 
-            val baseName = "import_${dateFormatter.format(timestamp)}"
-            val targetFile = File(importedDir, "$baseName.wav")
+            val safeName = "import_${safeDateFormatter.format(timestamp)}"
+            val targetFile = File(importedDir, "$safeName.wav")
 
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(targetFile).use { output ->
@@ -198,6 +198,8 @@ class AudioImporter @Inject constructor(
         private const val TAG = "AudioImporter"
         private const val FALLBACK_TEXT = "服务暂时不可用，请采用离线方式"
         private val dateFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
+            .withZone(ZoneId.systemDefault())
+        private val safeDateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
             .withZone(ZoneId.systemDefault())
         private val transcriptDateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
             .withZone(ZoneId.systemDefault())
