@@ -13,6 +13,7 @@ import com.voicenote.app.core.asr.FunASRClient
 import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.asr.OfflineASRClient
 import com.voicenote.app.core.audio.AudioFileManager
+import com.voicenote.app.core.audio.AudioImporter
 import com.voicenote.app.core.di.SettingsDataStore
 import com.voicenote.app.core.llm.LLMClient
 import com.voicenote.app.core.llm.LLMModelInfo
@@ -62,6 +63,7 @@ class DetailViewModel @Inject constructor(
     application: Application,
     private val recordRepository: VoiceRecordRepository,
     private val audioFileManager: AudioFileManager,
+    private val audioImporter: AudioImporter,
     private val funASRClient: FunASRClient,
     private val offlineASRClient: OfflineASRClient,
     private val llmClient: LLMClient,
@@ -241,6 +243,11 @@ class DetailViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isDeleting = true)
             releasePlayer()
+            retryTranscriptJob?.cancel()
+            retryTranscriptJob = null
+            retrySummaryJob?.cancel()
+            retrySummaryJob = null
+            audioImporter.cancelProcessing(record.id)
             audioFileManager.deleteAudioFile(record.audioFilePath)
             recordRepository.deleteRecord(record.id)
             _uiState.value = _uiState.value.copy(isDeleted = true, isDeleting = false)

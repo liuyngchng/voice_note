@@ -16,6 +16,7 @@ import com.voicenote.app.domain.repository.VoiceRecordRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,6 +39,7 @@ class AudioImporter @Inject constructor(
     private val offlineLLMClient: OfflineLLMClient
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val processingJobs = mutableMapOf<Long, Job>()
 
     suspend fun importAudio(uri: Uri, settings: AppSettings): Result<Long> = withContext(Dispatchers.IO) {
         try {
@@ -82,8 +84,12 @@ class AudioImporter @Inject constructor(
             Log.i(TAG, "录音记录已创建: recordId=$recordId，启动后台转写与总结")
 
             // Launch ASR + LLM in background; return recordId immediately
-            scope.launch {
-                processAudio(recordId, targetFile.absolutePath, settings)
+            processingJobs[recordId] = scope.launch {
+                try {
+                    processAudio(recordId, targetFile.absolutePath, settings)
+                } finally {
+                    processingJobs.remove(recordId)
+                }
             }
 
             Result.success(recordId)
@@ -91,6 +97,12 @@ class AudioImporter @Inject constructor(
             Log.e(TAG, "导入音频失败: ${e.message}", e)
             Result.failure(e)
         }
+    }
+
+    fun cancelProcessing(recordId: Long) {
+        processingJobs[recordId]?.cancel()
+        processingJobs.remove(recordId)
+        Log.i(TAG, "取消后台处理: recordId=$recordId")
     }
 
     private suspend fun processAudio(recordId: Long, audioFilePath: String, settings: AppSettings) {
