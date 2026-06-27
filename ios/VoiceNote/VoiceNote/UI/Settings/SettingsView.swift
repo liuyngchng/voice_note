@@ -7,127 +7,37 @@ struct SettingsView: View {
 
     @State private var showBackAlert = false
     @State private var showValidationAlert = false
-    @State private var showModelFileImporter = false
-    @State private var showLLMFileImporter = false
-    @StateObject private var modelDownloadManager = ModelDownloadManager()
-    @StateObject private var llmModelManager = LLMModelManager()
+    @State private var modelFilePickerTarget: FilePickerTarget? = nil
+    @State private var filePickerErrorMessage: String? = nil
+    @StateObject private var modelDownloadManager = ASRModelManager()
+    @StateObject private var punctuationModelManager = PunctuationModelManager()
 
-    /// iOS 15.1 以上才支持离线识别（onnxruntime 要求）
-    private var supportsOffline: Bool {
-        if #available(iOS 15.1, *) { return true }
-        return false
+    enum FilePickerTarget: String, Identifiable {
+        case asrModel
+        case punctModel
+        var id: String { rawValue }
     }
 
     var body: some View {
         Form {
-            // MARK: - ASR 模式选择
-            if supportsOffline {
-                Section(header: Text("语音识别")) {
-                    Toggle(isOn: Binding(
-                        get: { viewModel.asrMode == .offline },
-                        set: { viewModel.asrMode = $0 ? .offline : .online }
-                    )) {
-                        Text("离线识别")
-                    }
-
-                    if viewModel.asrMode == .online {
-                        TextField("WebSocket 地址", text: $viewModel.asrURL)
-                            .keyboardType(.URL)
-                            .autocapitalization(.none)
+            // MARK: - 语音识别模型设置
+            Section(header: Text("语音识别模型")) {
+                Picker("模型质量", selection: $viewModel.offlineModelQuality) {
+                    ForEach(ModelQuality.allCases, id: \.self) { quality in
+                        Text(quality.displayName).tag(quality)
                     }
                 }
-            } else {
-                Section(header: Text("语音识别")) {
-                    TextField("WebSocket 地址", text: $viewModel.asrURL)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .foregroundColor(.secondary)
-                        Text("离线识别需要 iOS 15.1 或更高版本")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
+                .pickerStyle(.menu)
+                .onChange(of: viewModel.offlineModelQuality) { newQuality in
+                    viewModel.checkFP32Switch(newQuality)
                 }
+
+                asrModelStatusSection
             }
 
-            // MARK: - 离线模型设置
-            if supportsOffline, viewModel.asrMode == .offline {
-                OfflineASRSettingsView(viewModel: viewModel,
-                                       downloadManager: modelDownloadManager,
-                                       showFileImporter: $showModelFileImporter)
-            }
-
-            // MARK: - LLM 模式选择
-            Section(header: Text("LLM 总结")) {
-                Toggle(isOn: Binding(
-                    get: { viewModel.llmMode == .offline },
-                    set: { viewModel.llmMode = $0 ? .offline : .online }
-                )) {
-                    Text("离线总结")
-                }
-
-                if viewModel.llmMode == .online {
-                    TextField("API 地址", text: $viewModel.llmURL)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-
-                    SecureField("API Key", text: $viewModel.llmKey)
-
-                    TextField("模型名称", text: $viewModel.llmModel)
-                        .autocapitalization(.none)
-                }
-            }
-
-            // MARK: - 离线 LLM 模型设置
-            if viewModel.llmMode == .offline {
-                OfflineLLMSettingsView(viewModel: viewModel,
-                                       downloadManager: llmModelManager,
-                                       showFileImporter: $showLLMFileImporter)
-            }
-
-            // MARK: - 连接测试（仅在线模式需要）
-            if viewModel.asrMode == .online || viewModel.llmMode == .online {
-                Section(header: Text("连接测试")) {
-                    if viewModel.asrMode == .online {
-                        HStack {
-                            Text("FunASR WebSocket")
-                                .font(.subheadline)
-                            Spacer()
-                            Text(viewModel.wsTestResult.message)
-                                .font(.caption)
-                                .foregroundColor(testResultColor(viewModel.wsTestResult))
-                            Image(systemName: testResultIcon(viewModel.wsTestResult))
-                                .foregroundColor(testResultColor(viewModel.wsTestResult))
-                        }
-                    }
-
-                    if viewModel.llmMode == .online {
-                        HStack {
-                            Text("LLM API")
-                                .font(.subheadline)
-                            Spacer()
-                            Text(viewModel.llmTestResult.message)
-                                .font(.caption)
-                                .foregroundColor(testResultColor(viewModel.llmTestResult))
-                            Image(systemName: testResultIcon(viewModel.llmTestResult))
-                                .foregroundColor(testResultColor(viewModel.llmTestResult))
-                        }
-                    }
-
-                    Button(action: { viewModel.test() }) {
-                        HStack {
-                            Text("开始测试")
-                                .foregroundColor(viewModel.isTesting ? .secondary : .accentColor)
-                            Spacer()
-                            if viewModel.isTesting {
-                                ProgressView()
-                            }
-                        }
-                    }
-                    .disabled(viewModel.isTesting)
-                }
+            // MARK: - 标点恢复模型
+            Section(header: Text("标点恢复模型")) {
+                punctModelStatusSection
             }
 
             // 版本号
@@ -157,7 +67,7 @@ struct SettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             viewModel.modelDownloadManager = modelDownloadManager
-            viewModel.llmModelManager = llmModelManager
+            viewModel.punctuationModelManager = punctuationModelManager
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -205,51 +115,461 @@ struct SettingsView: View {
                 }
             )
         }
-        .fileImporter(
-            isPresented: $showModelFileImporter,
-            allowedContentTypes: [.bz2],
-            onCompletion: { result in
-                switch result {
-                case .success(let url):
-                    Log.asr("用户选择了文件: \(url.lastPathComponent)")
-                    Task { await viewModel.importModel(from: url) }
-                case .failure(let error):
-                    Log.asr("文件选择取消或失败: \(error.localizedDescription)")
+        .alert(isPresented: Binding<Bool>(
+            get: { filePickerErrorMessage != nil },
+            set: { if !$0 { filePickerErrorMessage = nil } }
+        )) {
+            Alert(
+                title: Text("导入失败"),
+                message: Text(filePickerErrorMessage ?? ""),
+                dismissButton: .default(Text("好"))
+            )
+        }
+        .sheet(item: $modelFilePickerTarget) { target in
+            switch target {
+            case .asrModel:
+                ModelFilePicker(allowedContentTypes: [.bz2, UTType(filenameExtension: "tar") ?? .data]) { url, cleanup in
+                    Log.asr("[SettingsView] 用户选择了ASR模型文件: \(url.lastPathComponent)")
+                    Task {
+                        await viewModel.importModel(from: url)
+                        cleanup()
+                    }
+                } onError: { msg in
+                    Log.asr("[SettingsView] ASR文件选择失败: \(msg)")
+                    filePickerErrorMessage = msg
+                }
+            case .punctModel:
+                ModelFilePicker(allowedContentTypes: [.bz2, UTType(filenameExtension: "tar") ?? .data, UTType(filenameExtension: "onnx") ?? .data]) { url, cleanup in
+                    Log.asr("[SettingsView] 用户选择了标点模型文件: \(url.lastPathComponent)")
+                    Task {
+                        await viewModel.importPunctuationModel(from: url)
+                        cleanup()
+                    }
+                } onError: { msg in
+                    Log.asr("[SettingsView] 标点文件选择失败: \(msg)")
+                    filePickerErrorMessage = msg
                 }
             }
-        )
-        .fileImporter(
-            isPresented: $showLLMFileImporter,
-            allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data],
-            onCompletion: { result in
-                switch result {
-                case .success(let url):
-                    Log.llm("用户选择了 LLM 模型: \(url.lastPathComponent)")
-                    Task { await viewModel.importLLMModel(from: url) }
-                case .failure(let error):
-                    Log.llm("模型文件选择取消或失败: \(error.localizedDescription)")
-                }
-            }
-        )
-    }
-
-    // MARK: - 测试结果辅助
-
-    private func testResultColor(_ result: ConnectionTestResult) -> Color {
-        switch result {
-        case .idle:     return .secondary
-        case .testing:  return .orange
-        case .success:  return .green
-        case .failure:  return .red
         }
     }
 
-    private func testResultIcon(_ result: ConnectionTestResult) -> String {
-        switch result {
-        case .idle:     return "minus.circle"
-        case .testing:  return "arrow.triangle.2.circlepath"
-        case .success:  return "checkmark.circle.fill"
-        case .failure:  return "xmark.circle.fill"
+    // MARK: - ASR 模型状态
+
+    @ViewBuilder
+    private var asrModelStatusSection: some View {
+        switch modelDownloadManager.downloadState {
+        case .idle:
+            if viewModel.isModelDownloaded {
+                asrModelReadyRow
+            } else {
+                asrModelNotDownloadedRow
+            }
+
+        case .downloading(let progress):
+            asrDownloadingRow(progress)
+
+        case .extracting(let progress):
+            asrExtractingRow(progress)
+
+        case .completed:
+            asrModelReadyRow
+            if !viewModel.isModelDownloaded {
+                asrActionButtonsRow
+            }
+
+        case .failed(let error):
+            asrDownloadFailedRow(error)
         }
+    }
+
+    private var asrModelReadyRow: some View {
+        HStack {
+            Label("SenseVoice 模型已就绪", systemImage: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Spacer()
+            Text("\(viewModel.offlineModelQuality.rawValue.uppercased())")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Button {
+                Task { await viewModel.deleteModel() }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.body)
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private var asrModelNotDownloadedRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                Text("SenseVoice 模型未下载")
+                    .font(.body)
+            }
+            Divider()
+            asrActionButtonsRow
+        }
+    }
+
+    private var asrDownloadAddressRow: some View {
+        let urlString = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/\(viewModel.offlineModelQuality.archiveFilename)"
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("下载地址")
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            Button {
+                UIPasteboard.general.string = urlString
+            } label: {
+                HStack(spacing: 4) {
+                    Text(urlString)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.blue)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundColor(.blue)
+                }
+            }
+        }
+    }
+
+    private func asrDownloadingRow(_ progress: Double) -> some View {
+        let isImport = modelDownloadManager.activeOperation == .import_
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text(isImport ? "导入中..." : "下载中...")
+                Spacer()
+                if !isImport {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Button(action: { viewModel.cancelDownload() }) {
+                    Text("取消").foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
+            }
+            if !isImport {
+                ProgressView(value: progress)
+            }
+        }
+    }
+
+    private func asrExtractingRow(_ progress: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text("解压提取中...")
+                Spacer()
+                Text("\(Int(progress * 100))%")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            ProgressView(value: progress)
+            Text("正在解压并提取模型文件")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func asrDownloadFailedRow(_ error: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.red)
+                Text("下载失败")
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+            }
+            Text(error)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            asrDownloadAddressRow
+            Divider()
+            HStack(spacing: 12) {
+                Button {
+                    Task { await viewModel.startDownload() }
+                } label: {
+                    Label("重试", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+                .disabled(modelDownloadManager.isDownloading)
+                Spacer()
+                Button {
+                    Log.asr("[SettingsView] ASR上传按钮点击(失败行)")
+                    modelFilePickerTarget = .asrModel
+                } label: {
+                    Label("上传", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+            }
+        }
+    }
+
+    private var asrActionButtonsRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                Task { await viewModel.startDownload() }
+            } label: {
+                Label("下载", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .font(.subheadline)
+            .disabled(modelDownloadManager.isDownloading)
+            Spacer()
+            Button {
+                Log.asr("[SettingsView] ASR上传按钮点击(操作行)")
+                modelFilePickerTarget = .asrModel
+            } label: {
+                Label("上传", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .font(.subheadline)
+            .disabled(modelDownloadManager.isDownloading)
+        }
+    }
+
+    // MARK: - 标点模型状态
+
+    @ViewBuilder
+    private var punctModelStatusSection: some View {
+        switch punctuationModelManager.downloadState {
+        case .idle:
+            if viewModel.isPunctuationModelDownloaded {
+                punctModelReadyRow
+            } else {
+                punctModelNotDownloadedRow
+            }
+
+        case .downloading(let progress):
+            punctDownloadingRow(progress)
+
+        case .extracting(let progress):
+            punctExtractingRow(progress)
+
+        case .completed:
+            punctModelReadyRow
+            if !viewModel.isPunctuationModelDownloaded {
+                punctActionButtonsRow
+            }
+
+        case .failed(let error):
+            punctDownloadFailedRow(error)
+        }
+    }
+
+    private var punctModelReadyRow: some View {
+        HStack {
+            Label("标点模型已就绪", systemImage: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Spacer()
+            Button {
+                Task { await viewModel.deletePunctuationModel() }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.body)
+                    .foregroundColor(.red)
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private var punctModelNotDownloadedRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                Text("标点恢复模型未下载")
+                    .font(.body)
+            }
+            Text("用于给转写文本自动添加标点符号")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Divider()
+            punctActionButtonsRow
+        }
+    }
+
+    private var punctDownloadAddressRow: some View {
+        let urlString = "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2"
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("下载地址")
+                .font(.subheadline)
+                .foregroundColor(.primary)
+            Button {
+                UIPasteboard.general.string = urlString
+            } label: {
+                HStack(spacing: 4) {
+                    Text(urlString)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.blue)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundColor(.blue)
+                }
+            }
+        }
+    }
+
+    private func punctDownloadingRow(_ progress: Double) -> some View {
+        let isImport = punctuationModelManager.activeOperation == .import_
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text(isImport ? "导入中..." : "下载中...")
+                Spacer()
+                if !isImport {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Button(action: { viewModel.cancelPunctuationDownload() }) {
+                    Text("取消").foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
+            }
+            if !isImport {
+                ProgressView(value: progress)
+            }
+        }
+    }
+
+    private func punctExtractingRow(_ progress: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text("解压提取中...")
+                Spacer()
+                Text("\(Int(progress * 100))%")
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+            ProgressView(value: progress)
+            Text("正在解压并提取标点模型文件")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func punctDownloadFailedRow(_ error: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundColor(.red)
+                Text("下载失败")
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+            }
+            Text(error)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            punctDownloadAddressRow
+            Divider()
+            HStack(spacing: 12) {
+                Button {
+                    Task { await viewModel.startPunctuationDownload() }
+                } label: {
+                    Label("重试", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+                .disabled(punctuationModelManager.isDownloading)
+                Spacer()
+                Button {
+                    Log.asr("[SettingsView] 标点上传按钮点击(失败行)")
+                    modelFilePickerTarget = .punctModel
+                } label: {
+                    Label("上传", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+            }
+        }
+    }
+
+    private var punctActionButtonsRow: some View {
+        HStack(spacing: 12) {
+            Button {
+                Task { await viewModel.startPunctuationDownload() }
+            } label: {
+                Label("下载", systemImage: "square.and.arrow.down")
+            }
+            .buttonStyle(.borderless)
+            .font(.subheadline)
+            .disabled(punctuationModelManager.isDownloading)
+            Spacer()
+            Button {
+                Log.asr("[SettingsView] 标点上传按钮点击(操作行)")
+                modelFilePickerTarget = .punctModel
+            } label: {
+                Label("上传", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderless)
+            .font(.subheadline)
+            .disabled(punctuationModelManager.isDownloading)
+        }
+    }
+}
+
+// MARK: - 模型文件选择器（UIDocumentPicker 包装，避免 SwiftUI fileImporter 在 Form 中的兼容问题）
+
+private struct ModelFilePicker: UIViewControllerRepresentable {
+    let allowedContentTypes: [UTType]
+    let onPick: (URL, @escaping () -> Void) -> Void
+    let onError: ((String) -> Void)?
+
+    init(allowedContentTypes: [UTType], onPick: @escaping (URL, @escaping () -> Void) -> Void, onError: ((String) -> Void)? = nil) {
+        self.allowedContentTypes = allowedContentTypes
+        self.onPick = onPick
+        self.onError = onError
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: allowedContentTypes, asCopy: false)
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiView: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onError: onError)
+    }
+
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL, @escaping () -> Void) -> Void
+        let onError: ((String) -> Void)?
+        init(onPick: @escaping (URL, @escaping () -> Void) -> Void, onError: ((String) -> Void)?) {
+            self.onPick = onPick
+            self.onError = onError
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else {
+                onError?("无法读取所选文件。\n\n文件可能存储在远程服务器上但未下载到本地。\n\n请先在文件 App 中将文件下载到本地存储（'我的 iPhone'），再重新导入。")
+                return
+            }
+            // 在 picker 上下文中启动安全范围；对于远程文件（SMB 等），可能无法获取权限
+            let secured = url.startAccessingSecurityScopedResource()
+            if !secured {
+                onError?("无法访问所选文件。\n\n远程服务器上的文件需要先下载到本地。\n\n请在文件 App 中将该文件复制到'我的 iPhone'，再重新导入。")
+                return
+            }
+            onPick(url) {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
 }

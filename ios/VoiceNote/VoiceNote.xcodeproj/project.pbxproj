@@ -8,7 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		4EA7D42C1B8D4C3C99D83E6C /* OfflineASRClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C22B6898F5C744A3942E396B /* OfflineASRClient.swift */; };
-		6F3545960D434E4AA85D52D5 /* ModelDownloadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22EA984B8E94E578EA8F067 /* ModelDownloadManager.swift */; };
+		6F3545960D434E4AA85D52D5 /* ASRModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22EA984B8E94E578EA8F067 /* ASRModelManager.swift */; };
+		70364673755A47B383ED9C88 /* PunctuationModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4D8DA3B955443EAA00AE4F /* PunctuationModelManager.swift */; };
+		F13E8ACE65FD424DA02045CA /* OfflinePunctuationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58186E45AB5B44DCAAB2D85A /* OfflinePunctuationClient.swift */; };
 		7524A6CCFA8240DDB03D928A /* ASRTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E16C5B0D7A37408A98E8B747 /* ASRTypes.swift */; };
 		79336FD32FE40A2200752EE2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79336FD22FE40A2200752EE2 /* Assets.xcassets */; };
 		79336FD62FE40A2200752EE2 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79336FD52FE40A2200752EE2 /* Preview Assets.xcassets */; };
@@ -27,24 +29,14 @@
 		793370BC2FE40E1800752EE2 /* VisitSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709B2FE40E1600752EE2 /* VisitSummary.swift */; };
 		793370BD2FE40E1800752EE2 /* Visit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709C2FE40E1600752EE2 /* Visit.swift */; };
 		793370BE2FE40E1800752EE2 /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709F2FE40E1700752EE2 /* PersistenceController.swift */; };
-		793370BF2FE40E1800752EE2 /* LLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370A12FE40E1700752EE2 /* LLMClient.swift */; };
 		793370C02FE40E1800752EE2 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370A32FE40E1700752EE2 /* AppContainer.swift */; };
 		793370C22FE40E1800752EE2 /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370A72FE40E1700752EE2 /* AudioCapture.swift */; };
-		793370C32FE40E1800752EE2 /* FunASRClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370A92FE40E1700752EE2 /* FunASRClient.swift */; };
 		793370C42FE40E1800752EE2 /* RecordingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AB2FE40E1700752EE2 /* RecordingManager.swift */; };
 		793370C52FE40E1800752EE2 /* VisitRepositoryImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */; };
 		793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D02FE40E9000752EE2 /* AudioPlayer.swift */; };
-		793370C92FE40E9000752EE3 /* ConnectionTester.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D12FE40E9000752EE3 /* ConnectionTester.swift */; };
 		79815C502FE4BD21005AFCD5 /* VoiceNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */; };
 		79888F1E2FE7B6DE00B2EF86 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C722FA2A71904AA69777663D /* onnxruntime.xcframework */; };
-		79888F2A2FE7E97100B2EF86 /* LLMModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79888F252FE7E97100B2EF86 /* LLMModelManager.swift */; };
-		79888F2B2FE7E97100B2EF86 /* OfflineLLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79888F262FE7E97100B2EF86 /* OfflineLLMClient.swift */; };
-		79888F2C2FE7E97100B2EF86 /* LlamaBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = 79888F272FE7E97100B2EF86 /* LlamaBridge.mm */; };
-		79888F2D2FE7E97100B2EF86 /* LLMTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79888F292FE7E97100B2EF86 /* LLMTypes.swift */; };
-		79888F2F2FE7EA1200B2EF86 /* OfflineLLMSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79888F2E2FE7EA1200B2EF86 /* OfflineLLMSettingsView.swift */; };
-		79888F322FE8082400B2EF86 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 79888F302FE807ED00B2EF86 /* llama.xcframework */; };
 		9730040B87D9451D99A16193 /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF97AAB0F9B846ACB94816D0 /* sherpa-onnx.xcframework */; };
-		B5E424D055E94E13AFC98508 /* OfflineASRSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A03F620ADC04CAAB3BDB1C0 /* OfflineASRSettingsView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -65,7 +57,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		1A03F620ADC04CAAB3BDB1C0 /* OfflineASRSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflineASRSettingsView.swift; sourceTree = "<group>"; };
 		79336FCB2FE40A2000752EE2 /* VoiceNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		79336FD22FE40A2200752EE2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79336FD52FE40A2200752EE2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
@@ -86,23 +77,15 @@
 		7933709B2FE40E1600752EE2 /* VisitSummary.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisitSummary.swift; sourceTree = "<group>"; };
 		7933709C2FE40E1600752EE2 /* Visit.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Visit.swift; sourceTree = "<group>"; };
 		7933709F2FE40E1700752EE2 /* PersistenceController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
-		793370A12FE40E1700752EE2 /* LLMClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LLMClient.swift; sourceTree = "<group>"; };
-		793370A32FE40E1700752EE2 /* AppContainer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
+			793370A32FE40E1700752EE2 /* AppContainer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
 		793370A72FE40E1700752EE2 /* AudioCapture.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
-		793370A92FE40E1700752EE2 /* FunASRClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FunASRClient.swift; sourceTree = "<group>"; };
 		793370AB2FE40E1700752EE2 /* RecordingManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordingManager.swift; sourceTree = "<group>"; };
 		793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisitRepositoryImpl.swift; sourceTree = "<group>"; };
 		793370D02FE40E9000752EE2 /* AudioPlayer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
-		793370D12FE40E9000752EE3 /* ConnectionTester.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ConnectionTester.swift; sourceTree = "<group>"; };
 		79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VoiceNote.swift; sourceTree = "<group>"; };
-		79888F252FE7E97100B2EF86 /* LLMModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LLMModelManager.swift; sourceTree = "<group>"; };
-		79888F262FE7E97100B2EF86 /* OfflineLLMClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflineLLMClient.swift; sourceTree = "<group>"; };
-		79888F272FE7E97100B2EF86 /* LlamaBridge.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = LlamaBridge.mm; sourceTree = "<group>"; };
-		79888F282FE7E97100B2EF86 /* LlamaBridge.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LlamaBridge.h; sourceTree = "<group>"; };
-		79888F292FE7E97100B2EF86 /* LLMTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LLMTypes.swift; sourceTree = "<group>"; };
-		79888F2E2FE7EA1200B2EF86 /* OfflineLLMSettingsView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflineLLMSettingsView.swift; sourceTree = "<group>"; };
-		79888F302FE807ED00B2EF86 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = ../../../llama.cpp/build/llama.xcframework; sourceTree = "<group>"; };
-		B22EA984B8E94E578EA8F067 /* ModelDownloadManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelDownloadManager.swift; sourceTree = "<group>"; };
+		B22EA984B8E94E578EA8F067 /* ASRModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ASRModelManager.swift; sourceTree = "<group>"; };
+		0C4D8DA3B955443EAA00AE4F /* PunctuationModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PunctuationModelManager.swift; sourceTree = "<group>"; };
+		58186E45AB5B44DCAAB2D85A /* OfflinePunctuationClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflinePunctuationClient.swift; sourceTree = "<group>"; };
 		C22B6898F5C744A3942E396B /* OfflineASRClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflineASRClient.swift; sourceTree = "<group>"; };
 		C5BFA3FA83F94117A2CA12EB /* VoiceNote-Bridging-Header.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "VoiceNote-Bridging-Header.h"; sourceTree = "<group>"; };
 		C722FA2A71904AA69777663D /* onnxruntime.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = onnxruntime.xcframework; path = Libraries/onnxruntime.xcframework; sourceTree = "<group>"; };
@@ -117,7 +100,6 @@
 			files = (
 				9730040B87D9451D99A16193 /* sherpa-onnx.xcframework in Frameworks */,
 				79888F1E2FE7B6DE00B2EF86 /* onnxruntime.xcframework in Frameworks */,
-				79888F322FE8082400B2EF86 /* llama.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -141,7 +123,6 @@
 		79336FC22FE40A2000752EE2 = {
 			isa = PBXGroup;
 			children = (
-				79888F302FE807ED00B2EF86 /* llama.xcframework */,
 				79888F202FE7E69F00B2EF86 /* Packages */,
 				79336FCD2FE40A2000752EE2 /* VoiceNote */,
 				79336FCC2FE40A2000752EE2 /* Products */,
@@ -200,10 +181,8 @@
 		793370852FE40E1600752EE2 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				79888F2E2FE7EA1200B2EF86 /* OfflineLLMSettingsView.swift */,
 				793370862FE40E1600752EE2 /* SettingsView.swift */,
 				793370872FE40E1600752EE2 /* SettingsViewModel.swift */,
-				1A03F620ADC04CAAB3BDB1C0 /* OfflineASRSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -282,7 +261,6 @@
 			isa = PBXGroup;
 			children = (
 				7933709E2FE40E1700752EE2 /* Database */,
-				793370A02FE40E1700752EE2 /* LLM */,
 				793370A22FE40E1700752EE2 /* DI */,
 				793370A62FE40E1700752EE2 /* Audio */,
 				793370A82FE40E1700752EE2 /* ASR */,
@@ -297,19 +275,6 @@
 				7933709F2FE40E1700752EE2 /* PersistenceController.swift */,
 			);
 			path = Database;
-			sourceTree = "<group>";
-		};
-		793370A02FE40E1700752EE2 /* LLM */ = {
-			isa = PBXGroup;
-			children = (
-				79888F282FE7E97100B2EF86 /* LlamaBridge.h */,
-				79888F272FE7E97100B2EF86 /* LlamaBridge.mm */,
-				79888F252FE7E97100B2EF86 /* LLMModelManager.swift */,
-				79888F292FE7E97100B2EF86 /* LLMTypes.swift */,
-				79888F262FE7E97100B2EF86 /* OfflineLLMClient.swift */,
-				793370A12FE40E1700752EE2 /* LLMClient.swift */,
-			);
-			path = LLM;
 			sourceTree = "<group>";
 		};
 		793370A22FE40E1700752EE2 /* DI */ = {
@@ -332,10 +297,11 @@
 		793370A82FE40E1700752EE2 /* ASR */ = {
 			isa = PBXGroup;
 			children = (
-				793370A92FE40E1700752EE2 /* FunASRClient.swift */,
 				E16C5B0D7A37408A98E8B747 /* ASRTypes.swift */,
-				B22EA984B8E94E578EA8F067 /* ModelDownloadManager.swift */,
+				B22EA984B8E94E578EA8F067 /* ASRModelManager.swift */,
 				C22B6898F5C744A3942E396B /* OfflineASRClient.swift */,
+				58186E45AB5B44DCAAB2D85A /* OfflinePunctuationClient.swift */,
+				0C4D8DA3B955443EAA00AE4F /* PunctuationModelManager.swift */,
 			);
 			path = ASR;
 			sourceTree = "<group>";
@@ -344,7 +310,6 @@
 			isa = PBXGroup;
 			children = (
 				793370AB2FE40E1700752EE2 /* RecordingManager.swift */,
-				793370D12FE40E9000752EE3 /* ConnectionTester.swift */,
 			);
 			path = Service;
 			sourceTree = "<group>";
@@ -520,26 +485,21 @@
 			files = (
 				79815C502FE4BD21005AFCD5 /* VoiceNote.swift in Sources */,
 				7524A6CCFA8240DDB03D928A /* ASRTypes.swift in Sources */,
-				79888F2C2FE7E97100B2EF86 /* LlamaBridge.mm in Sources */,
-				79888F2D2FE7E97100B2EF86 /* LLMTypes.swift in Sources */,
-				6F3545960D434E4AA85D52D5 /* ModelDownloadManager.swift in Sources */,
+				6F3545960D434E4AA85D52D5 /* ASRModelManager.swift in Sources */,
 				4EA7D42C1B8D4C3C99D83E6C /* OfflineASRClient.swift in Sources */,
-				B5E424D055E94E13AFC98508 /* OfflineASRSettingsView.swift in Sources */,
+				F13E8ACE65FD424DA02045CA /* OfflinePunctuationClient.swift in Sources */,
+				70364673755A47B383ED9C88 /* PunctuationModelManager.swift in Sources */,
 				793370AF2FE40E1800752EE2 /* SettingsView.swift in Sources */,
 				793370C52FE40E1800752EE2 /* VisitRepositoryImpl.swift in Sources */,
 				793370B32FE40E1800752EE2 /* RecordingView.swift in Sources */,
 				793370B22FE40E1800752EE2 /* HomeView.swift in Sources */,
 				793370B72FE40E1800752EE2 /* AppTheme.swift in Sources */,
 				793370B52FE40E1800752EE2 /* DetailView.swift in Sources */,
-				79888F2F2FE7EA1200B2EF86 /* OfflineLLMSettingsView.swift in Sources */,
 				793370B92FE40E1800752EE2 /* HistoryView.swift in Sources */,
 				793370B82FE40E1800752EE2 /* HistoryViewModel.swift in Sources */,
 				793370B12FE40E1800752EE2 /* HomeViewModel.swift in Sources */,
-				79888F2A2FE7E97100B2EF86 /* LLMModelManager.swift in Sources */,
-				793370C32FE40E1800752EE2 /* FunASRClient.swift in Sources */,
 				793370BD2FE40E1800752EE2 /* Visit.swift in Sources */,
 				793370B42FE40E1800752EE2 /* RecordingViewModel.swift in Sources */,
-				79888F2B2FE7E97100B2EF86 /* OfflineLLMClient.swift in Sources */,
 				793370C22FE40E1800752EE2 /* AudioCapture.swift in Sources */,
 				793370B02FE40E1800752EE2 /* SettingsViewModel.swift in Sources */,
 				793370C02FE40E1800752EE2 /* AppContainer.swift in Sources */,
@@ -549,8 +509,6 @@
 				793370B62FE40E1800752EE2 /* DetailViewModel.swift in Sources */,
 				793370BA2FE40E1800752EE2 /* VisitRepository.swift in Sources */,
 				793370BE2FE40E1800752EE2 /* PersistenceController.swift in Sources */,
-				793370BF2FE40E1800752EE2 /* LLMClient.swift in Sources */,
-				793370C92FE40E9000752EE3 /* ConnectionTester.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -716,8 +674,6 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/Libraries/sherpa-onnx.xcframework/Headers",
-					"$(SRCROOT)/../../../llama.cpp/include",
-					"$(SRCROOT)/../../../llama.cpp/ggml/include",
 				);
 				INFOPLIST_FILE = VoiceNote/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "语音笔记";
@@ -736,10 +692,6 @@
 					"$(inherited)",
 					"-lc++",
 					"-lbz2",
-					"-force_load",
-					"$(SRCROOT)/../../../llama.cpp/build/llama.xcframework/ios-arm64/libggml-cpu.a",
-					"-force_load",
-					"$(SRCROOT)/../../../llama.cpp/build/llama.xcframework/ios-arm64/libggml-base.a",
 					"-framework",
 					Accelerate,
 					"-weak_framework",
@@ -777,8 +729,6 @@
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/Libraries/sherpa-onnx.xcframework/Headers",
-					"$(SRCROOT)/../../../llama.cpp/include",
-					"$(SRCROOT)/../../../llama.cpp/ggml/include",
 				);
 				INFOPLIST_FILE = VoiceNote/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "语音笔记";
@@ -797,10 +747,6 @@
 					"$(inherited)",
 					"-lc++",
 					"-lbz2",
-					"-force_load",
-					"$(SRCROOT)/../../../llama.cpp/build/llama.xcframework/ios-arm64/libggml-cpu.a",
-					"-force_load",
-					"$(SRCROOT)/../../../llama.cpp/build/llama.xcframework/ios-arm64/libggml-base.a",
 					"-framework",
 					Accelerate,
 					"-weak_framework",

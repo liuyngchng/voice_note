@@ -179,15 +179,15 @@ private struct RecordRow: View {
     }
 
     @ViewBuilder var statusBadge: some View {
-        if record.summary != nil {
-            Text("已总结")
+        if record.transcriptStatus == .completed {
+            Text("已转写")
                 .font(.caption2)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
                 .background(Color.green.opacity(0.15))
                 .foregroundColor(.green)
                 .cornerRadius(4)
-        } else if record.transcriptStatus == .processing || record.summaryStatus == .processing {
+        } else if record.transcriptStatus == .processing {
             Text("处理中")
                 .font(.caption2)
                 .padding(.horizontal, 8)

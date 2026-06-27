@@ -1,10 +1,11 @@
 import Foundation
 import os
 
-/// 离线模型下载管理器
-/// 从 GitHub Releases 下载 SenseVoice ONNX 模型（tar.bz2 归档），解压提取所需文件
+/// 离线 ASR 模型管理器
+/// 从 GitHub Releases 下载 / 本地导入 SenseVoice ONNX 模型（tar.bz2 / tar 归档），解压提取所需文件
+/// 对齐 Android: ASRModelManager.kt
 @MainActor
-final class ModelDownloadManager: ObservableObject {
+final class ASRModelManager: ObservableObject {
     @Published var downloadProgress: Double = 0
     @Published var downloadState: DownloadState = .idle
     /// 当前操作类型：下载 or 导入（UI 据此显示不同文案）
@@ -157,7 +158,8 @@ final class ModelDownloadManager: ObservableObject {
         try await processArchive(at: archiveURL, quality: quality)
     }
 
-    /// 从本地文件导入模型（用户提前下载好的 tar.bz2）
+    /// 从本地文件导入模型（用户提前下载好的 .tar.bz2 或 .tar）
+    /// 安全范围访问由调用方（ModelFilePicker）管理，调用方会在 import 完成后释放
     func importModel(from sourceURL: URL, quality: ModelQuality) async throws {
         guard !isDownloading else {
             Log.asr("操作已在進行中，忽略重复请求")
@@ -180,22 +182,43 @@ final class ModelDownloadManager: ObservableObject {
 
         let tempDir = fm.temporaryDirectory.appendingPathComponent("model-import")
         try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let archiveURL = tempDir.appendingPathComponent("uploaded.tar.bz2")
+
+        // 根据源文件扩展名决定临时文件名
+        let srcExt = sourceURL.pathExtension.lowercased()
+        let isTar = (srcExt == "tar")
+        let archiveFilename = isTar ? "uploaded.tar" : "uploaded.tar.bz2"
+        let archiveURL = tempDir.appendingPathComponent(archiveFilename)
 
         defer {
             try? fm.removeItem(at: tempDir)
             Log.asrDebug("临时文件已清理")
         }
 
-        // 复制用户选择的文件到临时目录（文件 App 提供的 URL 可能有时效性）
-        Log.asr("开始导入文件: \(sourceURL.lastPathComponent)")
+        // 读取用户选择的文件到临时目录
+        // 在后台线程执行文件 I/O（大文件可能耗时数十秒），避免阻塞 UI
+        // 分两级尝试：先用 Data(contentsOf:)（通过文件协调器触发下载），
+        // 失败则用 FileHandle 流式读取作为兜底
+        Log.asr("开始导入文件: \(sourceURL.lastPathComponent) (类型: \(isTar ? "tar" : "bz2"))")
         downloadState = .downloading(progress: 0)
         do {
-            try? fm.removeItem(at: archiveURL)
-            try fm.copyItem(at: sourceURL, to: archiveURL)
+            // 在后台线程执行所有阻塞 I/O，让主线程可以刷新进度 UI
+            try await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                try? fm.removeItem(at: archiveURL)
+                let data: Data
+                do {
+                    data = try Data(contentsOf: sourceURL, options: [])
+                } catch {
+                    Log.asr("Data(contentsOf:) 失败，尝试 FileHandle: \(error.localizedDescription)")
+                    let handle = try FileHandle(forReadingFrom: sourceURL)
+                    defer { try? handle.close() }
+                    data = handle.readDataToEndOfFile()
+                }
+                try data.write(to: archiveURL)
+            }.value
         } catch {
             isDownloading = false
-            let msg = "文件复制失败: \(error.localizedDescription)"
+            let msg = "文件读取失败: \(error.localizedDescription)"
             Log.asr(msg)
             downloadState = .failed(msg)
             throw DownloadError.fileImportFailed(error.localizedDescription)
@@ -205,28 +228,36 @@ final class ModelDownloadManager: ObservableObject {
         Log.asr("导入文件就绪: \(sourceURL.lastPathComponent) (\(fileSize / 1_048_576)MB)")
 
         // 共用：解压 → 提取 → 验证
-        try await processArchive(at: archiveURL, quality: quality)
+        try await processArchive(at: archiveURL, quality: quality, isTar: isTar)
     }
 
     // MARK: - 共用处理流程（解压 → 提取 → 验证）
 
-    private func processArchive(at archiveURL: URL, quality: ModelQuality) async throws {
+    private func processArchive(at archiveURL: URL, quality: ModelQuality, isTar: Bool = false) async throws {
         let fm = FileManager.default
-        let tarURL = archiveURL.deletingPathExtension().appendingPathExtension("tar")
 
-        // 解压 bzip2 → tar
-        Log.asr("开始解压 bzip2...")
-        downloadState = .extracting(progress: 0)
-        do {
-            try await decompressBzip2(input: archiveURL, output: tarURL)
-        } catch {
-            isDownloading = false
-            let msg = "解压失败: \(error.localizedDescription)"
-            Log.asr(msg)
-            downloadState = .failed(msg)
-            throw DownloadError.extractionFailed(error.localizedDescription)
+        let tarURL: URL
+        if isTar {
+            // 已经是 tar 文件，无需 bzip2 解压
+            Log.asr("文件已是 tar 格式，跳过 bzip2 解压")
+            tarURL = archiveURL
+        } else {
+            // bzip2 解压 → tar
+            let decompressedURL = archiveURL.deletingPathExtension().appendingPathExtension("tar")
+            Log.asr("开始解压 bzip2...")
+            downloadState = .extracting(progress: 0)
+            do {
+                try await decompressBzip2(input: archiveURL, output: decompressedURL)
+            } catch {
+                isDownloading = false
+                let msg = "解压失败: \(error.localizedDescription)"
+                Log.asr(msg)
+                downloadState = .failed(msg)
+                throw DownloadError.extractionFailed(error.localizedDescription)
+            }
+            Log.asr("bzip2 解压完成")
+            tarURL = decompressedURL
         }
-        Log.asr("bzip2 解压完成")
 
         // 从 tar 中提取 model 文件 + tokens.txt
         Log.asr("开始从 tar 提取模型文件...")

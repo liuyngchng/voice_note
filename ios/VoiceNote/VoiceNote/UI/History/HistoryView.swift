@@ -223,7 +223,7 @@ private struct RecordRow: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                if record.summary != nil {
+                if record.transcriptStatus == .completed {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                         .font(.caption)

@@ -34,11 +34,6 @@ struct DetailView: View {
         }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button("返回", action: onBack)
-            }
-        }
         .onAppear { viewModel.loadRecord(id: visitId) }
         .onDisappear { viewModel.audioPlayer.stop() }
         .sheet(item: $activeSheet) { sheet in
@@ -59,7 +54,6 @@ struct DetailView: View {
             Picker("", selection: $selectedTab) {
                 Text("音频").tag(0)
                 Text("转写").tag(1)
-                Text("总结").tag(2)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -69,7 +63,6 @@ struct DetailView: View {
             switch selectedTab {
             case 0: basicInfoTab(visit)
             case 1: transcriptTab(visit)
-            case 2: summaryTab(visit)
             default: EmptyView()
             }
         }
@@ -157,7 +150,7 @@ struct DetailView: View {
                     .frame(maxWidth: .infinity)
                 }
 
-                // 手动重试入口（转写完成或失败后均可手动重试）
+                // 手动重试入口
                 if visit.transcriptStatus == .completed || visit.transcriptStatus == .unavailable {
                     Divider().padding(.horizontal)
                     HStack(spacing: 24) {
@@ -191,115 +184,6 @@ struct DetailView: View {
                             }
                         }
                     }
-                    .padding(.bottom, 8)
-                }
-            }
-            .padding()
-        }
-    }
-
-    // MARK: - 总结
-
-    private func summaryTab(_ visit: VoiceRecord) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let summary = visit.summary {
-                    let isEmpty = summary.topics.isEmpty
-                        && summary.conclusions.isEmpty
-                        && summary.todos.isEmpty
-                        && summary.nextSteps.isEmpty
-
-                    if isEmpty {
-                        Text("未能提取到有效总结内容\n转写文本可能过短或信息不足")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                    } else {
-                        VStack(alignment: .leading, spacing: 16) {
-                            if !summary.topics.isEmpty {
-                                summarySection("议题", summary.topics, color: .blue)
-                            }
-                            if !summary.conclusions.isEmpty {
-                                summarySection("结论", summary.conclusions, color: .green)
-                            }
-                            if !summary.todos.isEmpty {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Label("待办", systemImage: "list.bullet")
-                                        .font(.subheadline)
-                                        .foregroundColor(.orange)
-                                    ForEach(summary.todos) { todo in
-                                        HStack {
-                                            Text("• \(todo.task)")
-                                            if !todo.owner.isEmpty {
-                                                Text("(\(todo.owner))")
-                                                    .foregroundColor(.secondary)
-                                                    .font(.caption)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if !summary.nextSteps.isEmpty {
-                                summarySection("后续", summary.nextSteps, color: .purple)
-                            }
-                        }
-                        .padding()
-                        .background(Color(.systemBackground))
-                        .cornerRadius(10)
-                    }
-
-                    // 生成时间
-                    if let generatedAt = visit.summaryGeneratedAt {
-                        Text("生成于 \(formattedDateTime(generatedAt))")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                    }
-                } else if visit.summaryStatus == .processing {
-                    HStack {
-                        ProgressView()
-                        Text("正在生成总结...")
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                } else if visit.summaryStatus == .unavailable {
-                    Text(viewModel.summaryError ?? "总结生成失败")
-                        .foregroundColor(.red)
-                        .font(.caption)
-                        .multilineTextAlignment(.center)
-                        .padding()
-                        .frame(maxWidth: .infinity)
-                } else if visit.summaryStatus == .pending {
-                    HStack {
-                        ProgressView().scaleEffect(0.8)
-                        Text("等待转写完成...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity)
-                }
-
-                // 手动重试入口（总结完成或失败后均可手动重试）
-                if visit.summaryStatus == .completed || visit.summaryStatus == .unavailable {
-                    Divider().padding(.horizontal)
-                    Button {
-                        viewModel.retrySummary()
-                    } label: {
-                        HStack {
-                            if viewModel.isRetryingSummary {
-                                ProgressView().scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                            }
-                            Text(viewModel.isRetryingSummary ? "重试中..." : "重新总结")
-                                .font(.subheadline)
-                        }
-                    }
-                    .disabled(viewModel.isRetryingSummary)
                     .padding(.bottom, 8)
                 }
             }
@@ -363,7 +247,6 @@ struct DetailView: View {
             }
             .padding(.vertical, 4)
 
-            // 导出音频
             if let path = viewModel.visit?.audioFilePath, FileManager.default.fileExists(atPath: path) {
                 Divider()
                 Button {
@@ -393,45 +276,11 @@ struct DetailView: View {
         }
     }
 
-    private func summarySection(_ title: String, _ items: [String], color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 6) {
-                Circle()
-                    .fill(color)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 5)
-                Text(title)
-                    .font(.subheadline)
-                    .bold()
-                    .foregroundColor(.primary)
-            }
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                HStack(alignment: .top, spacing: 6) {
-                    Text("•")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .frame(width: 14, alignment: .leading)
-                    Text(item)
-                        .font(.subheadline)
-                        .foregroundColor(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-    }
-
     private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-
-    private func formattedDateTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "MM月dd日 HH:mm"
         return formatter.string(from: date)
     }
 
@@ -443,7 +292,7 @@ struct DetailView: View {
     }
 }
 
-// MARK: - 分享面板 (UIActivityViewController, iOS 14 兼容)
+// MARK: - 分享面板
 
 private struct ActivitySheet: UIViewControllerRepresentable {
     let activityItems: [Any]

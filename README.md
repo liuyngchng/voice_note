@@ -1,19 +1,16 @@
 # 语音笔记
 
-语音笔记是一款 Android 应用，支持在线/离线语音转写（ASR）与 AI 总结（LLM）。录制或导入音频后，自动生成结构化录音记录：议题、结论、待办事项和跟进计划。
+语音笔记是一款 Android / iOS 双平台应用，支持离线语音转写（ASR）。录制或导入音频后，自动将语音转为文字。
 
 ## 功能
 
-- **录音与导入** — 实时录音（前台服务 + WakeLock 保活），支持从本地导入音频文件
-- **在线语音转写** — WebSocket 实时流式连接私有化 FunASR 服务
+- **录音与导入** — 实时录音（前台服务 + WakeLock 保活 / 后台音频模式），支持从本地导入音频文件
 - **离线语音转写** — 本地 Sherpa-ONNX + SenseVoice 模型（INT8 / FP32），无需网络
-- **在线 AI 总结** — OpenAI 兼容 API（支持 DeepSeek、GPT 等），长文本自动分段合并
-- **离线 AI 总结** — llama.cpp + Qwen2.5 GGUF 本地推理（1.5B / 0.5B），无需网络
 - **音频回放** — 播放/暂停、快进快退 15s、进度拖动、分享导出
 - **历史记录** — 按标题/备注/内容搜索，侧滑删除，批量清空
-- **连接测试** — ASR WebSocket / LLM API 连通性一键检测
+- **标点符号模型** — 可选下载，给转写文本自动添加标点
 
-## 技术栈
+## Android 版技术栈
 
 | 项 | 选型 |
 |---|---|
@@ -30,14 +27,61 @@
 | 离线 LLM | llama.cpp JNI + Qwen2.5 GGUF (0.5B/1.5B) |
 | 原生构建 | CMake + NDK (arm64-v8a) |
 
+## iOS 版技术栈
+
+| 项 | 选型 |
+|---|---|
+| 语言 | Swift 5.0 |
+| UI | SwiftUI (iOS 14 兼容) |
+| 架构 | MVVM + 手动 DI |
+| 本地存储 | Core Data + UserDefaults |
+| 录音 | AVAudioEngine 16kHz/16bit/PCM |
+| 离线 ASR | Sherpa-ONNX XCFramework + SenseVoice (INT8/FP32 ONNX) |
+| VAD | Silero VAD ONNX 模型（内置打包） |
+| 标点模型 | CT-Transformer ONNX（可选下载） |
+
 ## 快速开始
+
+### Android
 
 1. 用 Android Studio 打开项目目录
 2. 等待 Gradle Sync 完成
 3. 连接 Android 设备或启动模拟器（API ≥ 26）
 4. 运行 App
 
-## 配置
+### iOS
+
+1. 用 Xcode 打开 `ios/VoiceNote/VoiceNote.xcodeproj`
+2. 选择目标设备（iOS 14.0+）
+3. 运行 App
+4. 首次启动会提示下载/导入 SenseVoice 语音识别模型
+
+## 配置 — iOS
+
+首次使用在 App 内 **设置** 页面配置：
+
+| 配置项 | 说明 | 默认值 |
+|---|---|---|
+| ASR 模型质量 | INT8 (~170MB) / FP32 (~860MB) | INT8 |
+| 标点符号模型 | 可选，用于给转写文本自动添加标点 | 未安装 |
+
+### 模型获取
+
+**ASR 模型**从 GitHub Releases 自动下载 `.tar.bz2` 归档并解压，也支持从本地文件导入。
+
+**标点模型**从 GitHub Releases 下载，也支持从本地文件导入。
+
+| 模型 | 大小 | 下载地址 |
+|---|---|---|
+| ASR INT8 | ~170 MB | `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2` |
+| ASR FP32 | ~860 MB | `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09.tar.bz2` |
+| 标点模型 | ~1 MB | `https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar.bz2` |
+
+> 低内存设备（< 4GB RAM）不建议使用 FP32 模型。VAD 模型已内置在安装包中，无需额外下载。
+>
+> 标点模型为单个 tar.bz2 归档，App 内点击「下载」可自动下载并解压提取 ONNX 文件。
+
+## 配置 — Android
 
 首次使用可在 App 内 **设置** 页面配置：
 
@@ -53,30 +97,25 @@
 | 离线 LLM 模型 | Qwen2.5-1.5B / Qwen2.5-0.5B / 自定义 | Qwen2.5-0.5B |
 | 自定义 Prompt | 总结 Prompt 模板（可选） | 留空使用默认 |
 
-### 离线模型下载
-
-**ASR 模型**从 GitHub Releases 自动下载 `.tar.bz2` 归档并解压。
-
-**LLM 模型**（GGUF 格式）从 ModelScope 自动下载，也支持从本地文件导入。
+Android 离线模型下载详情见下方模型列表。
 
 | 模型 | 文件 | 大小 | 下载地址 |
 |---|---|---|---|
-| ASR INT8 | `model.int8.onnx` + `tokens.txt` | ~170 MB | [`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2`](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2) |
-| ASR FP32 | `model.onnx` + `tokens.txt` | ~860 MB | [`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09.tar.bz2`](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09.tar.bz2) |
+| ASR INT8 | `model.int8.onnx` + `tokens.txt` | ~170 MB | [GitHub Releases](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09.tar.bz2) |
+| ASR FP32 | `model.onnx` + `tokens.txt` | ~860 MB | [GitHub Releases](https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09.tar.bz2) |
 | LLM Qwen2.5-0.5B | `qwen2.5-0.5b-instruct-q4_k_m.gguf` | ~352 MB | [ModelScope](https://modelscope.cn/models/qwen/Qwen2.5-0.5B-Instruct-gguf/resolve/master/qwen2.5-0.5b-instruct-q4_k_m.gguf) |
 | LLM Qwen2.5-1.5B | `qwen2.5-1.5b-instruct-q4_k_m.gguf` | ~986 MB | [ModelScope](https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf) |
 
-> 低内存设备（< 3GB RAM）：离线 LLM 自动切换 CPU-only 推理。
-> 收到系统内存警告时，模型会在当前推理完成后自动释放。
->
-> 开发者也可用脚本预先下载模型，再传输到手机用「上传」按钮导入：
-> ```bash
-> bash scripts/download_models.sh          # 下载两种 ASR 精度
-> bash scripts/download_models.sh int8     # 仅 INT8
-> bash scripts/download_models.sh fp32     # 仅 FP32
-> ```
+## iOS 使用流程
 
-## 使用流程
+1. **首页** — 查看今日录音统计、最近录音列表
+2. **新建录音**（点击 ＋）— 直接开始录音，无需填写表单；也可点击导入按钮从本地选取音频文件
+3. **录音中** — 界面顶部变红，显示脉冲红点 + 计时器，下方实时滚动显示离线语音转写文本
+4. **结束录音** — 点击红色按钮，自动保存音频和转写结果
+5. **查看详情** — 两个 Tab 页切换：音频回放 / 完整转写，支持重新转写、导出分享
+6. **历史记录** — 按标题/备注搜索，左滑删除单条，右上角清空全部
+
+## Android 使用流程
 
 1. **首页** — 查看今日录音统计、最近录音列表
 2. **新建录音**（点击 +）— 填写标题、备注、说话人（均可选），点击「开始录音」；或点击「导入音频」从本地选取音频文件
@@ -85,7 +124,45 @@
 5. **查看详情** — 三个 Tab 页切换：音频回放 / 完整转写 / AI 总结，支持重新转写、重新总结、导出分享
 6. **历史记录** — 按标题/备注/内容搜索，侧滑删除单条，右上角清空全部
 
-## 项目结构
+## iOS 项目结构
+
+```
+ios/VoiceNote/VoiceNote/
+├── VoiceNote.swift                     # App 入口 + 启动模型加载
+├── Core/
+│   ├── ASR/
+│   │   ├── ASRTypes.swift              # 模型质量枚举
+│   │   ├── OfflineASRClient.swift      # Sherpa-ONNX C API 客户端
+│   │   ├── ModelDownloadManager.swift  # ASR 模型下载/导入/删除
+│   │   └── PunctuationModelManager.swift # 标点模型下载/导入/删除
+│   ├── Audio/
+│   │   ├── AudioCapture.swift          # AVAudioEngine PCM 采集
+│   │   └── AudioPlayer.swift           # 录音回放
+│   ├── Service/
+│   │   └── RecordingManager.swift      # 录音 + ASR 编排
+│   ├── Database/
+│   │   └── PersistenceController.swift # Core Data
+│   └── DI/
+│       └── AppContainer.swift          # 手动依赖注入
+├── Domain/
+│   ├── Model/
+│   │   ├── Visit.swift                 # VoiceRecord 领域模型
+│   │   └── VisitSummary.swift          # 总结数据模型
+│   └── Repository/
+│       └── VisitRepository.swift       # 数据仓库接口
+├── Data/
+│   └── Repository/
+│       └── VisitRepositoryImpl.swift   # Core Data 仓库实现
+└── UI/
+    ├── Home/                           # 首页仪表盘
+    ├── Recording/                      # 录音页（进入即开始）
+    ├── Detail/                         # 录音详情（音频 / 转写两个 Tab）
+    ├── History/                        # 历史记录
+    ├── Settings/                       # 设置（ASR 模型 + 标点模型）
+    └── Theme/                          # 主题常量
+```
+
+## Android 项目结构
 
 ```
 app/src/main/java/com/voicenote/app/
@@ -128,51 +205,32 @@ app/src/main/java/com/voicenote/app/
     └── theme/                         # Material 3 主题
 ```
 
-原生 JNI 层：
-
-```
-app/src/main/cpp/
-├── CMakeLists.txt
-├── llama_jni.c              # llama.cpp 推理 JNI（LLM 离线）
-├── sherpa_onnx_jni.c        # sherpa-onnx 识别 JNI（ASR 离线）
-├── include/                 # 第三方 C 头文件
-└── llama.cpp/               # llama.cpp 源码
-```
-
 ## 权限
 
-| 权限 | 用途 |
-|---|---|
-| RECORD_AUDIO | 录音 |
-| INTERNET | 网络通信（ASR + LLM） |
-| FOREGROUND_SERVICE | 前台服务运行 |
-| FOREGROUND_SERVICE_MICROPHONE | 前台录音（Android 14+） |
-| POST_NOTIFICATIONS | 前台服务通知 |
-| WAKE_LOCK | 防止 CPU 休眠中断录音 |
+| 权限 | 用途 | 平台 |
+|---|---|---|
+| RECORD_AUDIO / 麦克风 | 录音 | Android / iOS |
+| INTERNET | 网络通信（Android 在线 ASR/LLM） | Android |
+| FOREGROUND_SERVICE | 前台服务运行 | Android |
+| WAKE_LOCK | 防止 CPU 休眠中断录音 | Android |
 
 ## 数据模型
 
 ```
 VoiceRecord:
   id, title, memo, description, speakers,
-  sourceType (RECORDING / IMPORTED),
   startTime, endTime, audioFilePath, transcriptFilePath,
   transcriptText, transcriptStatus (PENDING / PROCESSING / COMPLETED / UNAVAILABLE),
-  summary (VoiceRecordSummary), summaryStatus (同上),
-  createdAt
+  summary (RecordSummary), summaryStatus, summaryGeneratedAt
 
-VoiceRecordSummary:
+RecordSummary:
   topics, conclusions, todos (TodoItem), nextSteps
 
 TodoItem:
   task, owner, deadline
 ```
 
-## iOS 版
-
-项目同时提供 iOS 原生版本（SwiftUI + Core Data），功能对等，见 [ios/README.md](ios/README.md)。
-
 ## 最低要求
 
-- Android 8.0 (API 26)
-- 离线 ASR/LLM 需 arm64-v8a 设备
+- **Android** 8.0 (API 26)，离线 ASR/LLM 需 arm64-v8a 设备
+- **iOS** 14.0，离线 ASR 需 iOS 15.1+

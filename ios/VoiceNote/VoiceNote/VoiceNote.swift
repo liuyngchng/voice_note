@@ -1,23 +1,58 @@
 import SwiftUI
 import AVFoundation
-import Network
 import os
 
 /// App 入口
-/// 对齐 Android: SmartBadgeApp.kt + MainActivity.kt
 @main
 struct SmartBadgeApp: App {
     @StateObject private var container = AppContainer()
+    @StateObject private var appState = AppState()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(container)
+                .environmentObject(appState)
         }
     }
 }
 
-// MARK: - 权限请求 (麦克风 + 局域网)
+// MARK: - App 全局状态
+
+@MainActor
+final class AppState: ObservableObject {
+    /// 离线 ASR 模型是否已加载
+    @Published var isModelLoaded = false
+    /// 模型加载错误
+    @Published var modelLoadError: String?
+    /// 是否需要引导用户导入模型
+    @Published var needsModelGuidance = false
+
+    private let offlineASRClient = OfflineASRClient()
+
+    /// 在 app 启动时调用，加载离线语音模型
+    func loadModelOnStartup() {
+        let quality = ASRModelManager.savedQuality()
+
+        guard ASRModelManager.isModelDownloaded(quality) else {
+            appLog("app", "[App] 离线语音模型未下载，需要引导用户导入")
+            needsModelGuidance = true
+            return
+        }
+
+        do {
+            try offlineASRClient.ensureRecognizer(quality: quality)
+            isModelLoaded = true
+            needsModelGuidance = false
+            appLog("app", "[App] 离线语音模型加载完成: \(quality.rawValue)")
+        } catch {
+            modelLoadError = error.localizedDescription
+            appLog("app", "[App] 离线语音模型加载失败: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - 权限请求
 
 private let permLogger = Logger(subsystem: "com.voicenote", category: "app")
 
@@ -43,39 +78,6 @@ private struct PermissionModifier: ViewModifier {
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 appLog("app","\(granted ? "[Perm] 麦克风权限已授予" : "[Perm] 麦克风权限被拒绝")")
             }
-
-            // 2. 局域网权限 — iOS 14+ 自动弹窗
-            //    用 NWConnection 触达本地 IP 触发系统对话框
-            let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
-            if let url = URL(string: asrURL),
-               let host = url.host,
-               let port = url.port {
-                appLog("app","[Perm] 触发局域网权限: \(host):\(port)")
-                let conn = NWConnection(
-                    host: NWEndpoint.Host(host),
-                    port: NWEndpoint.Port(integerLiteral: UInt16(port)),
-                    using: .tcp
-                )
-                conn.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        appLog("app","[Perm] 局域网连接就绪")
-                        conn.cancel()
-                    case .failed(let error):
-                        appLog("app","[Perm] 局域网连接失败: \(error.localizedDescription)")
-                        conn.cancel()
-                    default:
-                        break
-                    }
-                }
-                conn.start(queue: .global())
-                // 3 秒后取消，避免长时间挂起
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
-                    conn.cancel()
-                }
-            } else {
-                appLog("app","[Perm] 局域网权限: ASR URL 解析失败，跳过")
-            }
         }
     }
 }
@@ -84,13 +86,14 @@ private struct PermissionModifier: ViewModifier {
 
 private struct RootView: View {
     @EnvironmentObject var container: AppContainer
+    @EnvironmentObject var appState: AppState
 
-    // 导航状态 (iOS 14 兼容: 使用 NavigationLink(isActive:) 替代 NavigationPath)
     @State private var showRecording = false
     @State private var showHistory = false
     @State private var showSettings = false
     @State private var showDetail = false
     @State private var detailId: UUID?
+    @State private var showModelGuide = false
 
     var body: some View {
         NavigationView {
@@ -102,6 +105,27 @@ private struct RootView: View {
         }
         .navigationViewStyle(.stack)
         .modifier(PermissionModifier())
+        .onAppear {
+            appState.loadModelOnStartup()
+        }
+        .alert(isPresented: $showModelGuide) {
+            Alert(
+                title: Text("需要导入语音识别模型"),
+                message: Text("检测到离线语音模型尚未下载或导入。\n\n请前往「设置」页面下载或导入 SenseVoice 模型，否则无法进行语音识别。"),
+                primaryButton: .default(Text("前往设置")) {
+                    // 延迟导航，等待 alert 关闭动画完成，避免与 NavigationLink push 冲突
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showSettings = true
+                    }
+                },
+                secondaryButton: .cancel(Text("稍后"))
+            )
+        }
+        .onChange(of: appState.needsModelGuidance) { needs in
+            if needs {
+                showModelGuide = true
+            }
+        }
     }
 
     // MARK: - 隐藏 NavigationLink (程序化导航)
@@ -162,7 +186,15 @@ private struct RootView: View {
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
-                    showSettings = true
+                    if showModelGuide {
+                        // alert 正在显示，先关闭再延迟导航，避免转场冲突
+                        showModelGuide = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showSettings = true
+                        }
+                    } else {
+                        showSettings = true
+                    }
                 } label: {
                     Image(systemName: "gearshape")
                 }
@@ -180,7 +212,6 @@ private struct RootView: View {
                 showRecording = false
             }
         )
-        .navigationBarBackButtonHidden(true)
     }
 
     // MARK: - Detail 详情页
@@ -191,7 +222,6 @@ private struct RootView: View {
             visitId: id,
             onBack: { showDetail = false }
         )
-        .navigationBarBackButtonHidden(true)
     }
 
     // MARK: - History 历史页
@@ -199,9 +229,7 @@ private struct RootView: View {
     private var historyScreen: some View {
         HistoryView(
             viewModel: HistoryViewModel(container: container),
-            onVisitTap: { id in
-                // History 内部自己管理推入 Detail
-            },
+            onVisitTap: { id in },
             onBack: { showHistory = false }
         )
         .navigationBarBackButtonHidden(true)
