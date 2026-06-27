@@ -22,7 +22,7 @@ import javax.inject.Inject
 
 data class HomeUiState(
     val todayRecordCount: Int = 0,
-    val todayTotalMinutes: Long = 0,
+    val totalRecordCount: Int = 0,
     val recentRecords: List<VoiceRecord> = emptyList(),
     val isLoading: Boolean = true,
     val modelStatus: ModelStatus = ModelStatus.UNKNOWN
@@ -64,14 +64,9 @@ class HomeViewModel @Inject constructor(
                 val todayStart = Instant.now().atZone(ZoneId.systemDefault())
                     .truncatedTo(ChronoUnit.DAYS).toInstant()
                 val todayRecords = records.filter { it.startTime >= todayStart }
-                val todayMinutes = todayRecords.sumOf { record ->
-                    val end = record.endTime ?: record.startTime
-                    ChronoUnit.MINUTES.between(record.startTime, end)
-                }
-
                 _uiState.value = _uiState.value.copy(
                     todayRecordCount = todayRecords.size,
-                    todayTotalMinutes = todayMinutes,
+                    totalRecordCount = records.size,
                     recentRecords = records.take(2),
                     isLoading = false
                 )

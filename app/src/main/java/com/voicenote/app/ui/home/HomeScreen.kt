@@ -45,7 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -84,14 +84,16 @@ fun HomeScreen(
                         Icon(
                             Icons.Default.History,
                             contentDescription = "历史记录",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                     IconButton(onClick = onSettingsClick) {
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = "设置",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                     // "+" button — primary action, matches iOS toolbar pattern
@@ -105,7 +107,7 @@ fun HomeScreen(
                             Icons.Default.Add,
                             contentDescription = "新建录音",
                             tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(40.dp).padding(8.dp)
+                            modifier = Modifier.size(44.dp).padding(10.dp)
                         )
                     }
                 }
@@ -131,13 +133,13 @@ fun HomeScreen(
                     ) {
                         StatCard(
                             modifier = Modifier.weight(1f),
-                            title = "今日录音",
-                            value = "${uiState.todayRecordCount} 次"
+                            title = "今日记录",
+                            value = "${uiState.todayRecordCount}"
                         )
                         StatCard(
                             modifier = Modifier.weight(1f),
-                            title = "今日时长",
-                            value = "${uiState.todayTotalMinutes} 分钟"
+                            title = "总记录",
+                            value = "${uiState.totalRecordCount}"
                         )
                     }
                 }
@@ -161,7 +163,7 @@ fun HomeScreen(
                 // Recent records header
                 item {
                     Text(
-                        "最近录音",
+                        "最近记录",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 4.dp)
@@ -170,43 +172,15 @@ fun HomeScreen(
 
                 if (uiState.recentRecords.isEmpty()) {
                     item {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(80.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "暂无录音记录",
+                                "暂无记录",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "点击 ",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                                )
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                    modifier = Modifier.size(18.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.Add,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
-                                }
-                                Text(
-                                    " 开始录音",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
-                                )
-                            }
                         }
                     }
                 }
