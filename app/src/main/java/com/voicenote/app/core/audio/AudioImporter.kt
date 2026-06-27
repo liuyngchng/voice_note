@@ -4,7 +4,6 @@ import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
-import com.voicenote.app.core.asr.FunASRClient
 import com.voicenote.app.core.asr.OfflineASRClient
 import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.di.AppSettings
@@ -30,7 +29,6 @@ class AudioImporter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val recordRepository: VoiceRecordRepository,
     private val audioFileManager: AudioFileManager,
-    private val funASRClient: FunASRClient,
     private val offlineASRClient: OfflineASRClient
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -124,28 +122,20 @@ class AudioImporter @Inject constructor(
     }
 
     private suspend fun runASR(audioFilePath: String, settings: AppSettings): String {
-        return when (settings.asrMode) {
-            "offline" -> {
-                try {
-                    val quality = ModelQuality.fromString(settings.offlineModelQuality)
-                    offlineASRClient.ensureRecognizer(quality)
-                    val file = File(audioFilePath)
-                    val pcmData = file.inputStream().use { input ->
-                        input.skip(44)
-                        input.readBytes()
-                    }
-                    val result = offlineASRClient.processPCMChunk(pcmData)
-                    offlineASRClient.reset()
-                    result.getOrDefault(FALLBACK_TEXT)
-                } catch (e: Exception) {
-                    Log.e(TAG, "离线 ASR 失败: ${e.message}", e)
-                    FALLBACK_TEXT
-                }
+        return try {
+            val quality = ModelQuality.fromString(settings.offlineModelQuality)
+            offlineASRClient.ensureRecognizer(quality)
+            val file = File(audioFilePath)
+            val pcmData = file.inputStream().use { input ->
+                input.skip(44)
+                input.readBytes()
             }
-            else -> {
-                val result = funASRClient.processFile(audioFilePath, settings.asrUrl)
-                result.getOrDefault(FALLBACK_TEXT)
-            }
+            val result = offlineASRClient.processPCMChunk(pcmData)
+            offlineASRClient.reset()
+            result.getOrDefault(FALLBACK_TEXT)
+        } catch (e: Exception) {
+            Log.e(TAG, "离线 ASR 失败: ${e.message}", e)
+            FALLBACK_TEXT
         }
     }
 

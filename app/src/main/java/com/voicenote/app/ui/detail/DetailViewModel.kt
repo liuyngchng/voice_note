@@ -10,7 +10,6 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.voicenote.app.core.asr.ASRModelManager
-import com.voicenote.app.core.asr.FunASRClient
 import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.asr.OfflineASRClient
 import com.voicenote.app.core.audio.AudioFileManager
@@ -61,7 +60,6 @@ class DetailViewModel @Inject constructor(
     private val recordRepository: VoiceRecordRepository,
     private val audioFileManager: AudioFileManager,
     private val audioImporter: AudioImporter,
-    private val funASRClient: FunASRClient,
     private val offlineASRClient: OfflineASRClient,
     private val asrModelManager: ASRModelManager,
     private val settingsDataStore: SettingsDataStore
@@ -459,14 +457,8 @@ class DetailViewModel @Inject constructor(
 
             try {
                 val settings = settingsDataStore.settingsFlow.first()
-                Log.i(TAG, "retryTranscript: asrMode=${settings.asrMode}, quality=${settings.offlineModelQuality}, url=${settings.asrUrl}")
-                val result = when (settings.asrMode) {
-                    "offline" -> runOfflineASR(audioPath, settings.offlineModelQuality)
-                    else -> {
-                        _uiState.value = _uiState.value.copy(retryProgress = "正在在线转写...")
-                        funASRClient.processFile(audioPath, settings.asrUrl)
-                    }
-                }
+                Log.i(TAG, "retryTranscript: quality=${settings.offlineModelQuality}")
+                val result = runOfflineASR(audioPath, settings.offlineModelQuality)
 
                 result.onSuccess { text ->
                     if (text.isNotBlank() && text != FALLBACK_TEXT) {

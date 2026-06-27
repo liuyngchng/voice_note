@@ -103,8 +103,6 @@ dependencies {
 
     // Network
     implementation(libs.okhttp)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.gson)
     implementation(libs.gson)
 
     // Coroutines

@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.voicenote.app.BuildConfig
 import com.voicenote.app.core.asr.ASRModelManager
+import com.voicenote.app.core.asr.OfflineASRClient
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -71,6 +72,7 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 interface SettingsEntryPoint {
     fun asrModelManager(): ASRModelManager
+    fun offlineASRClient(): OfflineASRClient
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -85,6 +87,7 @@ fun SettingsScreen(
         EntryPointAccessors.fromApplication(context.applicationContext, SettingsEntryPoint::class.java)
     }
     val asrModelManager = remember { entryPoint.asrModelManager() }
+    val offlineASRClient = remember { entryPoint.offlineASRClient() }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val punctFilePicker = rememberLauncherForActivityResult(
@@ -147,13 +150,17 @@ fun SettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     OfflineASRSettingsView(
-                        asrMode = uiState.asrMode,
-                        asrUrl = uiState.asrUrl,
                         modelQuality = uiState.offlineModelQuality,
-                        onAsrModeChange = viewModel::updateAsrMode,
-                        onAsrUrlChange = viewModel::updateAsrUrl,
                         onModelQualityChange = viewModel::updateOfflineModelQuality,
-                        asrModelManager = asrModelManager
+                        asrModelManager = asrModelManager,
+                        onModelReady = { quality ->
+                            offlineASRClient.preloadIfAvailable(quality)
+                        },
+                        onModelDeleted = {
+                            offlineASRClient.refreshModelStatus(
+                                com.voicenote.app.core.asr.ModelQuality.fromString(uiState.offlineModelQuality)
+                            )
+                        }
                     )
                 }
             }

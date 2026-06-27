@@ -29,8 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,13 +50,11 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun OfflineASRSettingsView(
-    asrMode: String,
-    asrUrl: String,
     modelQuality: String,
-    onAsrModeChange: (String) -> Unit,
-    onAsrUrlChange: (String) -> Unit,
     onModelQualityChange: (String) -> Unit,
-    asrModelManager: ASRModelManager
+    asrModelManager: ASRModelManager,
+    onModelReady: (com.voicenote.app.core.asr.ModelQuality) -> Unit = {},
+    onModelDeleted: () -> Unit = {}
 ) {
     val downloadState by asrModelManager.downloadState.collectAsState()
     val context = LocalContext.current
@@ -72,6 +68,13 @@ fun OfflineASRSettingsView(
         }
     }
 
+    // Auto-load model into memory after download/import completes
+    LaunchedEffect(downloadState.status) {
+        if (downloadState.status == DownloadStatus.COMPLETED) {
+            onModelReady(quality)
+        }
+    }
+
     val totalRamGB = remember {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         val memInfo = ActivityManager.MemoryInfo()
@@ -81,182 +84,149 @@ fun OfflineASRSettingsView(
 
     Column(modifier = Modifier.fillMaxWidth()) {
 
-        // ── Header row: title + online/offline switch ──────────────────────
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "语音识别",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
+        // ── Header ───────────────────────────────────────────────────────
+        Text(
+            "语音识别",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "离线 · SenseVoice",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Model quality segmented chips
+        Text(
+            "模型质量",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        val isBusy = downloadState.status != DownloadStatus.IDLE
+            && downloadState.status != DownloadStatus.COMPLETED
+            && downloadState.status != DownloadStatus.FAILED
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = modelQuality == "int8",
+                onClick = { onModelQualityChange("int8") },
+                label = { Text("INT8") },
+                enabled = !isBusy,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                 )
+            )
+            FilterChip(
+                selected = modelQuality == "fp32",
+                onClick = { onModelQualityChange("fp32") },
+                label = { Text("FP32") },
+                enabled = !isBusy,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            )
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "约 ${quality.estimatedSizeMB}MB",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // Low-memory warning
+        if (modelQuality == "fp32" && totalRamGB < 4.0) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Icon(
+                    Icons.Default.Error,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    if (asrMode == "online") "在线 · FunASR WebSocket" else "离线 · SenseVoice",
+                    "设备内存仅 %.1f GB，可能无法加载 FP32 模型".format(totalRamGB),
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.error
                 )
             }
-            Text(
-                "在线",
-                style = MaterialTheme.typography.labelLarge,
-                color = if (asrMode == "online") MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Switch(
-                checked = asrMode == "online",
-                onCheckedChange = { onAsrModeChange(if (it) "online" else "offline") }
-            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ── Online: WebSocket URL field ────────────────────────────────────
-        if (asrMode == "online") {
-            OutlinedTextField(
-                value = asrUrl,
-                onValueChange = onAsrUrlChange,
-                label = { Text("WebSocket 地址") },
-                placeholder = { Text("ws://192.168.240.29:10095") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            )
+        // ── Download / status section ─────────────────────────────────
+        val isDownloaded = asrModelManager.isModelDownloaded(quality)
+        val scope = rememberCoroutineScope()
+        val filePicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            uri?.let {
+                scope.launch(Dispatchers.IO) { asrModelManager.uploadModel(quality, it) }
+            }
         }
 
-        // ── Offline: model quality + download ──────────────────────────────
-        if (asrMode == "offline") {
-
-            // Model quality segmented chips
-            Text(
-                "模型质量",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            val isBusy = downloadState.status != DownloadStatus.IDLE
-                && downloadState.status != DownloadStatus.COMPLETED
-                && downloadState.status != DownloadStatus.FAILED
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = modelQuality == "int8",
-                    onClick = { onModelQualityChange("int8") },
-                    label = { Text("INT8") },
-                    enabled = !isBusy,
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                )
-                FilterChip(
-                    selected = modelQuality == "fp32",
-                    onClick = { onModelQualityChange("fp32") },
-                    label = { Text("FP32") },
-                    enabled = !isBusy,
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                )
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                "约 ${quality.estimatedSizeMB}MB",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            // Low-memory warning
-            if (modelQuality == "fp32" && totalRamGB < 4.0) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Error,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "设备内存仅 %.1f GB，可能无法加载 FP32 模型".format(totalRamGB),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ── Download / status section ─────────────────────────────────
-            val isDownloaded = asrModelManager.isModelDownloaded(quality)
-            val scope = rememberCoroutineScope()
-            val filePicker = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument()
-            ) { uri ->
-                uri?.let {
-                    scope.launch(Dispatchers.IO) { asrModelManager.uploadModel(quality, it) }
-                }
-            }
-
-            when (downloadState.status) {
-                DownloadStatus.IDLE -> {
-                    if (isDownloaded) {
-                        ModelReadyCard(
-                            onDelete = {
-                                asrModelManager.deleteModel(quality)
-                                android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                        )
-                    } else {
-                        DownloadActionsCard(
-                            onDownload = {
-                                scope.launch(Dispatchers.IO) { asrModelManager.downloadModel(quality) }
-                            },
-                            onUpload = { filePicker.launch(arrayOf("*/*")) }
-                        )
-                    }
-                }
-
-                DownloadStatus.DOWNLOADING,
-                DownloadStatus.UPLOADING,
-                DownloadStatus.EXTRACTING -> {
-                    DownloadProgressCard(
-                        isUploading = downloadState.status == DownloadStatus.UPLOADING,
-                        isExtracting = downloadState.status == DownloadStatus.EXTRACTING,
-                        progress = downloadState.progress
-                    )
-                }
-
-                DownloadStatus.COMPLETED -> {
+        when (downloadState.status) {
+            DownloadStatus.IDLE -> {
+                if (isDownloaded) {
                     ModelReadyCard(
                         onDelete = {
                             asrModelManager.deleteModel(quality)
-                            asrModelManager.resetState()
+                            onModelDeleted()
                             android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     )
-                }
-
-                DownloadStatus.FAILED -> {
-                    DownloadFailedCard(
-                        error = downloadState.error,
-                        downloadUrl = downloadState.downloadUrl,
-                        onRetry = {
-                            asrModelManager.resetState()
+                } else {
+                    DownloadActionsCard(
+                        onDownload = {
                             scope.launch(Dispatchers.IO) { asrModelManager.downloadModel(quality) }
                         },
                         onUpload = { filePicker.launch(arrayOf("*/*")) }
                     )
                 }
+            }
+
+            DownloadStatus.DOWNLOADING,
+            DownloadStatus.UPLOADING,
+            DownloadStatus.EXTRACTING -> {
+                DownloadProgressCard(
+                    isUploading = downloadState.status == DownloadStatus.UPLOADING,
+                    isExtracting = downloadState.status == DownloadStatus.EXTRACTING,
+                    progress = downloadState.progress
+                )
+            }
+
+            DownloadStatus.COMPLETED -> {
+                ModelReadyCard(
+                    onDelete = {
+                        asrModelManager.deleteModel(quality)
+                        asrModelManager.resetState()
+                        onModelDeleted()
+                        android.widget.Toast.makeText(context, "模型已删除", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+
+            DownloadStatus.FAILED -> {
+                DownloadFailedCard(
+                    error = downloadState.error,
+                    downloadUrl = downloadState.downloadUrl,
+                    onRetry = {
+                        asrModelManager.resetState()
+                        scope.launch(Dispatchers.IO) { asrModelManager.downloadModel(quality) }
+                    },
+                    onUpload = { filePicker.launch(arrayOf("*/*")) }
+                )
             }
         }
     }

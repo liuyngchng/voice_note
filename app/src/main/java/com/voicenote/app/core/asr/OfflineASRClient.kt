@@ -4,12 +4,17 @@ import android.util.Log
 import com.voicenote.app.core.common.MemoryWarningBus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+
+enum class ModelStatus { UNKNOWN, MISSING, LOADING, READY, ERROR }
 
 @Singleton
 class OfflineASRClient @Inject constructor(
@@ -26,6 +31,10 @@ class OfflineASRClient @Inject constructor(
     // ── VAD state ────────────────────────────────────────────────────────────
     private var vadPtr: Long = 0
     private var vadReady = false
+
+    // ── Model status (observable by UI) ─────────────────────────────────────
+    private val _modelStatus = MutableStateFlow(ModelStatus.UNKNOWN)
+    val modelStatus: StateFlow<ModelStatus> = _modelStatus.asStateFlow()
 
     init {
         scope.launch {
@@ -268,6 +277,7 @@ class OfflineASRClient @Inject constructor(
             recognizerPtr = 0
             isInitialized = false
             currentQuality = null
+            _modelStatus.value = ModelStatus.UNKNOWN
             Log.i(TAG, "离线 ASR 模型已释放")
         }
         destroyVad()
@@ -275,6 +285,49 @@ class OfflineASRClient @Inject constructor(
     }
 
     val isAvailable: Boolean get() = isInitialized
+
+    /** Check model files and preload into memory. Idempotent — no-op if already loaded. */
+    fun preloadIfAvailable(quality: ModelQuality) {
+        if (isInitialized && currentQuality == quality) {
+            _modelStatus.value = ModelStatus.READY
+            return
+        }
+
+        val modelFile = File(asrModelManager.modelFilePath(quality))
+        val tokensFile = File(asrModelManager.tokensFilePath())
+
+        if (!modelFile.exists() || !tokensFile.exists()) {
+            _modelStatus.value = ModelStatus.MISSING
+            Log.i(TAG, "Model files not found for ${quality.name}, needs download")
+            return
+        }
+
+        _modelStatus.value = ModelStatus.LOADING
+        scope.launch {
+            try {
+                ensureRecognizer(quality)
+                asrModelManager.ensureVadModelAvailable()
+                ensureVad()
+                ensurePunctuation()
+                _modelStatus.value = ModelStatus.READY
+                Log.i(TAG, "Preload complete: ${quality.name}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Preload failed: ${e.message}", e)
+                _modelStatus.value = ModelStatus.ERROR
+            }
+        }
+    }
+
+    fun refreshModelStatus(quality: ModelQuality) {
+        if (isInitialized && currentQuality == quality) {
+            _modelStatus.value = ModelStatus.READY
+            return
+        }
+        val modelFile = File(asrModelManager.modelFilePath(quality))
+        val tokensFile = File(asrModelManager.tokensFilePath())
+        _modelStatus.value = if (modelFile.exists() && tokensFile.exists()) ModelStatus.READY
+            else ModelStatus.MISSING
+    }
 
     private fun handleMemoryWarning(level: Int) {
         scope.launch {

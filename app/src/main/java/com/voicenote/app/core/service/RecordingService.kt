@@ -14,9 +14,6 @@ import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import com.voicenote.app.MainActivity
 import com.voicenote.app.R
-import com.voicenote.app.core.asr.ASRMode
-import com.voicenote.app.core.asr.AsrEvent
-import com.voicenote.app.core.asr.FunASRClient
 import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.asr.OfflineASRClient
@@ -28,11 +25,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -44,7 +38,6 @@ import javax.inject.Inject
 class RecordingService : Service() {
 
     @Inject lateinit var audioCapture: AudioCapture
-    @Inject lateinit var funASRClient: FunASRClient
     @Inject lateinit var offlineASRClient: OfflineASRClient
     @Inject lateinit var asrModelManager: ASRModelManager
     @Inject lateinit var recordRepository: VoiceRecordRepositoryImpl
@@ -59,7 +52,6 @@ class RecordingService : Service() {
     private var actualStopTime: java.time.Instant? = null
 
     private val mutableTranscript = StringBuilder()
-    private var currentAsrMode: ASRMode = ASRMode.ONLINE
     private var currentOfflineModelQuality: ModelQuality = ModelQuality.INT8
     private var transcriptFilePath: String = ""
     private var punctReady = false
@@ -70,8 +62,6 @@ class RecordingService : Service() {
         const val ACTION_START = "com.voicenote.app.action.START_RECORDING"
         const val ACTION_STOP = "com.voicenote.app.action.STOP_RECORDING"
         const val EXTRA_RECORD_ID = "record_id"
-        const val EXTRA_ASR_URL = "asr_url"
-        const val EXTRA_ASR_MODE = "asr_mode"
         const val EXTRA_OFFLINE_MODEL_QUALITY = "offline_model_quality"
 
         // Offline ASR strategy:
@@ -96,9 +86,6 @@ class RecordingService : Service() {
         private val _statusMessage = MutableStateFlow("")
         val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
-        private val _asrEvents = MutableSharedFlow<AsrEvent>()
-        val asrEvents: SharedFlow<AsrEvent> = _asrEvents.asSharedFlow()
-
         private var durationJob: Job? = null
         private var currentRecordId: Long = 0
     }
@@ -112,11 +99,8 @@ class RecordingService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 val recordId = intent.getLongExtra(EXTRA_RECORD_ID, 0)
-                val asrUrl = intent.getStringExtra(EXTRA_ASR_URL) ?: ""
-                val asrModeStr = intent.getStringExtra(EXTRA_ASR_MODE) ?: "online"
                 val offlineModelQuality = intent.getStringExtra(EXTRA_OFFLINE_MODEL_QUALITY) ?: "int8"
-                val asrMode = ASRMode.fromString(asrModeStr)
-                startRecording(recordId, asrUrl, asrMode, offlineModelQuality)
+                startRecording(recordId, offlineModelQuality)
             }
             ACTION_STOP -> stopRecording()
         }
@@ -127,13 +111,10 @@ class RecordingService : Service() {
 
     private fun startRecording(
         recordId: Long,
-        asrUrl: String,
-        asrMode: ASRMode = ASRMode.ONLINE,
         offlineModelQualityStr: String = "int8"
     ) {
         try {
             currentRecordId = recordId
-            currentAsrMode = asrMode
             currentOfflineModelQuality = ModelQuality.fromString(offlineModelQualityStr)
             _isRecording.value = true
             _durationSeconds.value = 0
@@ -167,13 +148,10 @@ class RecordingService : Service() {
                 .format(java.time.Instant.now())
             transcriptFilePath = File(transcriptDir, "$dateStr.txt").absolutePath
 
-            when (asrMode) {
-                ASRMode.ONLINE -> startOnlineASR(asrUrl)
-                ASRMode.OFFLINE -> startOfflineASR()
-            }
+            startOfflineASR()
 
             // Launch post-recording finalization (waits for recordingJob to complete)
-            startFinalization(asrUrl)
+            startFinalization()
         } catch (e: Exception) {
             Log.e("RecordingService", "Failed to start recording: ${e.message}", e)
             _isRecording.value = false
@@ -182,64 +160,17 @@ class RecordingService : Service() {
         }
     }
 
-    private fun startOnlineASR(asrUrl: String) {
-        // Shared flag: recordingJob reads it to know whether to send audio
-        var asrConnected = false
-
-        // ── Audio capture: independent coroutine, never blocked by ASR ──
-        recordingJob = serviceScope.launch {
-            startDurationCounter()
-            audioCapture.startCapture().collect { audioData ->
-                audioFileManager.writeAudioChunk(audioData)
-                if (asrConnected) {
-                    funASRClient.sendAudio(audioData)
-                }
-            }
-        }
-
-        // ── ASR: sibling coroutine, NOT a child of recordingJob,
-        //     so recordingJob completes immediately when capture stops. ──
-        serviceScope.launch {
-            try {
-                val asrFlow = funASRClient.connect(asrUrl)
-                asrConnected = true
-
-                launch {
-                    asrFlow.collect { event ->
-                        _asrEvents.emit(event)
-                        when (event) {
-                            is AsrEvent.Partial -> {
-                                mutableTranscript.append(event.text)
-                                _transcriptState.value = mutableTranscript.toString()
-                                saveTranscriptToFile()
-                            }
-                            is AsrEvent.Final -> {
-                                _transcriptState.value = mutableTranscript.toString()
-                                saveTranscriptToFile()
-                            }
-                            is AsrEvent.Error -> {
-                                Log.e("RecordingService", "ASR error: ${event.message}")
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-
-                kotlinx.coroutines.delay(300)
-                funASRClient.sendHandshake()
-            } catch (e: Exception) {
-                Log.e("RecordingService", "Online ASR unavailable: ${e.message}", e)
-            }
-        }
-    }
 
     private fun startOfflineASR() {
         recordingJob = serviceScope.launch {
-            // ── Load model + VAD in parallel, does not block audio capture ──
+            // ── Model/VAD should already be preloaded; ensureReady is a fast no-op ──
             var asrReady = false
             var vadActive = false
             launch {
-                _statusMessage.value = "正在加载离线模型..."
+                val alreadyLoaded = offlineASRClient.isAvailable
+                if (!alreadyLoaded) {
+                    _statusMessage.value = "正在加载离线模型..."
+                }
                 try {
                     offlineASRClient.ensureRecognizer(currentOfflineModelQuality)
                     asrReady = true
@@ -396,7 +327,7 @@ class RecordingService : Service() {
         return result
     }
 
-    private fun startFinalization(asrUrl: String) {
+    private fun startFinalization() {
         serviceScope.launch {
             recordingJob?.join()
 
@@ -407,30 +338,16 @@ class RecordingService : Service() {
             )
 
             val transcript = mutableTranscript.toString()
-            val fallbackText = "服务暂时不可用，请采用离线方式"
-            var finalTranscript: String
+            var finalTranscript = transcript
 
-            Log.i("RecordingService", "Finalizing: transcript.length=${transcript.length}, asrMode=$currentAsrMode, punctReady=$punctReady")
+            Log.i("RecordingService", "Finalizing: transcript.length=${transcript.length}, punctReady=$punctReady")
 
-            finalTranscript = transcript
-
-            // Online retry fallback
-            if (finalTranscript.isBlank() && currentAsrMode == ASRMode.ONLINE && asrUrl.isNotBlank()) {
-                recordRepository.updateTranscriptStatus(
-                    currentRecordId,
-                    com.voicenote.app.domain.model.ProcessingStatus.PROCESSING
-                )
-                val retryResult = retryAsrWithBackoff(audioFilePath, asrUrl)
-                finalTranscript = retryResult.getOrDefault(fallbackText)
-            } else if (finalTranscript.isBlank() && currentAsrMode == ASRMode.OFFLINE) {
+            if (finalTranscript.isBlank()) {
                 finalTranscript = "离线转写未完成，请检查模型是否正确安装"
-            } else if (finalTranscript.isBlank()) {
-                finalTranscript = fallbackText
             }
 
-            // Apply offline punctuation BEFORE reset (reset destroys punctuation model)
+            // Apply offline punctuation (model stays resident in memory)
             if (punctReady && finalTranscript.isNotBlank()
-                && finalTranscript != fallbackText
                 && finalTranscript != "离线转写未完成，请检查模型是否正确安装"
             ) {
                 Log.i("RecordingService", "Applying punctuation to transcript (${finalTranscript.length} chars)")
@@ -441,12 +358,7 @@ class RecordingService : Service() {
                 Log.i("RecordingService", "Punctuation skipped: punctReady=$punctReady, textBlank=${finalTranscript.isBlank()}")
             }
 
-            // Release ASR resources AFTER punctuation is applied
-            if (currentAsrMode == ASRMode.OFFLINE) {
-                if (offlineASRClient.isAvailable) {
-                    offlineASRClient.reset()
-                }
-            }
+            // Model stays loaded in memory for next recording; released only on memory warning or app kill.
 
             _transcriptState.value = finalTranscript
             saveTranscriptToFile()
@@ -456,7 +368,7 @@ class RecordingService : Service() {
             )
             recordRepository.updateTranscriptStatus(
                 currentRecordId,
-                if (finalTranscript.isBlank() || finalTranscript == fallbackText ||
+                if (finalTranscript.isBlank() ||
                     finalTranscript == "离线转写未完成，请检查模型是否正确安装"
                 ) com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE
                 else com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
@@ -473,17 +385,8 @@ class RecordingService : Service() {
         actualStopTime = java.time.Instant.now()
         durationJob?.cancel()
         audioCapture.stopCapture()
-
-        when (currentAsrMode) {
-            ASRMode.ONLINE -> {
-                funASRClient.sendEnd()
-                // disconnect + final-result wait is handled in startFinalization
-            }
-            ASRMode.OFFLINE -> {
-                // Flow ends naturally when audioCapture stops.
-                // Cancelling here would truncate the WAV file.
-            }
-        }
+        // Flow ends naturally when audioCapture stops.
+        // Cancelling here would truncate the WAV file.
 
         _isRecording.value = false
         _statusMessage.value = "录音已结束，正在保存..."
@@ -565,27 +468,6 @@ class RecordingService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private suspend fun retryAsrWithBackoff(audioFilePath: String, asrUrl: String): Result<String> {
-        val delays = listOf(20_000L, 40_000L, 80_000L, 160_000L, 320_000L)
-        var lastError: Throwable? = null
-
-        for ((index, delay) in delays.withIndex()) {
-            if (index > 0) {
-                Log.i("RecordingService", "ASR retry ${index + 1}/${delays.size} after ${delay}ms")
-                kotlinx.coroutines.delay(delay)
-            }
-
-            val result = funASRClient.processFile(audioFilePath, asrUrl)
-            if (result.isSuccess) {
-                Log.i("RecordingService", "ASR retry ${index + 1} succeeded")
-                return result
-            }
-            lastError = result.exceptionOrNull()
-            Log.w("RecordingService", "ASR retry ${index + 1}/${delays.size} failed: ${lastError?.message}")
-        }
-
-        return Result.failure(lastError ?: Exception("All ASR retries exhausted"))
-    }
 
     private fun releaseWakeLock() {
         wakeLock?.let {

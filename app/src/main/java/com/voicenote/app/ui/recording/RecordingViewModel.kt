@@ -86,8 +86,6 @@ class RecordingViewModel @Inject constructor(
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START
             putExtra(RecordingService.EXTRA_RECORD_ID, recordId)
-            putExtra(RecordingService.EXTRA_ASR_URL, settings.asrUrl)
-            putExtra(RecordingService.EXTRA_ASR_MODE, settings.asrMode)
             putExtra(RecordingService.EXTRA_OFFLINE_MODEL_QUALITY, settings.offlineModelQuality)
         }
         try {

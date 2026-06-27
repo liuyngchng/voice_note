@@ -8,7 +8,6 @@ import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.asr.DownloadStatus
 import com.voicenote.app.core.di.AppSettings
 import com.voicenote.app.core.di.SettingsDataStore
-import com.voicenote.app.core.network.ConnectivityChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,8 +35,6 @@ data class ModelInfo(
 
 data class SettingsUiState(
     val isLoading: Boolean = true,
-    val asrUrl: String = "",
-    val asrMode: String = "offline",
     val offlineModelQuality: String = "int8",
     val isTesting: Boolean = false,
     val testResults: List<TestResult> = emptyList(),
@@ -49,7 +46,6 @@ data class SettingsUiState(
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val connectivityChecker: ConnectivityChecker,
     private val asrModelManager: ASRModelManager
 ) : ViewModel() {
 
@@ -63,8 +59,6 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.settingsFlow.collect { settings ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    asrUrl = settings.asrUrl,
-                    asrMode = settings.asrMode,
                     offlineModelQuality = settings.offlineModelQuality
                 )
             }
@@ -150,34 +144,21 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    fun updateAsrUrl(url: String) {
-        _uiState.value = _uiState.value.copy(asrUrl = url)
-    }
-
-    fun updateAsrMode(mode: String) {
-        _uiState.value = _uiState.value.copy(asrMode = mode)
-        viewModelScope.launch { settingsDataStore.updateAsrMode(mode) }
-    }
-
     fun updateOfflineModelQuality(quality: String) {
         _uiState.value = _uiState.value.copy(offlineModelQuality = quality)
         viewModelScope.launch { settingsDataStore.updateOfflineModelQuality(quality) }
     }
 
     fun save() {
-        val state = _uiState.value
         viewModelScope.launch {
-            settingsDataStore.updateAsrUrl(state.asrUrl)
-            settingsDataStore.updateAsrMode(state.asrMode)
-            settingsDataStore.updateOfflineModelQuality(state.offlineModelQuality)
+            settingsDataStore.updateOfflineModelQuality(_uiState.value.offlineModelQuality)
             _uiState.value = _uiState.value.copy(saveCount = _uiState.value.saveCount + 1)
         }
     }
 
     fun buildSaveSummary(): String {
         val s = _uiState.value
-        val asr = if (s.asrMode == "offline") "离线(${s.offlineModelQuality.uppercase()})" else "在线"
-        return "已保存 · 语音识别: $asr"
+        return "已保存 · 离线(${s.offlineModelQuality.uppercase()})"
     }
 
     fun testConnection() {
@@ -187,21 +168,23 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val results = mutableListOf<TestResult>()
 
-            if (state.asrMode == "online") {
-                val result = connectivityChecker.checkAsrConnection(state.asrUrl)
-                results.add(TestResult(
-                    name = "语音识别",
-                    success = result.isSuccess,
-                    message = result.getOrElse { it.message ?: "未知错误" }
-                ))
-            } else {
-                val result = connectivityChecker.checkAsrOffline(state.offlineModelQuality)
-                results.add(TestResult(
-                    name = "语音识别 (离线)",
-                    success = result.isSuccess,
-                    message = result.getOrElse { it.message ?: "未知错误" }
-                ))
+            val modelFile = java.io.File(asrModelManager.modelFilePath(
+                com.voicenote.app.core.asr.ModelQuality.fromString(state.offlineModelQuality)
+            ))
+            val tokensFile = java.io.File(asrModelManager.tokensFilePath())
+
+            val success = modelFile.exists() && tokensFile.exists()
+            val message = when {
+                !modelFile.exists() -> "离线模型未下载，请先下载"
+                !tokensFile.exists() -> "tokens.txt 缺失，请重新下载模型"
+                else -> "离线 ASR 准备就绪 (${state.offlineModelQuality.uppercase()})"
             }
+
+            results.add(TestResult(
+                name = "语音识别 (离线)",
+                success = success,
+                message = message
+            ))
 
             _uiState.value = _uiState.value.copy(
                 isTesting = false,
