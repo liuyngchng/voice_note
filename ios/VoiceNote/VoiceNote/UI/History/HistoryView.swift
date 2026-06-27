@@ -2,7 +2,7 @@ import SwiftUI
 
 struct HistoryView: View {
     @ObservedObject var viewModel: HistoryViewModel
-    let onVisitTap: (UUID) -> Void
+    let onRecordTap: (UUID) -> Void
     let onBack: () -> Void
 
     // 内部 Detail 导航 (iOS 14 兼容)
@@ -29,22 +29,22 @@ struct HistoryView: View {
                 .padding(.vertical, 60)
             } else {
                 List {
-                    ForEach(viewModel.records) { visit in
-                        RecordRow(record: visit)
+                    ForEach(viewModel.records) { record in
+                        RecordRow(record: record)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                selectedDetailId = visit.id
+                                selectedDetailId = record.id
                                 showDetail = true
-                                onVisitTap(visit.id)
+                                onRecordTap(record.id)
                             }
                             .modifier(SwipeActionsModifier {
-                                viewModel.deleteRecord(id: visit.id)
+                                viewModel.deleteRecord(id: record.id)
                             })
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
-                            let visit = viewModel.records[index]
-                            viewModel.deleteRecord(id: visit.id)
+                            let record = viewModel.records[index]
+                            viewModel.deleteRecord(id: record.id)
                         }
                     }
                 }
@@ -93,7 +93,7 @@ struct HistoryView: View {
             NavigationLink(
                 destination: DetailView(
                     viewModel: DetailViewModel(container: viewModel.container),
-                    visitId: id,
+                    recordId: id,
                     onBack: { showDetail = false }
                 )
                 .navigationBarBackButtonHidden(true),

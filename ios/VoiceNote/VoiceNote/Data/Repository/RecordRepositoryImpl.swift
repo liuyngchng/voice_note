@@ -2,7 +2,6 @@ import CoreData
 import Foundation
 
 /// 数据仓库实现
-/// 对齐 Android: VisitRepositoryImpl.kt
 final class RecordRepositoryImpl: RecordRepository {
     private let container: AppContainer
     private let context: NSManagedObjectContext
@@ -28,7 +27,6 @@ final class RecordRepositoryImpl: RecordRepository {
                 entity.speakersJSON = try? self.encoder.encodeString(record.speakers)
                 entity.startTime = record.startTime
                 entity.transcriptStatus = record.transcriptStatus.rawValue
-                entity.summaryStatus = record.summaryStatus.rawValue
                 do {
                     try self.context.save()
                     c.resume(returning: record.id)
@@ -51,11 +49,10 @@ final class RecordRepositoryImpl: RecordRepository {
         }
     }
 
-    func updateTranscript(_ recordId: UUID, text: String, filePath: String) async throws {
+    func updateTranscriptFilePath(_ recordId: UUID, filePath: String) async throws {
         await withCheckedContinuation { c in
             context.perform {
                 guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
-                entity.transcriptText = text
                 entity.transcriptFilePath = filePath
                 try? self.context.save()
                 c.resume()
@@ -74,26 +71,28 @@ final class RecordRepositoryImpl: RecordRepository {
         }
     }
 
-    func updateSummary(_ recordId: UUID, summary: RecordSummary) async throws {
+    /// 5 分钟 checkpoint：更新已转录时长（用于崩溃恢复定位进度）
+    func checkpointTranscriptProgress(_ recordId: UUID, durationSeconds: TimeInterval) async {
         await withCheckedContinuation { c in
             context.perform {
                 guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
-                entity.summaryJSON = try? self.encoder.encodeString(summary)
-                entity.summaryStatus = ProcessingStatus.completed.rawValue
-                entity.summaryGeneratedAt = Date()
+                entity.transcribedDurationSeconds = durationSeconds
                 try? self.context.save()
                 c.resume()
             }
         }
     }
 
-    func updateSummaryStatus(_ recordId: UUID, status: ProcessingStatus) async throws {
+    /// 查找所有未完成的录音记录（崩溃恢复用）
+    func getUnfinishedRecords() async -> [VoiceRecord] {
         await withCheckedContinuation { c in
             context.perform {
-                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
-                entity.summaryStatus = status.rawValue
-                try? self.context.save()
-                c.resume()
+                let request = VoiceRecordEntity.fetchRequest()
+                request.predicate = NSPredicate(format: "transcriptStatus IN %@",
+                    [ProcessingStatus.pending.rawValue, ProcessingStatus.processing.rawValue])
+                request.sortDescriptors = [NSSortDescriptor(keyPath: \VoiceRecordEntity.startTime, ascending: false)]
+                let entities = (try? self.context.fetch(request)) as? [VoiceRecordEntity] ?? []
+                c.resume(returning: entities.map(self.mapEntity))
             }
         }
     }
@@ -186,13 +185,11 @@ final class RecordRepositoryImpl: RecordRepository {
             speakers: (try? decoder.decode([String].self, from: e.speakersJSON)) ?? [],
             startTime: e.startTime,
             endTime: e.endTime,
-            transcriptText: e.transcriptText,
+            transcriptText: e.transcriptText,  // 仅用于兼容旧数据，新记录为 nil
             transcriptFilePath: e.transcriptFilePath,
             transcriptStatus: ProcessingStatus(rawValue: e.transcriptStatus) ?? .pending,
-            summaryStatus: ProcessingStatus(rawValue: e.summaryStatus) ?? .pending,
             audioFilePath: e.audioFilePath,
-            summary: (try? decoder.decode(RecordSummary.self, from: e.summaryJSON)),
-            summaryGeneratedAt: e.summaryGeneratedAt
+            transcribedDurationSeconds: e.transcribedDurationSeconds
         )
     }
 }

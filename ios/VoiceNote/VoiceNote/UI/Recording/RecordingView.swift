@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 struct RecordingView: View {
     @ObservedObject var viewModel: RecordingViewModel
     let onBack: () -> Void
-    let onVisitComplete: (UUID) -> Void
+    let onRecordComplete: (UUID) -> Void
 
     @State private var hasNavigated = false
     @State private var dotPulse = false
@@ -43,7 +43,7 @@ struct RecordingView: View {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("返回") {
                     if viewModel.isRecording {
-                        viewModel.stopVisit(navigateToDetail: false)
+                        viewModel.stopRecording(navigateToDetail: false)
                     }
                     onBack()
                 }
@@ -53,13 +53,13 @@ struct RecordingView: View {
         .onAppear {
             if !hasStarted {
                 hasStarted = true
-                viewModel.startVisit()
+                viewModel.startRecording()
             }
         }
         .onChange(of: viewModel.isRecording) { newValue in
-            if !newValue, !hasNavigated, viewModel.shouldNavigateToDetail, let visitId = viewModel.currentVisitId {
+            if !newValue, !hasNavigated, viewModel.shouldNavigateToDetail, let recordId = viewModel.currentRecordId {
                 hasNavigated = true
-                onVisitComplete(visitId)
+                onRecordComplete(recordId)
             }
         }
     }
@@ -90,18 +90,21 @@ struct RecordingView: View {
                                     .padding(.top, 80)
                                     .frame(maxWidth: .infinity)
                             } else {
-                                Text(viewModel.transcript)
+                                Text(viewModel.displayTranscript)
                                     .font(.body)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 8)
-                                    .id("transcript")
                             }
+                            // 底部锚点（与 Android LaunchedEffect + animateScrollTo 对齐）
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottomAnchor")
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onChange(of: viewModel.transcript) { _ in
                         withAnimation {
-                            proxy.scrollTo("transcript", anchor: .bottom)
+                            proxy.scrollTo("bottomAnchor", anchor: .bottom)
                         }
                     }
                 }
@@ -109,7 +112,7 @@ struct RecordingView: View {
 
                 VStack(spacing: 8) {
                     Button(action: {
-                        viewModel.stopVisit(navigateToDetail: true)
+                        viewModel.stopRecording(navigateToDetail: true)
                     }) {
                         HStack {
                             if viewModel.isStopping {

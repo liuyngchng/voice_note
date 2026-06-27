@@ -2,8 +2,8 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
-    let onNewVisit: () -> Void
-    let onVisitTap: (UUID) -> Void
+    let onNewRecord: () -> Void
+    let onRecordTap: (UUID) -> Void
 
     @State private var isRefreshing = false
 
@@ -28,7 +28,7 @@ struct HomeView: View {
                     ForEach(viewModel.recentRecords) { record in
                         RecordRow(record: record)
                             .contentShape(Rectangle())
-                            .onTapGesture { onVisitTap(record.id) }
+                            .onTapGesture { onRecordTap(record.id) }
                     }
                 }
             }
@@ -36,7 +36,7 @@ struct HomeView: View {
         .navigationTitle("语音笔记")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button(action: onNewVisit) {
+                Button(action: onNewRecord) {
                     Image(systemName: "plus")
                 }
             }

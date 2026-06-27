@@ -170,8 +170,8 @@ private struct RootView: View {
     private var homeScreen: some View {
         HomeView(
             viewModel: HomeViewModel(container: container),
-            onNewVisit: { showRecording = true },
-            onVisitTap: { id in
+            onNewRecord: { showRecording = true },
+            onRecordTap: { id in
                 detailId = id
                 showDetail = true
             }
@@ -208,7 +208,7 @@ private struct RootView: View {
         RecordingView(
             viewModel: RecordingViewModel(container: container),
             onBack: { showRecording = false },
-            onVisitComplete: { _ in
+            onRecordComplete: { _ in
                 showRecording = false
             }
         )
@@ -219,7 +219,7 @@ private struct RootView: View {
     private func detailScreen(id: UUID) -> some View {
         DetailView(
             viewModel: DetailViewModel(container: container),
-            visitId: id,
+            recordId: id,
             onBack: { showDetail = false }
         )
     }
@@ -229,7 +229,7 @@ private struct RootView: View {
     private var historyScreen: some View {
         HistoryView(
             viewModel: HistoryViewModel(container: container),
-            onVisitTap: { id in },
+            onRecordTap: { id in },
             onBack: { showHistory = false }
         )
         .navigationBarBackButtonHidden(true)

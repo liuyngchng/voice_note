@@ -3,10 +3,12 @@ import Foundation
 
 @MainActor
 final class DetailViewModel: ObservableObject {
-    @Published var visit: VoiceRecord?
+    @Published var record: VoiceRecord?
     @Published var isLoading = true
     @Published var isRetryingTranscript = false
     @Published var transcriptError: String?
+    /// 从 .txt 文件加载的转写文本（DB 不再存储全文）
+    @Published var transcriptText: String?
 
     @Published var audioPlayer = AudioPlayer()
 
@@ -14,7 +16,7 @@ final class DetailViewModel: ObservableObject {
     private var loadedAudioPath: String?
     private var cancellables = Set<AnyCancellable>()
     private var refreshTimer: AnyCancellable?
-    private var currentVisitId: UUID?
+    private var currentRecordId: UUID?
 
     init(container: AppContainer) {
         self.container = container
@@ -26,17 +28,19 @@ final class DetailViewModel: ObservableObject {
     }
 
     func loadRecord(id: UUID) {
-        currentVisitId = id
+        currentRecordId = id
         refresh()
     }
 
     private func refresh() {
-        guard let id = currentVisitId else { return }
+        guard let id = currentRecordId else { return }
         Task {
             let result = try? await container.recordRepository.getRecord(id: id)
             await MainActor.run {
-                visit = result
+                record = result
                 isLoading = false
+                // 从 .txt 文件加载转录文本（DB 不再存储全文）
+                loadTranscriptFromFile()
                 loadAudioIfNeeded()
                 scheduleNextRefreshIfNeeded()
                 deriveErrorMessages()
@@ -44,13 +48,22 @@ final class DetailViewModel: ObservableObject {
         }
     }
 
-    private func deriveErrorMessages() {
-        guard let visit else { return }
+    /// 从 .txt 文件加载转录文本
+    private func loadTranscriptFromFile() {
+        guard let path = record?.transcriptFilePath, !path.isEmpty else {
+            transcriptText = record?.transcriptText  // 兼容旧数据
+            return
+        }
+        transcriptText = try? String(contentsOfFile: path, encoding: .utf8)
+    }
 
-        if visit.transcriptStatus == .unavailable, transcriptError == nil {
-            if let path = visit.audioFilePath, !path.isEmpty, !FileManager.default.fileExists(atPath: path) {
+    private func deriveErrorMessages() {
+        guard let record else { return }
+
+        if record.transcriptStatus == .unavailable, transcriptError == nil {
+            if let path = record.audioFilePath, !path.isEmpty, !FileManager.default.fileExists(atPath: path) {
                 transcriptError = "音频文件已被删除"
-            } else if visit.audioFilePath?.isEmpty != false {
+            } else if record.audioFilePath?.isEmpty != false {
                 transcriptError = "录音未正常完成"
             } else {
                 transcriptError = "离线转写失败，可尝试手动重新转写"
@@ -60,10 +73,10 @@ final class DetailViewModel: ObservableObject {
 
     private func scheduleNextRefreshIfNeeded() {
         refreshTimer?.cancel()
-        guard let visit else { return }
+        guard let record else { return }
 
-        let needsRefresh = visit.transcriptStatus == .processing
-            || visit.transcriptStatus == .pending
+        let needsRefresh = record.transcriptStatus == .processing
+            || record.transcriptStatus == .pending
 
         if needsRefresh {
             refreshTimer = Timer.publish(every: 2, on: .main, in: .common)
@@ -75,7 +88,7 @@ final class DetailViewModel: ObservableObject {
     }
 
     private func loadAudioIfNeeded() {
-        guard let path = visit?.audioFilePath, !path.isEmpty else { return }
+        guard let path = record?.audioFilePath, !path.isEmpty else { return }
         guard loadedAudioPath != path else { return }
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else { return }
@@ -101,9 +114,9 @@ final class DetailViewModel: ObservableObject {
     // MARK: - 手动重试转写
 
     func retryTranscript() {
-        guard let id = currentVisitId, !isRetryingTranscript else { return }
+        guard let id = currentRecordId, !isRetryingTranscript else { return }
 
-        let audioPath = visit?.audioFilePath ?? ""
+        let audioPath = record?.audioFilePath ?? ""
 
         guard !audioPath.isEmpty else {
             transcriptError = "没有关联的音频文件，无法重新转写"
@@ -154,10 +167,10 @@ final class DetailViewModel: ObservableObject {
                 let fileURL = dir.appendingPathComponent("\(dateStr).txt")
                 try? text.write(to: fileURL, atomically: true, encoding: .utf8)
 
-                try? await repository.updateTranscript(id, text: text, filePath: fileURL.path)
+                try? await repository.updateTranscriptFilePath(id, filePath: fileURL.path)
                 try? await repository.updateTranscriptStatus(id, status: .completed)
                 transcriptError = nil
-                if let oldPath = visit?.transcriptFilePath, !oldPath.isEmpty, oldPath != fileURL.path {
+                if let oldPath = record?.transcriptFilePath, !oldPath.isEmpty, oldPath != fileURL.path {
                     try? FileManager.default.removeItem(atPath: oldPath)
                 }
             } else {

@@ -16,6 +16,10 @@ final class OfflineASRClient {
     private var isInitialized = false
     private var initError: String?
 
+    // MARK: - VAD state
+    private var vad: OpaquePointer?
+    private var vadReady = false
+
     deinit {
         reset()
     }
@@ -160,6 +164,126 @@ final class OfflineASRClient {
         }
     }
 
+    // MARK: - VAD (语音活动检测)
+
+    /// 初始化 VAD，对标 Android 端 silero_vad.onnx
+    /// 返回 true 表示 VAD 就绪; false 表示 VAD 不可用，应回退到按时间分块
+    func ensureVad() -> Bool {
+        if vadReady { return true }
+
+        // 确保 VAD 模型文件可用（从 Bundle 拷贝到 Documents）
+        ASRModelManager.ensureVadModelAvailable()
+
+        let vadPath = ASRModelManager.vadModelFilePath().path
+        guard FileManager.default.fileExists(atPath: vadPath) else {
+            Log.asr("VAD model not found at \(vadPath)")
+            return false
+        }
+
+        var config = SherpaOnnxVadModelConfig()
+        memset(&config, 0, MemoryLayout<SherpaOnnxVadModelConfig>.size)
+
+        let modelStr = strdup(vadPath)!
+        let providerStr = strdup("cpu")!
+        defer {
+            free(modelStr)
+            free(providerStr)
+        }
+
+        config.silero_vad.model = UnsafePointer(modelStr)
+        config.silero_vad.threshold = 0.5
+        config.silero_vad.min_silence_duration = 0.5
+        config.silero_vad.min_speech_duration = 0.25
+        config.silero_vad.window_size = 512
+        config.silero_vad.max_speech_duration = 20.0
+
+        config.sample_rate = 16000
+        config.num_threads = 1
+        config.provider = UnsafePointer(providerStr)
+        config.debug = 0
+
+        // buffer_size_in_seconds: 30 秒滑动窗口
+        guard let v = SherpaOnnxCreateVoiceActivityDetector(&config, 30.0) else {
+            Log.asr("VAD 创建失败")
+            return false
+        }
+        vad = v
+        vadReady = true
+        Log.asr("VAD 初始化完成 (silero_vad)")
+        return true
+    }
+
+    /// 将音频采样送入 VAD
+    func vadAcceptWaveform(samples: [Float]) {
+        guard vadReady, let vad else { return }
+        samples.withUnsafeBufferPointer { buf in
+            SherpaOnnxVoiceActivityDetectorAcceptWaveform(vad, buf.baseAddress, Int32(buf.count))
+        }
+    }
+
+    /// VAD 是否有已完成的语音段
+    var vadHasSpeechSegment: Bool {
+        guard vadReady, let vad else { return false }
+        return SherpaOnnxVoiceActivityDetectorEmpty(vad) == 0
+    }
+
+    /// 消费所有已检测到的语音段，逐个通过 ASR 推理
+    /// 返回识别结果列表（在 inference queue 上执行，线程安全）
+    func vadDecodeSpeechSegments() async -> [String] {
+        guard vadReady, let vad, isInitialized, let rec = recognizer else { return [] }
+
+        return await withCheckedContinuation { continuation in
+            inferenceQueue.async { [weak self] in
+                guard let self else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                var results: [String] = []
+                while SherpaOnnxVoiceActivityDetectorEmpty(vad) == 0 {
+                    guard let segment = SherpaOnnxVoiceActivityDetectorFront(vad) else { break }
+                    defer {
+                        SherpaOnnxDestroySpeechSegment(segment)
+                        SherpaOnnxVoiceActivityDetectorPop(vad)
+                    }
+
+                    let sampleCount = Int(segment.pointee.n)
+                    guard sampleCount > 0 else { continue }
+                    let samples = Array(UnsafeBufferPointer(start: segment.pointee.samples, count: sampleCount))
+
+                    // 过短语音段跳过（< 0.5s = 8000 samples @16kHz）
+                    guard sampleCount >= 8000 else {
+                        Log.asrDebug("VAD 跳过过短语音段: \(sampleCount) samples")
+                        continue
+                    }
+
+                    do {
+                        let text = try self.runInference(recognizer: rec, samples: samples)
+                        if !text.isEmpty {
+                            results.append(text)
+                            Log.asr("VAD 语音段识别完成: \"\(text.prefix(40))...\"")
+                        }
+                    } catch {
+                        Log.asr("VAD 语音段识别失败: \(error.localizedDescription)")
+                    }
+                }
+                continuation.resume(returning: results)
+            }
+        }
+    }
+
+    /// VAD 是否正在检测到语音
+    var vadIsDetected: Bool {
+        guard vadReady, let vad else { return false }
+        return SherpaOnnxVoiceActivityDetectorDetected(vad) == 1
+    }
+
+    /// Flush VAD 尾部数据，强制输出最后的语音段
+    func vadFlush() {
+        guard vadReady, let vad else { return }
+        SherpaOnnxVoiceActivityDetectorFlush(vad)
+        Log.asr("VAD flush 完成")
+    }
+
     // MARK: - 生命周期
 
     /// 仅在 app 退出时调用（deinit），不在录音之间释放
@@ -172,6 +296,15 @@ final class OfflineASRClient {
             isInitialized = false
             currentQuality = nil
         }
+
+        // 销毁 VAD
+        if let vad {
+            SherpaOnnxDestroyVoiceActivityDetector(vad)
+            self.vad = nil
+            vadReady = false
+            Log.asr("VAD 已销毁")
+        }
+
         Log.asr("离线 ASR 模型已释放（app 退出）")
     }
 

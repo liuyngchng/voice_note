@@ -25,14 +25,13 @@
 		793370B72FE40E1800752EE2 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370922FE40E1600752EE2 /* AppTheme.swift */; };
 		793370B82FE40E1800752EE2 /* HistoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370942FE40E1600752EE2 /* HistoryViewModel.swift */; };
 		793370B92FE40E1800752EE2 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370952FE40E1600752EE2 /* HistoryView.swift */; };
-		793370BA2FE40E1800752EE2 /* VisitRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370982FE40E1600752EE2 /* VisitRepository.swift */; };
-		793370BC2FE40E1800752EE2 /* VisitSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709B2FE40E1600752EE2 /* VisitSummary.swift */; };
-		793370BD2FE40E1800752EE2 /* Visit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709C2FE40E1600752EE2 /* Visit.swift */; };
+		793370BA2FE40E1800752EE2 /* RecordRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370982FE40E1600752EE2 /* RecordRepository.swift */; };
+		793370BD2FE40E1800752EE2 /* Record.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709C2FE40E1600752EE2 /* Record.swift */; };
 		793370BE2FE40E1800752EE2 /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7933709F2FE40E1700752EE2 /* PersistenceController.swift */; };
 		793370C02FE40E1800752EE2 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370A32FE40E1700752EE2 /* AppContainer.swift */; };
 		793370C22FE40E1800752EE2 /* AudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370A72FE40E1700752EE2 /* AudioCapture.swift */; };
 		793370C42FE40E1800752EE2 /* RecordingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AB2FE40E1700752EE2 /* RecordingManager.swift */; };
-		793370C52FE40E1800752EE2 /* VisitRepositoryImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */; };
+		793370C52FE40E1800752EE2 /* RecordRepositoryImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AE2FE40E1700752EE2 /* RecordRepositoryImpl.swift */; };
 		793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D02FE40E9000752EE2 /* AudioPlayer.swift */; };
 		79815C502FE4BD21005AFCD5 /* VoiceNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */; };
 		79888F1E2FE7B6DE00B2EF86 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C722FA2A71904AA69777663D /* onnxruntime.xcframework */; };
@@ -73,14 +72,13 @@
 		793370922FE40E1600752EE2 /* AppTheme.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		793370942FE40E1600752EE2 /* HistoryViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HistoryViewModel.swift; sourceTree = "<group>"; };
 		793370952FE40E1600752EE2 /* HistoryView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
-		793370982FE40E1600752EE2 /* VisitRepository.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisitRepository.swift; sourceTree = "<group>"; };
-		7933709B2FE40E1600752EE2 /* VisitSummary.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisitSummary.swift; sourceTree = "<group>"; };
-		7933709C2FE40E1600752EE2 /* Visit.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Visit.swift; sourceTree = "<group>"; };
+		793370982FE40E1600752EE2 /* RecordRepository.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordRepository.swift; sourceTree = "<group>"; };
+		7933709C2FE40E1600752EE2 /* Record.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Record.swift; sourceTree = "<group>"; };
 		7933709F2FE40E1700752EE2 /* PersistenceController.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
 			793370A32FE40E1700752EE2 /* AppContainer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
 		793370A72FE40E1700752EE2 /* AudioCapture.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioCapture.swift; sourceTree = "<group>"; };
 		793370AB2FE40E1700752EE2 /* RecordingManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordingManager.swift; sourceTree = "<group>"; };
-		793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VisitRepositoryImpl.swift; sourceTree = "<group>"; };
+		793370AE2FE40E1700752EE2 /* RecordRepositoryImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordRepositoryImpl.swift; sourceTree = "<group>"; };
 		793370D02FE40E9000752EE2 /* AudioPlayer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
 		79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VoiceNote.swift; sourceTree = "<group>"; };
 		B22EA984B8E94E578EA8F067 /* ASRModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ASRModelManager.swift; sourceTree = "<group>"; };
@@ -243,7 +241,7 @@
 		793370972FE40E1600752EE2 /* Repository */ = {
 			isa = PBXGroup;
 			children = (
-				793370982FE40E1600752EE2 /* VisitRepository.swift */,
+				793370982FE40E1600752EE2 /* RecordRepository.swift */,
 			);
 			path = Repository;
 			sourceTree = "<group>";
@@ -251,8 +249,7 @@
 		793370992FE40E1600752EE2 /* Model */ = {
 			isa = PBXGroup;
 			children = (
-				7933709B2FE40E1600752EE2 /* VisitSummary.swift */,
-				7933709C2FE40E1600752EE2 /* Visit.swift */,
+				7933709C2FE40E1600752EE2 /* Record.swift */,
 			);
 			path = Model;
 			sourceTree = "<group>";
@@ -325,7 +322,7 @@
 		793370AD2FE40E1700752EE2 /* Repository */ = {
 			isa = PBXGroup;
 			children = (
-				793370AE2FE40E1700752EE2 /* VisitRepositoryImpl.swift */,
+				793370AE2FE40E1700752EE2 /* RecordRepositoryImpl.swift */,
 			);
 			path = Repository;
 			sourceTree = "<group>";
@@ -490,7 +487,7 @@
 				F13E8ACE65FD424DA02045CA /* OfflinePunctuationClient.swift in Sources */,
 				70364673755A47B383ED9C88 /* PunctuationModelManager.swift in Sources */,
 				793370AF2FE40E1800752EE2 /* SettingsView.swift in Sources */,
-				793370C52FE40E1800752EE2 /* VisitRepositoryImpl.swift in Sources */,
+				793370C52FE40E1800752EE2 /* RecordRepositoryImpl.swift in Sources */,
 				793370B32FE40E1800752EE2 /* RecordingView.swift in Sources */,
 				793370B22FE40E1800752EE2 /* HomeView.swift in Sources */,
 				793370B72FE40E1800752EE2 /* AppTheme.swift in Sources */,
@@ -498,16 +495,15 @@
 				793370B92FE40E1800752EE2 /* HistoryView.swift in Sources */,
 				793370B82FE40E1800752EE2 /* HistoryViewModel.swift in Sources */,
 				793370B12FE40E1800752EE2 /* HomeViewModel.swift in Sources */,
-				793370BD2FE40E1800752EE2 /* Visit.swift in Sources */,
+				793370BD2FE40E1800752EE2 /* Record.swift in Sources */,
 				793370B42FE40E1800752EE2 /* RecordingViewModel.swift in Sources */,
 				793370C22FE40E1800752EE2 /* AudioCapture.swift in Sources */,
 				793370B02FE40E1800752EE2 /* SettingsViewModel.swift in Sources */,
 				793370C02FE40E1800752EE2 /* AppContainer.swift in Sources */,
-				793370BC2FE40E1800752EE2 /* VisitSummary.swift in Sources */,
 				793370C42FE40E1800752EE2 /* RecordingManager.swift in Sources */,
 				793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */,
 				793370B62FE40E1800752EE2 /* DetailViewModel.swift in Sources */,
-				793370BA2FE40E1800752EE2 /* VisitRepository.swift in Sources */,
+				793370BA2FE40E1800752EE2 /* RecordRepository.swift in Sources */,
 				793370BE2FE40E1800752EE2 /* PersistenceController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -82,6 +82,37 @@ final class ASRModelManager: ObservableObject {
         return size
     }
 
+    // MARK: - VAD 模型
+
+    /// VAD 模型本地存储目录
+    nonisolated static var vadDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("models/vad", isDirectory: true)
+    }
+
+    /// VAD 模型文件路径 (silero_vad.onnx)
+    nonisolated static func vadModelFilePath() -> URL {
+        vadDirectory.appendingPathComponent("silero_vad.onnx")
+    }
+
+    /// 确保 VAD 模型已从 Bundle 拷贝到 Documents
+    nonisolated static func ensureVadModelAvailable() {
+        let targetURL = vadModelFilePath()
+        guard !FileManager.default.fileExists(atPath: targetURL.path) else { return }
+        try? FileManager.default.createDirectory(at: vadDirectory, withIntermediateDirectories: true)
+        guard let bundleURL = Bundle.main.url(forResource: "silero_vad", withExtension: "onnx") else {
+            Log.asr("VAD model not found in bundle")
+            return
+        }
+        try? FileManager.default.copyItem(at: bundleURL, to: targetURL)
+        Log.asr("VAD model copied from bundle: \(targetURL.path)")
+    }
+
+    /// VAD 模型是否可用
+    nonisolated static func isVadModelAvailable() -> Bool {
+        FileManager.default.fileExists(atPath: vadModelFilePath().path)
+    }
+
     // MARK: - 磁盘空间检查
 
     /// 检查是否有足够磁盘空间（模型压缩包 + 解压后 + 10% 余量）

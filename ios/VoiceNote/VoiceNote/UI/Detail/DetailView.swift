@@ -15,7 +15,7 @@ private enum ActiveSheet: Identifiable {
 
 struct DetailView: View {
     @StateObject var viewModel: DetailViewModel
-    let visitId: UUID
+    let recordId: UUID
     let onBack: () -> Void
 
     @State private var selectedTab = 0
@@ -25,8 +25,8 @@ struct DetailView: View {
         Group {
             if viewModel.isLoading {
                 ProgressView("加载中...")
-            } else if let visit = viewModel.visit {
-                content(visit)
+            } else if let record = viewModel.record {
+                content(record)
             } else {
                 Text("记录不存在")
                     .foregroundColor(.secondary)
@@ -34,12 +34,12 @@ struct DetailView: View {
         }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { viewModel.loadRecord(id: visitId) }
+        .onAppear { viewModel.loadRecord(id: recordId) }
         .onDisappear { viewModel.audioPlayer.stop() }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .transcript:
-                if let t = viewModel.visit?.transcriptText {
+                if let t = viewModel.transcriptText {
                     TranscriptSheetView(title: transcriptFileName, text: t)
                 }
             case .share(let url):
@@ -48,7 +48,7 @@ struct DetailView: View {
         }
     }
 
-    private func content(_ visit: VoiceRecord) -> some View {
+    private func content(_ record: VoiceRecord) -> some View {
         VStack(spacing: 0) {
             // 选项卡
             Picker("", selection: $selectedTab) {
@@ -61,8 +61,8 @@ struct DetailView: View {
 
             // 内容区
             switch selectedTab {
-            case 0: basicInfoTab(visit)
-            case 1: transcriptTab(visit)
+            case 0: basicInfoTab(record)
+            case 1: transcriptTab(record)
             default: EmptyView()
             }
         }
@@ -70,29 +70,29 @@ struct DetailView: View {
 
     // MARK: - 基本信息
 
-    private func basicInfoTab(_ visit: VoiceRecord) -> some View {
+    private func basicInfoTab(_ record: VoiceRecord) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 GroupBox(label: Text("基本信息")) {
-                    infoRow("标题", visit.title)
-                    if !visit.memo.isEmpty {
-                        infoRow("备注", visit.memo)
+                    infoRow("标题", record.title)
+                    if !record.memo.isEmpty {
+                        infoRow("备注", record.memo)
                     }
-                    if !visit.desc.isEmpty {
-                        infoRow("描述", visit.desc)
+                    if !record.desc.isEmpty {
+                        infoRow("描述", record.desc)
                     }
-                    if !visit.speakers.isEmpty {
-                        infoRow("参与人员", visit.speakers.joined(separator: "、"))
+                    if !record.speakers.isEmpty {
+                        infoRow("参与人员", record.speakers.joined(separator: "、"))
                     }
-                    infoRow("开始时间", formattedDate(visit.startTime))
-                    if let end = visit.endTime {
+                    infoRow("开始时间", formattedDate(record.startTime))
+                    if let end = record.endTime {
                         infoRow("结束时间", formattedDate(end))
-                        infoRow("时长", AppTheme.formatDuration(end.timeIntervalSince(visit.startTime)))
+                        infoRow("时长", AppTheme.formatDuration(end.timeIntervalSince(record.startTime)))
                     }
                 }
 
                 // 录音回放
-                if visit.audioFilePath != nil {
+                if record.audioFilePath != nil {
                     audioPlaybackSection
                 }
             }
@@ -102,10 +102,10 @@ struct DetailView: View {
 
     // MARK: - 转写
 
-    private func transcriptTab(_ visit: VoiceRecord) -> some View {
+    private func transcriptTab(_ record: VoiceRecord) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if let transcript = visit.transcriptText, !transcript.isEmpty {
+                if let transcript = viewModel.transcriptText, !transcript.isEmpty {
                     GroupBox(label: Text("完整转写")) {
                         Button {
                             activeSheet = nil
@@ -124,7 +124,7 @@ struct DetailView: View {
                             }
                         }
                     }
-                } else if visit.transcriptStatus == .processing {
+                } else if record.transcriptStatus == .processing {
                     HStack {
                         ProgressView()
                         Text("正在转写...")
@@ -132,14 +132,14 @@ struct DetailView: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity)
-                } else if visit.transcriptStatus == .unavailable {
+                } else if record.transcriptStatus == .unavailable {
                     Text(viewModel.transcriptError ?? "转写失败")
                         .foregroundColor(.red)
                         .font(.caption)
                         .multilineTextAlignment(.center)
                         .padding()
                         .frame(maxWidth: .infinity)
-                } else if visit.transcriptStatus == .pending {
+                } else if record.transcriptStatus == .pending {
                     HStack {
                         ProgressView().scaleEffect(0.8)
                         Text("转写准备中...")
@@ -151,7 +151,7 @@ struct DetailView: View {
                 }
 
                 // 手动重试入口
-                if visit.transcriptStatus == .completed || visit.transcriptStatus == .unavailable {
+                if record.transcriptStatus == .completed || record.transcriptStatus == .unavailable {
                     Divider().padding(.horizontal)
                     HStack(spacing: 24) {
                         Button {
@@ -169,7 +169,7 @@ struct DetailView: View {
                         }
                         .disabled(viewModel.isRetryingTranscript)
 
-                        if let path = visit.transcriptFilePath, !path.isEmpty,
+                        if let path = record.transcriptFilePath, !path.isEmpty,
                            FileManager.default.fileExists(atPath: path) {
                             Button {
                                 let url = URL(fileURLWithPath: path)
@@ -247,7 +247,7 @@ struct DetailView: View {
             }
             .padding(.vertical, 4)
 
-            if let path = viewModel.visit?.audioFilePath, FileManager.default.fileExists(atPath: path) {
+            if let path = viewModel.record?.audioFilePath, FileManager.default.fileExists(atPath: path) {
                 Divider()
                 Button {
                     let url = URL(fileURLWithPath: path)
@@ -285,7 +285,7 @@ struct DetailView: View {
     }
 
     private var transcriptFileName: String {
-        if let path = viewModel.visit?.transcriptFilePath, !path.isEmpty {
+        if let path = viewModel.record?.transcriptFilePath, !path.isEmpty {
             return URL(fileURLWithPath: path).lastPathComponent
         }
         return "转写内容.txt"

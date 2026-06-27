@@ -14,14 +14,21 @@ final class RecordingViewModel: ObservableObject {
     @Published var isStopping = false
     @Published var errorMessage: String?
 
+    /// 录音界面仅展示最后 200 字符，避免长录音全文渲染
+    var displayTranscript: String {
+        let tail = transcript.suffix(200)
+        return transcript.count > 200 ? "…\n" + tail : transcript
+    }
+
     // MARK: - 依赖
 
     private let container: AppContainer
     private let recordingManager: RecordingManager
 
-    var currentVisitId: UUID?
+    var currentRecordId: UUID?
     private var hasStopped = false
     var shouldNavigateToDetail = false
+    private var cancellables = Set<AnyCancellable>()
 
     init(container: AppContainer) {
         self.container = container
@@ -29,7 +36,7 @@ final class RecordingViewModel: ObservableObject {
     }
 
     /// 点击 + 按钮直接开始录音（无需表单）
-    func startVisit() {
+    func startRecording() {
         // 检查麦克风权限
         let micPermission = AVAudioSession.sharedInstance().recordPermission
         switch micPermission {
@@ -70,7 +77,7 @@ final class RecordingViewModel: ObservableObject {
 
             do {
                 let recordId = try await container.recordRepository.createRecord(record)
-                currentVisitId = recordId
+                currentRecordId = recordId
 
                 try? await container.recordRepository.updateTranscriptStatus(recordId, status: .pending)
 
@@ -80,7 +87,7 @@ final class RecordingViewModel: ObservableObject {
                 // 启动录音（仅离线 ASR）
                 recordingManager.startRecording(recordId: recordId)
 
-                // 绑定状态轮询
+                // 绑定状态（Combine 替代轮询）
                 observeRecordingState()
 
             } catch {
@@ -90,35 +97,44 @@ final class RecordingViewModel: ObservableObject {
     }
 
     private func observeRecordingState() {
-        isRecording = true
+        cancellables.removeAll()
 
-        Task {
-            await MainActor.run {
-                isRecording = true
+        recordingManager.$isRecording
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] rec in
+                self?.isRecording = rec
             }
-            while true {
-                let rec = await MainActor.run { recordingManager.isRecording }
-                if !rec { break }
-                await MainActor.run {
-                    transcript = recordingManager.transcript
-                    durationSeconds = recordingManager.durationSeconds
-                    phase = recordingManager.phase
-                }
-                try? await Task.sleep(nanoseconds: 500_000_000)
+            .store(in: &cancellables)
+
+        recordingManager.$transcript
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                self?.transcript = text
             }
-            await MainActor.run {
-                isRecording = false
+            .store(in: &cancellables)
+
+        recordingManager.$durationSeconds
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] dur in
+                self?.durationSeconds = dur
             }
-        }
+            .store(in: &cancellables)
+
+        recordingManager.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] phase in
+                self?.phase = phase
+            }
+            .store(in: &cancellables)
     }
 
-    func stopVisit(navigateToDetail: Bool = false) {
+    func stopRecording(navigateToDetail: Bool = false) {
         guard !hasStopped else { return }
         hasStopped = true
         shouldNavigateToDetail = navigateToDetail
         isStopping = true
         recordingManager.stopRecording()
-        isRecording = false
+        // isRecording 现在由 $isRecording sink 自动同步
         isStopping = false
     }
 

@@ -33,10 +33,23 @@ final class RecordingManager: ObservableObject {
     /// 分段 ASR：尚未完成的片段数
     private var pendingChunkCount = 0
     /// 分段 ASR：每片段最大时长（秒）
-    private let chunkDurationSeconds: TimeInterval = 300  // 5 min
+    private let chunkDurationSeconds: TimeInterval = 30
+
+    /// 增量转写：累积拼接 buffer（避免 O(n²) 全量拼接）
+    private var accumulatedTranscript = ""
+    /// 增量转写：最后已拼入的序号，防止乱序
+    private var lastChunkIndex: Int = -1
+    /// 增量写盘：转写文件路径
+    private var transcriptFileURL: URL?
+
+    /// VAD 是否激活（模型可用则为 true，否则回退到按时间分块）
+    private var vadActive = false
+    /// VAD 语音段计数器（替代 chunkIndex 用于 VAD 模式）
+    private var vadSegmentIndex = 0
 
     private var audioStreamTask: Task<Void, Never>?
     private var durationTask: Task<Void, Never>?
+    private var diskCheckTask: Task<Void, Never>?
 
     private var currentPcmURL: URL?
     private var currentFileHandle: FileHandle?
@@ -57,10 +70,20 @@ final class RecordingManager: ObservableObject {
         chunkIndex = 0
         pendingChunkCount = 0
         transcript = ""
+        accumulatedTranscript = ""
+        lastChunkIndex = -1
         durationSeconds = 0
         batteryWarningShown = false
         isRecording = true
         phase = .recording
+
+        // 创建增量转写文件 (crash 可恢复)
+        let dir = audioDirectory.appendingPathComponent(recordId.uuidString, isDirectory: true)
+        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dateStr = Self.localDateString()
+        transcriptFileURL = dir.appendingPathComponent("\(dateStr).txt")
+        fileManager.createFile(atPath: transcriptFileURL!.path, contents: nil)
+        Log.recording("增量转写文件已创建: \(transcriptFileURL!.path)")
 
         // 时长计时器
         durationTask = Task {
@@ -99,7 +122,38 @@ final class RecordingManager: ObservableObject {
         container.offlinePunctuationClient.ensureInitialized()
         Log.recording("标点模型状态: \(container.offlinePunctuationClient.isAvailable ? "已加载" : "未加载")")
 
-        Log.recording("启动离线 ASR 录音 (chunk=\(Int(chunkDurationSeconds))s)")
+        // 尝试初始化 VAD（若模型可用）
+        vadActive = container.offlineASRClient.ensureVad()
+        vadSegmentIndex = 0
+        Log.recording("VAD 状态: \(vadActive ? "已激活" : "不可用，回退到按时间分块")")
+
+        Log.recording("启动离线 ASR 录音 (chunk=\(Int(chunkDurationSeconds))s, vad=\(vadActive))")
+
+        // 启动磁盘空间监控 + 转录进度 checkpoint（每 5 分钟）
+        let ridForCheckpoint = recordId
+        let repositoryForCheckpoint = container.recordRepository
+        diskCheckTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 300_000_000_000)  // 5 min
+                guard let self else { break }
+
+                // 转录进度 checkpoint（DB 仅记录时长，文本在 .txt 文件中）
+                let dur = await MainActor.run { self.durationSeconds }
+                await repositoryForCheckpoint.checkpointTranscriptProgress(ridForCheckpoint, durationSeconds: dur)
+                Log.recording("转录 checkpoint: \(Int(dur))s")
+
+                // 磁盘空间检查
+                guard let values = try? FileManager.default
+                    .urls(for: .documentDirectory, in: .userDomainMask)[0]
+                    .resourceValues(forKeys: [.volumeAvailableCapacityKey]),
+                      let free = values.volumeAvailableCapacity, free > 0
+                else { continue }
+                let freeMB = free / 1_048_576
+                if free < 500_000_000 {
+                    Log.recording("⚠️ 磁盘空间不足 (剩余 \(freeMB)MB)，建议停止录音")
+                }
+            }
+        }
 
         // 启动录音 pipeline
         performRecording()
@@ -113,22 +167,49 @@ final class RecordingManager: ObservableObject {
                 let stream = try audioCapture.startCapturing()
                 Log.recording("音频流已启动，开始接收数据...")
                 var totalBytes = 0
+                var lastVadDecodeTime = Date()
+
                 for try await audioData in stream {
                     // 写文件（用于最终回放）
                     audioDataWritable?(audioData)
-                    // 积累到 PCM buffer（用于分段 ASR）
-                    pcmBuffer.append(audioData)
                     totalBytes += audioData.count
 
-                    // 每 10 秒打一次日志
-                    if totalBytes % 320_000 < audioData.count {
-                        Log.recording("录音中: 已写入 \(totalBytes / 1000)KB, buffer=\(pcmBuffer.count / 1000)KB")
-                    }
+                    if vadActive {
+                        // VAD 模式: 持续 feed VAD，每 3 秒解码语音段
+                        let floats = pcmDataToFloats(audioData)
+                        container.offlineASRClient.vadAcceptWaveform(samples: floats)
 
-                    // 每 chunkDurationSeconds 秒处理一个片段
-                    let bufferDuration = Double(pcmBuffer.count) / 32000.0
-                    if bufferDuration >= chunkDurationSeconds {
-                        processCurrentChunk()
+                        let elapsed = Date().timeIntervalSince(lastVadDecodeTime)
+                        if elapsed >= 3.0 {
+                            lastVadDecodeTime = Date()
+                            let segments = await container.offlineASRClient.vadDecodeSpeechSegments()
+                            if !segments.isEmpty {
+                                await MainActor.run {
+                                    for text in segments {
+                                        self.handleVadSegment(text: text)
+                                    }
+                                }
+                            }
+                        }
+
+                        // 每 10 秒打一次日志（含 VAD 状态）
+                        if totalBytes % 320_000 < audioData.count {
+                            let detected = container.offlineASRClient.vadIsDetected ? "语音" : "静音"
+                            Log.recording("录音中: 已写入 \(totalBytes / 1000)KB [VAD: \(detected)]")
+                        }
+                    } else {
+                        // 非 VAD 模式: 积累到 PCM buffer，按时间分块
+                        pcmBuffer.append(audioData)
+
+                        // 每 10 秒打一次日志
+                        if totalBytes % 320_000 < audioData.count {
+                            Log.recording("录音中: 已写入 \(totalBytes / 1000)KB, buffer=\(pcmBuffer.count / 1000)KB")
+                        }
+
+                        let bufferDuration = Double(pcmBuffer.count) / 32000.0
+                        if bufferDuration >= chunkDurationSeconds {
+                            processCurrentChunk()
+                        }
                     }
                 }
                 Log.recording("音频流结束，总计写入 \(totalBytes / 1000)KB")
@@ -136,6 +217,45 @@ final class RecordingManager: ObservableObject {
                 Log.recording("Audio capture error: \(error)")
             }
         }
+    }
+
+    /// 将 PCM Data 转换为 Float 数组 (16kHz/16bit/mono → [-1, 1])
+    private func pcmDataToFloats(_ data: Data) -> [Float] {
+        let sampleCount = data.count / MemoryLayout<Int16>.size
+        return data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) in
+            let int16s = ptr.bindMemory(to: Int16.self)
+            var floats = [Float](repeating: 0, count: sampleCount)
+            for i in 0..<sampleCount {
+                floats[i] = Float(int16s[i]) / 32768.0
+            }
+            return floats
+        }
+    }
+
+    /// 处理 VAD 模式下一个语音段的 ASR 结果
+    private func handleVadSegment(text: String) {
+        let index = vadSegmentIndex
+        vadSegmentIndex += 1
+
+        // 存入 transcriptChunks 并增量拼接
+        transcriptChunks[index] = text
+
+        // 累积拼接
+        var nextIndex = lastChunkIndex + 1
+        while let chunkText = transcriptChunks[nextIndex] {
+            if !accumulatedTranscript.isEmpty {
+                accumulatedTranscript += "\n"
+            }
+            accumulatedTranscript += chunkText
+            lastChunkIndex = nextIndex
+            nextIndex += 1
+        }
+        transcript = accumulatedTranscript
+
+        // 增量写盘
+        appendTranscriptChunk(text)
+
+        Log.recording("VAD 语音段 #\(index): \"\(text.prefix(40))...\"")
     }
 
     /// 将当前 buffer 作为一个片段发给离线 ASR
@@ -161,6 +281,22 @@ final class RecordingManager: ObservableObject {
                     var chunks = self.transcriptChunks
                     chunks[index] = text
                     self.transcriptChunks = chunks
+
+                    // 增量写盘 (crash 可恢复)
+                    self.appendTranscriptChunk(text)
+
+                    // 累积拼接：按序拼接已完成片段 (O(n) 替代 O(n²))
+                    var nextIndex = self.lastChunkIndex + 1
+                    while let chunkText = chunks[nextIndex] {
+                        if !self.accumulatedTranscript.isEmpty {
+                            self.accumulatedTranscript += "\n"
+                        }
+                        self.accumulatedTranscript += chunkText
+                        self.lastChunkIndex = nextIndex
+                        nextIndex += 1
+                    }
+                    self.transcript = self.accumulatedTranscript
+
                     if chunks.count == 1, let rid = recordId {
                         Task { try? await repository.updateTranscriptStatus(rid, status: .processing) }
                     }
@@ -168,11 +304,10 @@ final class RecordingManager: ObservableObject {
                 } else {
                     Log.recording("片段 #\(index) 失败")
                 }
-                self.transcript = self.joinedTranscript()
 
                 if self.pendingChunkCount == 0, !self.isRecording, let rid = recordId {
                     Log.recording("全部片段完成，保存最终转写")
-                    let rawText = self.joinedTranscript()
+                    let rawText = self.accumulatedTranscript
                     let punctClient = self.container.offlinePunctuationClient
                     let punctuated: String
                     if !rawText.isBlank, punctClient.isAvailable {
@@ -187,18 +322,26 @@ final class RecordingManager: ObservableObject {
                     let savedText = punctuated.isBlank
                         ? "暂时无法获取转写内容"
                         : punctuated
-                    let fileURL = self.saveTranscriptToFile(recordId: rid, text: savedText)
+                    // 增量文件已写入，此处仅保存最终文件到 DB
+                    let fileURL = self.transcriptFileURL
+                    if let url = fileURL {
+                        try? savedText.write(to: url, atomically: true, encoding: .utf8)
+                    }
                     self.doFinalizeTranscript(recordId: rid, text: savedText, fileURL: fileURL)
                 }
             }
         }
     }
 
-    /// 按序号拼接所有已完成片段
-    private func joinedTranscript() -> String {
-        guard !transcriptChunks.isEmpty else { return "" }
-        let sorted = transcriptChunks.keys.sorted()
-        return sorted.compactMap { transcriptChunks[$0] }.joined(separator: "\n")
+    /// 增量追加转写文本到磁盘文件（含 sync，崩溃安全）
+    private func appendTranscriptChunk(_ text: String) {
+        guard let url = transcriptFileURL,
+              let handle = try? FileHandle(forWritingTo: url) else { return }
+        let line = text + "\n"
+        try? handle.seekToEnd()
+        try? handle.write(contentsOf: line.data(using: .utf8)!)
+        try? handle.synchronize()
+        try? handle.close()
     }
 
     /// 提供给外部的原始音频回调（用于写本地文件）
@@ -209,20 +352,40 @@ final class RecordingManager: ObservableObject {
     // MARK: - 结束录音
 
     func stopRecording() {
-        Log.recording("停止录音: pcmBuffer=\(pcmBuffer.count/1000)KB, pendingChunks=\(pendingChunkCount), chunkIndex=\(chunkIndex)")
+        Log.recording("停止录音: pcmBuffer=\(pcmBuffer.count/1000)KB, pendingChunks=\(pendingChunkCount), chunkIndex=\(chunkIndex), vadActive=\(vadActive)")
         phase = .stopping
         durationTask?.cancel()
+        diskCheckTask?.cancel()
         container.audioCapture.stop()
 
         // 立即标记录音结束 → UI 马上返回
         isRecording = false
         phase = .idle
 
-        // 处理最后一段残片（不足 5min 的部分）
-        if !pcmBuffer.isEmpty {
-            processCurrentChunk()
+        if vadActive {
+            // VAD 模式: flush 尾部语音段
+            container.offlineASRClient.vadFlush()
+            Task {
+                let finalSegments = await container.offlineASRClient.vadDecodeSpeechSegments()
+                if !finalSegments.isEmpty {
+                    await MainActor.run {
+                        for text in finalSegments {
+                            self.handleVadSegment(text: text)
+                        }
+                    }
+                }
+                await MainActor.run {
+                    self.finalizeTranscriptIfNeeded()
+                }
+            }
+            audioStreamTask?.cancel()
+        } else {
+            // 非 VAD 模式: 处理最后一段残片（不足 5min 的部分）
+            if !pcmBuffer.isEmpty {
+                processCurrentChunk()
+            }
+            audioStreamTask?.cancel()
         }
-        audioStreamTask?.cancel()
 
         // 音频定稿：后台执行，不阻塞 UI
         let recordId = currentRecordId
@@ -247,13 +410,38 @@ final class RecordingManager: ObservableObject {
         currentPcmURL = nil
     }
 
-    /// 保存最终转写到 DB
+    /// VAD 模式下的最终转写保存
+    private func finalizeTranscriptIfNeeded() {
+        guard let rid = currentRecordId else { return }
+        Log.recording("VAD 全部语音段完成，保存最终转写")
+        let rawText = accumulatedTranscript
+        let punctClient = container.offlinePunctuationClient
+        let punctuated: String
+        if !rawText.isBlank, punctClient.isAvailable {
+            punctuated = punctClient.addPunctuation(to: rawText)
+            Log.recording("标点恢复完成: raw=\(rawText.count)字符, punct=\(punctuated.count)字符")
+        } else {
+            punctuated = rawText
+            if !rawText.isBlank {
+                Log.recording("标点模型不可用，跳过标点恢复")
+            }
+        }
+        let savedText = punctuated.isBlank
+            ? "暂时无法获取转写内容"
+            : punctuated
+        if let url = transcriptFileURL {
+            try? savedText.write(to: url, atomically: true, encoding: .utf8)
+        }
+        doFinalizeTranscript(recordId: rid, text: savedText, fileURL: transcriptFileURL)
+    }
+
+    /// 保存最终转写到 DB（仅元数据，文本全文在 .txt 文件中）
     private func doFinalizeTranscript(recordId: UUID, text: String, fileURL: URL?) {
         let repository = container.recordRepository
-        let savedText = text
+        let isUnavailable = (text == "暂时无法获取转写内容")
         Task {
-            try? await repository.updateTranscript(recordId, text: savedText, filePath: fileURL?.path ?? "")
-            let status: ProcessingStatus = savedText == "暂时无法获取转写内容" ? .unavailable : .completed
+            try? await repository.updateTranscriptFilePath(recordId, filePath: fileURL?.path ?? "")
+            let status: ProcessingStatus = isUnavailable ? .unavailable : .completed
             try? await repository.updateTranscriptStatus(recordId, status: status)
         }
     }
@@ -269,6 +457,39 @@ final class RecordingManager: ObservableObject {
     }
 
     private let fileManager = FileManager.default
+
+    // MARK: - 崩溃恢复
+
+    /// 恢复未完成的录音：从 .txt 文件加载已转录文本，更新 DB
+    func recoverUnfinishedRecords() async {
+        let repository = container.recordRepository
+        let unfinished = await repository.getUnfinishedRecords()
+        guard !unfinished.isEmpty else {
+            Log.recording("崩溃恢复: 无未完成记录")
+            return
+        }
+
+        Log.recording("崩溃恢复: 发现 \(unfinished.count) 条未完成记录")
+        for record in unfinished {
+            let dir = audioDirectory.appendingPathComponent(record.id.uuidString, isDirectory: true)
+            let txtFiles = (try? fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil))
+                .flatMap { $0.filter { $0.pathExtension == "txt" } } ?? []
+
+            guard let latestTxt = txtFiles.sorted(by: { $0.lastPathComponent > $1.lastPathComponent }).first else {
+                Log.recording("崩溃恢复: recordId=\(record.id) 无转录文件，跳过")
+                continue
+            }
+
+            guard let text = try? String(contentsOf: latestTxt, encoding: .utf8), !text.isEmpty else {
+                Log.recording("崩溃恢复: recordId=\(record.id) 转录文件为空")
+                continue
+            }
+
+            Log.recording("崩溃恢复: recordId=\(record.id), 恢复 \(text.count) 字符, 已转录 \(Int(record.transcribedDurationSeconds))s")
+            try? await repository.updateTranscriptFilePath(record.id, filePath: latestTxt.path)
+            try? await repository.updateTranscriptStatus(record.id, status: .completed)
+        }
+    }
 
     private var audioDirectory: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -298,6 +519,7 @@ final class RecordingManager: ObservableObject {
     }
 
     func finalizeAudio(recordId: UUID, pcmURL: URL) -> String? {
+        // 关闭写入 handle
         if let handle = currentFileHandle {
             try? handle.synchronize()
             try? handle.close()
@@ -305,72 +527,93 @@ final class RecordingManager: ObservableObject {
             Log.recording("PCM FileHandle 已关闭并同步")
         }
 
-        let wavURL = pcmURL.deletingPathExtension().appendingPathExtension("wav")
-        guard let pcmData = try? Data(contentsOf: pcmURL),
-              pcmData.count > 0
+        // 获取 PCM 文件大小（不加载到内存）
+        guard let pcmAttrs = try? fileManager.attributesOfItem(atPath: pcmURL.path),
+              let pcmSize = pcmAttrs[.size] as? Int64,
+              pcmSize > 0
         else {
             Log.recording("finalizeAudio 失败: PCM 文件为空或不可读")
             return nil
         }
 
-        Log.recording("finalizeAudio: PCM size=\(pcmData.count) bytes, duration≈\(Double(pcmData.count) / 32000.0)s")
-
-        let sampleCount = pcmData.count / MemoryLayout<Int16>.size
-        let midOffset = max(0, (sampleCount / 2 - 50) * MemoryLayout<Int16>.size)
-        let samples = pcmData.withUnsafeBytes { ptr -> [Int16] in
-            let base = ptr.baseAddress!.advanced(by: midOffset)
-            return Array(UnsafeBufferPointer(start: base.bindMemory(to: Int16.self, capacity: 100), count: min(100, sampleCount)))
-        }
-        let maxAbs = samples.map(abs).max() ?? 0
-        Log.recording("finalizeAudio: 前100个sample中最大振幅=\(maxAbs)")
-
-        let dataSize = Int32(pcmData.count)
+        let wavURL = pcmURL.deletingPathExtension().appendingPathExtension("wav")
+        let dataSize = Int32(pcmSize)
         let fileSize = dataSize + 36
         let sampleRate: Int32 = 16_000
-        let byteRate: Int32 = sampleRate * 2 // 16-bit mono
+        let byteRate: Int32 = sampleRate * 2
 
-        var wav = Data()
-        wav.append("RIFF".data(using: .ascii)!)
-        wav.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian, Array.init))
-        wav.append("WAVE".data(using: .ascii)!)
-        wav.append("fmt ".data(using: .ascii)!)
-        wav.append(contentsOf: withUnsafeBytes(of: Int32(16).littleEndian, Array.init)) // chunk size
-        wav.append(contentsOf: withUnsafeBytes(of: Int16(1).littleEndian, Array.init))  // PCM
-        wav.append(contentsOf: withUnsafeBytes(of: Int16(1).littleEndian, Array.init))  // mono
-        wav.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian, Array.init))
-        wav.append(contentsOf: withUnsafeBytes(of: byteRate.littleEndian, Array.init))
-        wav.append(contentsOf: withUnsafeBytes(of: Int16(2).littleEndian, Array.init))  // block align
-        wav.append(contentsOf: withUnsafeBytes(of: Int16(16).littleEndian, Array.init)) // bits/sample
-        wav.append("data".data(using: .ascii)!)
-        wav.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian, Array.init))
-        wav.append(pcmData)
+        Log.recording("finalizeAudio: PCM size=\(pcmSize) bytes, duration≈\(Double(pcmSize) / 32000.0)s, 流式转换 WAV")
 
-        try? wav.write(to: wavURL)
-        try? fileManager.removeItem(at: pcmURL) // 删除原始 PCM
+        // 创建 WAV 文件
+        guard fileManager.createFile(atPath: wavURL.path, contents: nil) else {
+            Log.recording("finalizeAudio 失败: 无法创建 WAV 文件")
+            return nil
+        }
+        guard let wavHandle = try? FileHandle(forWritingTo: wavURL) else {
+            return nil
+        }
+
+        // 写 WAV header
+        var header = Data()
+        header.append("RIFF".data(using: .ascii)!)
+        header.append(contentsOf: withUnsafeBytes(of: fileSize.littleEndian, Array.init))
+        header.append("WAVE".data(using: .ascii)!)
+        header.append("fmt ".data(using: .ascii)!)
+        header.append(contentsOf: withUnsafeBytes(of: Int32(16).littleEndian, Array.init))
+        header.append(contentsOf: withUnsafeBytes(of: Int16(1).littleEndian, Array.init))
+        header.append(contentsOf: withUnsafeBytes(of: Int16(1).littleEndian, Array.init))
+        header.append(contentsOf: withUnsafeBytes(of: sampleRate.littleEndian, Array.init))
+        header.append(contentsOf: withUnsafeBytes(of: byteRate.littleEndian, Array.init))
+        header.append(contentsOf: withUnsafeBytes(of: Int16(2).littleEndian, Array.init))
+        header.append(contentsOf: withUnsafeBytes(of: Int16(16).littleEndian, Array.init))
+        header.append("data".data(using: .ascii)!)
+        header.append(contentsOf: withUnsafeBytes(of: dataSize.littleEndian, Array.init))
+        try? wavHandle.write(contentsOf: header)
+
+        // 流式读 PCM → 写到 WAV (每次 4MB 块)，避免全量加载到内存
+        guard let pcmHandle = try? FileHandle(forReadingFrom: pcmURL) else {
+            try? wavHandle.close()
+            try? fileManager.removeItem(at: wavURL)
+            Log.recording("finalizeAudio 失败: 无法打开 PCM 文件读取")
+            return nil
+        }
+
+        let chunkSize = 4 * 1024 * 1024  // 4MB
+        var totalWritten: Int64 = 0
+        while true {
+            guard let chunk = try? pcmHandle.read(upToCount: chunkSize),
+                  !chunk.isEmpty else { break }
+            try? wavHandle.write(contentsOf: chunk)
+            totalWritten += Int64(chunk.count)
+        }
+
+        try? pcmHandle.close()
+        try? wavHandle.close()
+
+        Log.recording("WAV 流式转换完成: \(totalWritten) bytes written")
+
+        // 验证中间振幅
+        if let verifyHandle = try? FileHandle(forReadingFrom: wavURL) {
+            defer { try? verifyHandle.close() }
+            // Seek to middle of data section (44 byte header + middle of PCM)
+            let midDataOffset: UInt64 = 44 + UInt64(pcmSize / 2)
+            try? verifyHandle.seek(toOffset: midDataOffset)
+            if let midChunk = try? verifyHandle.read(upToCount: 200) {
+                let samples = midChunk.withUnsafeBytes { ptr -> [Int16] in
+                    let base = ptr.baseAddress!.bindMemory(to: Int16.self, capacity: 100)
+                    return Array(UnsafeBufferPointer(start: base, count: min(100, midChunk.count / 2)))
+                }
+                let maxAbs = samples.map(abs).max() ?? 0
+                Log.recording("finalizeAudio: 中段前100个sample中最大振幅=\(maxAbs)")
+            }
+        }
+
+        // 删除原始 PCM
+        try? fileManager.removeItem(at: pcmURL)
 
         return wavURL.path
     }
 
-    private func saveTranscriptToFile(recordId: UUID, text: String) -> URL? {
-        guard !text.isEmpty else { return nil }
-        let dir = audioDirectory.appendingPathComponent(recordId.uuidString, isDirectory: true)
-        do {
-            try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            Log.recording("创建转写目录失败: \(error)")
-            return nil
-        }
-        let dateString = Self.localDateString()
-        let url = dir.appendingPathComponent("\(dateString).txt")
-        do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            Log.recording("转写文件已保存: \(url.path) (\(text.count) 字符)")
-            return url
-        } catch {
-            Log.recording("转写文件写入失败: \(error)")
-            return nil
-        }
-    }
 }
 
 // MARK: - 日志
