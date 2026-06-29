@@ -1,5 +1,6 @@
 package com.voicenote.app.ui.detail
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -15,9 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.VerticalScrollbar
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -61,6 +60,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.style.TextAlign
@@ -226,17 +229,38 @@ fun DetailScreen(
                 SelectionContainer {
                     Box {
                         Column(
-                            modifier = Modifier.verticalScroll(scrollState)
+                            modifier = Modifier
+                                .verticalScroll(scrollState)
+                                .padding(end = 10.dp)
                         ) {
                             Text(
                                 transcriptText.ifBlank { "转写内容为空" },
                                 style = MaterialTheme.typography.bodyMedium
                             )
                         }
-                        VerticalScrollbar(
-                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                            adapter = rememberScrollbarAdapter(scrollState)
-                        )
+                        if (scrollState.maxValue > 0) {
+                            val onSurface = MaterialTheme.colorScheme.onSurface
+                            Canvas(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .fillMaxHeight()
+                                    .width(4.dp)
+                            ) {
+                                val viewportHeight = size.height
+                                val totalHeight = viewportHeight + scrollState.maxValue
+                                val thumbHeight = viewportHeight / totalHeight * viewportHeight
+                                val scrollFraction =
+                                    scrollState.value.toFloat() / scrollState.maxValue.toFloat()
+                                val thumbOffset =
+                                    scrollFraction * (viewportHeight - thumbHeight)
+                                drawRoundRect(
+                                    color = onSurface.copy(alpha = 0.35f),
+                                    topLeft = Offset(0f, thumbOffset),
+                                    size = Size(size.width, thumbHeight),
+                                    cornerRadius = CornerRadius(2.dp.toPx())
+                                )
+                            }
+                        }
                     }
                 }
             },
