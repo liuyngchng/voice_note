@@ -220,11 +220,14 @@ fun DetailScreen(
             title = { Text("转写内容") },
             text = {
                 SelectionContainer {
-                    Text(
-                        transcriptText.ifBlank { "转写内容为空" },
-                        style = MaterialTheme.typography.bodyMedium,
+                    Column(
                         modifier = Modifier.verticalScroll(rememberScrollState())
-                    )
+                    ) {
+                        Text(
+                            transcriptText.ifBlank { "转写内容为空" },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
             },
             confirmButton = {
