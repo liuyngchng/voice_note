@@ -7,15 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -222,21 +219,11 @@ fun DetailScreen(
             onDismissRequest = viewModel::dismissTranscriptPreview,
             title = { Text("转写内容") },
             text = {
-                val scrollState = rememberScrollState()
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    SelectionContainer {
-                        Column(
-                            modifier = Modifier.verticalScroll(scrollState)
-                        ) {
-                            Text(
-                                transcriptText.ifBlank { "转写内容为空" },
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                    VerticalScrollbar(
-                        modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
-                        adapter = rememberScrollbarAdapter(scrollState)
+                SelectionContainer {
+                    Text(
+                        transcriptText.ifBlank { "转写内容为空" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.verticalScroll(rememberScrollState())
                     )
                 }
             },
