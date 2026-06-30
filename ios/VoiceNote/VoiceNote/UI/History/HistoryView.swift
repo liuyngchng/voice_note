@@ -95,8 +95,7 @@ struct HistoryView: View {
                     viewModel: DetailViewModel(container: viewModel.container),
                     recordId: id,
                     onBack: { showDetail = false }
-                )
-                .navigationBarBackButtonHidden(true),
+                ),
                 isActive: $showDetail,
                 label: { EmptyView() }
             )

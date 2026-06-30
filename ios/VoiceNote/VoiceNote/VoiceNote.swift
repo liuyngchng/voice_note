@@ -19,35 +19,90 @@ struct SmartBadgeApp: App {
 
 // MARK: - App 全局状态
 
+/// 模型加载状态，对齐 Android: OfflineASRClient.ModelStatus
+enum ModelStatus {
+    case unknown
+    case missing
+    case loading
+    case ready
+    case error
+}
+
 @MainActor
 final class AppState: ObservableObject {
-    /// 离线 ASR 模型是否已加载
-    @Published var isModelLoaded = false
-    /// 模型加载错误
+    /// 模型加载状态
+    @Published var modelStatus: ModelStatus = .unknown
+    /// 模型加载错误描述
     @Published var modelLoadError: String?
-    /// 是否需要引导用户导入模型
+    /// 是否需要引导用户导入模型（弹 alert）
     @Published var needsModelGuidance = false
 
-    private let offlineASRClient = OfflineASRClient()
+    /// 在 app 启动时调用，加载离线模型（ASR + VAD + 标点）
+    func loadModelOnStartup(container: AppContainer) {
+        preloadModels(container: container)
+    }
 
-    /// 在 app 启动时调用，加载离线语音模型
-    func loadModelOnStartup() {
+    /// 从设置页返回时刷新模型状态（用户可能刚下载了模型）
+    func refreshModelStatus(container: AppContainer) {
+        // 正在加载或已就绪则跳过，避免重复加载
+        guard modelStatus != .ready, modelStatus != .loading else { return }
+        preloadModels(container: container)
+    }
+
+    // MARK: - 私有
+
+    private func preloadModels(container: AppContainer) {
         let quality = ASRModelManager.savedQuality()
 
-        guard ASRModelManager.isModelDownloaded(quality) else {
-            appLog("app", "[App] 离线语音模型未下载，需要引导用户导入")
+        // 检查 ASR 模型文件 + tokens 是否在本地
+        guard ASRModelManager.isModelDownloaded(quality),
+              FileManager.default.fileExists(atPath: ASRModelManager.tokensFilePath().path)
+        else {
+            modelStatus = .missing
             needsModelGuidance = true
+            appLog("app", "[App] 离线语音模型未下载，需要引导用户导入")
             return
         }
 
-        do {
-            try offlineASRClient.ensureRecognizer(quality: quality)
-            isModelLoaded = true
+        // ASR 已加载且 VAD 已就绪 → 直接标记 ready
+        let asrClient = container.offlineASRClient
+        if asrClient.isAvailable, asrClient.loadedQuality == quality {
+            modelStatus = .ready
             needsModelGuidance = false
-            appLog("app", "[App] 离线语音模型加载完成: \(quality.rawValue)")
-        } catch {
-            modelLoadError = error.localizedDescription
-            appLog("app", "[App] 离线语音模型加载失败: \(error.localizedDescription)")
+            appLog("app", "[App] 离线模型已加载，跳过")
+            return
+        }
+
+        modelStatus = .loading
+        appLog("app", "[App] 开始加载离线模型 (quality=\(quality.rawValue))")
+
+        Task.detached(priority: .utility) {
+            do {
+                // 1. 加载 ASR 模型
+                try asrClient.ensureRecognizer(quality: quality)
+                appLog("app", "[App] ASR 模型加载完成")
+
+                // 2. 加载 VAD
+                let vadReady = asrClient.ensureVad()
+                appLog("app", "[App] VAD \(vadReady ? "已就绪" : "不可用")")
+
+                // 3. 加载标点模型（可选，不存在则跳过）
+                container.offlinePunctuationClient.ensureInitialized()
+                appLog("app", "[App] 标点模型 \(container.offlinePunctuationClient.isAvailable ? "已加载" : "未安装，跳过")")
+
+                await MainActor.run {
+                    self.modelStatus = .ready
+                    self.needsModelGuidance = false
+                    self.modelLoadError = nil
+                    appLog("app", "[App] 全部模型加载完成")
+                }
+            } catch {
+                appLog("app", "[App] 模型加载失败: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.modelStatus = .error
+                    self.modelLoadError = error.localizedDescription
+                }
+            }
         }
     }
 }
@@ -106,7 +161,8 @@ private struct RootView: View {
         .navigationViewStyle(.stack)
         .modifier(PermissionModifier())
         .onAppear {
-            appState.loadModelOnStartup()
+            appState.loadModelOnStartup(container: container)
+            appState.refreshModelStatus(container: container)
         }
         .alert(isPresented: $showModelGuide) {
             Alert(
@@ -170,11 +226,13 @@ private struct RootView: View {
     private var homeScreen: some View {
         HomeView(
             viewModel: HomeViewModel(container: container),
+            modelStatus: appState.modelStatus,
             onNewRecord: { showRecording = true },
             onRecordTap: { id in
                 detailId = id
                 showDetail = true
-            }
+            },
+            onSettingsTap: { showSettings = true }
         )
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

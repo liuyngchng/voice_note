@@ -2,13 +2,22 @@ import SwiftUI
 
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
+    let modelStatus: ModelStatus
     let onNewRecord: () -> Void
     let onRecordTap: (UUID) -> Void
+    let onSettingsTap: () -> Void
 
     @State private var isRefreshing = false
 
     var body: some View {
         List {
+            // 模型状态横幅（对齐 Android: ModelLoadingBanner / ModelMissingBanner / ModelErrorBanner）
+            if modelStatus != .ready {
+                Section {
+                    modelStatusBanner
+                }
+            }
+
             Section(header: Text("今日概览")) {
                 HStack {
                     StatCard(title: "今日记录", value: "\(viewModel.todayRecordCount)")
@@ -39,6 +48,7 @@ struct HomeView: View {
                 Button(action: onNewRecord) {
                     Image(systemName: "plus")
                 }
+                .disabled(modelStatus != .ready)
             }
         }
         .onAppear {
@@ -47,6 +57,75 @@ struct HomeView: View {
         .modifier(RefreshableModifier(isRefreshing: $isRefreshing) {
             viewModel.loadRecords()
         })
+    }
+
+    // MARK: - 模型状态横幅
+
+    @ViewBuilder
+    private var modelStatusBanner: some View {
+        switch modelStatus {
+        case .loading:
+            HStack(spacing: 10) {
+                ProgressView()
+                    .scaleEffect(0.8)
+                Text("正在加载语音识别模型...")
+                    .font(.subheadline)
+                    .foregroundColor(.primary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.blue.opacity(0.1))
+            .cornerRadius(8)
+
+        case .missing:
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("离线模型未安装")
+                        .font(.subheadline)
+                        .bold()
+                    Text("请先下载 SenseVoice 语音识别模型")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("前往设置") { onSettingsTap() }
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.orange)
+                    .foregroundColor(.white)
+                    .cornerRadius(6)
+            }
+            .padding(12)
+            .background(Color.orange.opacity(0.1))
+            .cornerRadius(8)
+
+        case .error:
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("模型加载失败")
+                        .font(.subheadline)
+                        .bold()
+                    Text("请前往设置重新下载模型")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("前往设置") { onSettingsTap() }
+                    .font(.subheadline)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.red)
+                    .foregroundColor(.white)
+                    .cornerRadius(6)
+            }
+            .padding(12)
+            .background(Color.red.opacity(0.1))
+            .cornerRadius(8)
+
+        case .ready, .unknown:
+            EmptyView()
+        }
     }
 }
 

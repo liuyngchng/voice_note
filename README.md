@@ -49,10 +49,60 @@
 
 ### iOS
 
-1. 用 Xcode 打开 `ios/VoiceNote/VoiceNote.xcodeproj`
+#### GUI 方式
+
+1. 用 Xcode 打开 `ios/VoiceNote/VoiceNote.xcodeproj`（或 `ios/VoiceNote/VoiceNote.xcworkspace`）
 2. 选择目标设备（iOS 14.0+）
-3. 运行 App
+3. 点击 Run（⌘R）运行 App
 4. 首次启动会提示下载/导入 SenseVoice 语音识别模型
+
+#### 命令行方式
+
+**模拟器**（无需额外工具，Xcode 14+ 均可使用）：
+
+```bash
+# 列出可用模拟器
+xcrun simctl list devices available
+
+# 构建
+xcodebuild -workspace ios/VoiceNote/VoiceNote.xcworkspace \
+  -scheme VoiceNote \
+  -configuration Debug \
+  -derivedDataPath ./build \
+  -destination 'platform=iOS Simulator,name=iPhone 14' \
+  build
+
+# 安装到模拟器
+xcrun simctl install "iPhone 14" build/Build/Products/Debug-iphonesimulator/VoiceNote.app
+
+# 启动 App
+xcrun simctl launch "iPhone 14" <bundle.id>
+```
+
+**真机**（需安装 `ios-deploy`）：
+
+```bash
+# 一次性安装 ios-deploy
+brew install ios-deploy
+
+# 构建（destination 填你的 iPhone 名称，可在 Xcode → Window → Devices and Simulators 查看）
+xcodebuild -workspace ios/VoiceNote/VoiceNote.xcworkspace \
+  -scheme VoiceNote \
+  -configuration Debug \
+  -derivedDataPath ./build \
+  -destination 'platform=iOS,name=你的iPhone名' \
+  build
+
+# 安装到真机（仅安装，不启动）
+ios-deploy --bundle build/Build/Products/Debug-iphoneos/VoiceNote.app --justlaunch=false
+
+# 安装并启动
+ios-deploy --bundle build/Build/Products/Debug-iphoneos/VoiceNote.app
+```
+
+> **Xcode 版本说明**：
+> - Xcode 14：使用 `ios-deploy` 安装到真机；`xcrun simctl` 用于模拟器
+> - Xcode 15+：可使用内置 `xcrun devicectl device install` 替代 `ios-deploy`（`devicectl` 在 Xcode 14 中不可用）
 
 ## 配置
 

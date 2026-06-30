@@ -34,6 +34,12 @@ struct DetailView: View {
         }
         .navigationTitle("记录详情")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button("返回", action: onBack)
+            }
+        }
         .onAppear { viewModel.loadRecord(id: recordId) }
         .onDisappear { viewModel.audioPlayer.stop() }
         .sheet(item: $activeSheet) { sheet in

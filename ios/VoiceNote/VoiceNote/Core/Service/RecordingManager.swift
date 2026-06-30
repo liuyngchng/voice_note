@@ -33,7 +33,7 @@ final class RecordingManager: ObservableObject {
     /// 分段 ASR：尚未完成的片段数
     private var pendingChunkCount = 0
     /// 分段 ASR：每片段最大时长（秒）
-    private let chunkDurationSeconds: TimeInterval = 30
+    private let chunkDurationSeconds: TimeInterval = 15
 
     /// 增量转写：累积拼接 buffer（避免 O(n²) 全量拼接）
     private var accumulatedTranscript = ""
