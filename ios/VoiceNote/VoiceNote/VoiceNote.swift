@@ -40,10 +40,10 @@ final class AppState: ObservableObject {
         preloadModels(container: container)
     }
 
-    /// 从设置页返回时刷新模型状态（用户可能刚下载了模型）
+    /// 从设置页返回时刷新模型状态（用户可能刚下载或删除了模型）
     func refreshModelStatus(container: AppContainer) {
-        // 正在加载或已就绪则跳过，避免重复加载
-        guard modelStatus != .ready, modelStatus != .loading else { return }
+        // 正在加载中则跳过，避免重复启动加载任务
+        guard modelStatus != .loading else { return }
         preloadModels(container: container)
     }
 
@@ -158,6 +158,12 @@ private struct RootView: View {
             appState.loadModelOnStartup(container: container)
             appState.refreshModelStatus(container: container)
         }
+        .onChange(of: showSettings) { isShowing in
+            if !isShowing {
+                // 从设置页返回时刷新模型状态（用户可能刚下载了模型）
+                appState.refreshModelStatus(container: container)
+            }
+        }
     }
 
     // MARK: - 隐藏 NavigationLink (程序化导航)
@@ -208,7 +214,8 @@ private struct RootView: View {
                 detailId = id
                 showDetail = true
             },
-            onSettingsTap: { showSettings = true }
+            onSettingsTap: { showSettings = true },
+            onRefreshModelStatus: { appState.refreshModelStatus(container: container) }
         )
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

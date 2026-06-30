@@ -6,6 +6,7 @@ struct HomeView: View {
     let onNewRecord: () -> Void
     let onRecordTap: (UUID) -> Void
     let onSettingsTap: () -> Void
+    let onRefreshModelStatus: () -> Void
 
     @State private var isRefreshing = false
 
@@ -56,6 +57,7 @@ struct HomeView: View {
         }
         .modifier(RefreshableModifier(isRefreshing: $isRefreshing) {
             viewModel.loadRecords()
+            onRefreshModelStatus()
         })
     }
 
