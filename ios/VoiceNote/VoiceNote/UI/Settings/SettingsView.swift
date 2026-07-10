@@ -278,11 +278,12 @@ struct SettingsView: View {
     }
 
     private func asrDownloadFailedRow(_ error: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isImport = modelDownloadManager.activeOperation == .import_
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-                Text("下载失败")
+                Text(isImport ? "导入失败" : "下载失败")
                     .font(.subheadline)
                     .foregroundColor(.red)
             }
@@ -461,11 +462,12 @@ struct SettingsView: View {
     }
 
     private func punctDownloadFailedRow(_ error: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isImport = punctuationModelManager.activeOperation == .import_
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-                Text("下载失败")
+                Text(isImport ? "导入失败" : "下载失败")
                     .font(.subheadline)
                     .foregroundColor(.red)
             }
