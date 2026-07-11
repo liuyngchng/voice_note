@@ -20,8 +20,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Audiotrack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,18 +35,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.voicenote.app.core.asr.ModelStatus
 import com.voicenote.app.domain.model.VoiceRecord
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -59,6 +65,12 @@ fun HomeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // Refresh model status each time the screen enters composition,
+    // picking up changes made on other screens (e.g. model upload in Settings).
+    LaunchedEffect(Unit) {
+        viewModel.refreshModelStatus()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -72,14 +84,16 @@ fun HomeScreen(
                         Icon(
                             Icons.Default.History,
                             contentDescription = "历史记录",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                     IconButton(onClick = onSettingsClick) {
                         Icon(
                             Icons.Default.Settings,
                             contentDescription = "设置",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                     // "+" button — primary action, matches iOS toolbar pattern
@@ -93,7 +107,7 @@ fun HomeScreen(
                             Icons.Default.Add,
                             contentDescription = "新建录音",
                             tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(40.dp).padding(8.dp)
+                            modifier = Modifier.size(44.dp).padding(10.dp)
                         )
                     }
                 }
@@ -119,21 +133,37 @@ fun HomeScreen(
                     ) {
                         StatCard(
                             modifier = Modifier.weight(1f),
-                            title = "今日录音",
-                            value = "${uiState.todayRecordCount} 次"
+                            title = "今日记录",
+                            value = "${uiState.todayRecordCount}"
                         )
                         StatCard(
                             modifier = Modifier.weight(1f),
-                            title = "今日时长",
-                            value = "${uiState.todayTotalMinutes} 分钟"
+                            title = "总记录",
+                            value = "${uiState.totalRecordCount}"
                         )
+                    }
+                }
+
+                // Model status banner
+                item {
+                    when (uiState.modelStatus) {
+                        ModelStatus.UNKNOWN, ModelStatus.LOADING -> {
+                            ModelLoadingBanner()
+                        }
+                        ModelStatus.MISSING -> {
+                            ModelMissingBanner(onGoToSettings = onSettingsClick)
+                        }
+                        ModelStatus.ERROR -> {
+                            ModelErrorBanner(onGoToSettings = onSettingsClick)
+                        }
+                        ModelStatus.READY -> { /* no banner needed */ }
                     }
                 }
 
                 // Recent records header
                 item {
                     Text(
-                        "最近录音",
+                        "最近记录",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(top = 4.dp)
@@ -142,21 +172,14 @@ fun HomeScreen(
 
                 if (uiState.recentRecords.isEmpty()) {
                     item {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
+                        Box(
+                            modifier = Modifier.fillMaxWidth().height(80.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "暂无录音记录",
+                                "暂无记录",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                "点击右上角 + 新建录音",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
                             )
                         }
                     }
@@ -191,6 +214,121 @@ private fun StatCard(modifier: Modifier = Modifier, title: String, value: String
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModelMissingBanner(onGoToSettings: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "离线模型未安装",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+            TextButton(onClick = onGoToSettings) {
+                Icon(
+                    Icons.Default.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("前往设置")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelErrorBanner(onGoToSettings: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "模型加载失败",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    "模型文件可能已损坏，请重新下载或上传",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                )
+            }
+            TextButton(onClick = onGoToSettings) {
+                Icon(
+                    Icons.Default.Download,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("前往设置")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModelLoadingBanner() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                "正在加载语音识别模型...",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
     }
@@ -241,20 +379,6 @@ private fun VoiceRecordCard(record: VoiceRecord, onClick: () -> Unit) {
                             modifier = Modifier.size(14.dp),
                             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                         )
-                    }
-                    if (record.summary != null) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                        ) {
-                            Text(
-                                "已总结",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
                     }
                 }
             }

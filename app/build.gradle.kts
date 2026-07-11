@@ -37,6 +37,17 @@ android {
         versionCode = 1
         versionName = "2.0.0"
         buildConfigField("String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\"")
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags("-O3", "-DNDEBUG")
+                cFlags("-O3", "-DNDEBUG")
+            }
+        }
     }
 
     buildTypes {
@@ -96,8 +107,6 @@ dependencies {
 
     // Network
     implementation(libs.okhttp)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.gson)
     implementation(libs.gson)
 
     // Coroutines

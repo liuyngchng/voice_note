@@ -5,13 +5,10 @@ import Foundation
 @MainActor
 final class AppContainer: ObservableObject {
     let audioCapture = AudioCapture()
-    let asrClient = FunASRClient()
-    let llmClient = LLMClient()
     let persistence = PersistenceController.shared
-    let modelDownloadManager = ModelDownloadManager()
+    let modelDownloadManager = ASRModelManager()
     let offlineASRClient = OfflineASRClient()
-    let offlineLLMClient = OfflineLLMClient()
-    let llmModelManager = LLMModelManager()
+    let offlinePunctuationClient = OfflinePunctuationClient()
 
     lazy var recordRepository: RecordRepository = RecordRepositoryImpl(container: self)
     lazy var recordingManager = RecordingManager(container: self)

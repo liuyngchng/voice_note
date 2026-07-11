@@ -9,13 +9,14 @@ struct VoiceRecord: Identifiable, Codable {
     var speakers: [String]
     var startTime: Date
     var endTime: Date?
+    /// [已废弃] 仅用于兼容旧版本 DB 数据，新记录不再写入此字段
     var transcriptText: String?
+    /// 转写 .txt 文件路径（文本全文存于磁盘文件）
     var transcriptFilePath: String?
     var transcriptStatus: ProcessingStatus
-    var summaryStatus: ProcessingStatus
     var audioFilePath: String?
-    var summary: RecordSummary?
-    var summaryGeneratedAt: Date?
+    /// 已转录时长（秒），5 分钟 checkpoint，用于崩溃恢复
+    var transcribedDurationSeconds: TimeInterval
 
     init(
         id: UUID = UUID(),
@@ -28,10 +29,8 @@ struct VoiceRecord: Identifiable, Codable {
         transcriptText: String? = nil,
         transcriptFilePath: String? = nil,
         transcriptStatus: ProcessingStatus = .pending,
-        summaryStatus: ProcessingStatus = .pending,
         audioFilePath: String? = nil,
-        summary: RecordSummary? = nil,
-        summaryGeneratedAt: Date? = nil
+        transcribedDurationSeconds: TimeInterval = 0
     ) {
         self.id = id
         self.title = title
@@ -43,10 +42,8 @@ struct VoiceRecord: Identifiable, Codable {
         self.transcriptText = transcriptText
         self.transcriptFilePath = transcriptFilePath
         self.transcriptStatus = transcriptStatus
-        self.summaryStatus = summaryStatus
         self.audioFilePath = audioFilePath
-        self.summary = summary
-        self.summaryGeneratedAt = summaryGeneratedAt
+        self.transcribedDurationSeconds = transcribedDurationSeconds
     }
 }
 

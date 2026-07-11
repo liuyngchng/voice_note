@@ -1,11 +1,11 @@
 package com.voicenote.app.ui.recording
 
 import android.app.Application
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
-import android.os.IBinder
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.voicenote.app.core.di.SettingsDataStore
@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 data class RecordingUiState(
@@ -31,7 +33,10 @@ data class RecordingUiState(
     val currentRecordId: Long = 0,
     val isStarting: Boolean = false,
     val isStopping: Boolean = false,
-    val error: String? = null
+    val statusMessage: String = "",
+    val error: String? = null,
+    val showBatteryOptDialog: Boolean = false,
+    val batteryOptimizationDisabled: Boolean = false
 )
 
 @HiltViewModel
@@ -53,13 +58,15 @@ class RecordingViewModel @Inject constructor(
         val state = _uiState.value
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isStarting = true, error = null)
-            android.util.Log.e("REC_CRASH", "VM: startRecording entered")
 
             val settings = settingsDataStore.settingsFlow.first()
-            android.util.Log.e("REC_CRASH", "VM: settings loaded, asrMode=${settings.asrMode}, llmMode=${settings.llmMode}")
+
+            val title = state.title.trim().ifBlank {
+                "新录音 ${dateFormatter.format(java.time.Instant.now())}"
+            }
 
             val record = VoiceRecord(
-                title = state.title,
+                title = title,
                 memo = state.memo,
                 description = state.description,
                 speakers = state.speakers
@@ -69,7 +76,6 @@ class RecordingViewModel @Inject constructor(
             )
 
             val recordId = recordRepository.createRecord(record)
-            android.util.Log.e("REC_CRASH", "VM: record created, id=$recordId")
             _uiState.value = _uiState.value.copy(
                 currentRecordId = recordId,
                 isRecording = true,
@@ -77,34 +83,19 @@ class RecordingViewModel @Inject constructor(
             )
 
             startRecordingService(recordId, settings)
-            android.util.Log.e("REC_CRASH", "VM: startRecordingService returned")
         }
     }
 
     private fun startRecordingService(recordId: Long, settings: com.voicenote.app.core.di.AppSettings) {
-        android.util.Log.e("REC_CRASH", "VM: startRecordingService entered, recordId=$recordId")
         val context = getApplication<Application>()
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START
             putExtra(RecordingService.EXTRA_RECORD_ID, recordId)
-            putExtra(RecordingService.EXTRA_ASR_URL, settings.asrUrl)
-            putExtra(RecordingService.EXTRA_LLM_URL, settings.llmUrl)
-            putExtra(RecordingService.EXTRA_LLM_KEY, settings.llmKey)
-            putExtra(RecordingService.EXTRA_LLM_MODEL, settings.llmModel)
-            putExtra(RecordingService.EXTRA_ASR_MODE, settings.asrMode)
-            putExtra(RecordingService.EXTRA_LLM_MODE, settings.llmMode)
-            putExtra(RecordingService.EXTRA_LLM_MODEL_INFO, settings.llmModelInfo)
             putExtra(RecordingService.EXTRA_OFFLINE_MODEL_QUALITY, settings.offlineModelQuality)
-            if (settings.llmPrompt.isNotBlank()) {
-                putExtra(RecordingService.EXTRA_LLM_PROMPT, settings.llmPrompt)
-            }
         }
-        android.util.Log.e("REC_CRASH", "VM: calling startForegroundService")
         try {
             context.startForegroundService(intent)
-            android.util.Log.e("REC_CRASH", "VM: startForegroundService OK, observing service state")
         } catch (e: Exception) {
-            android.util.Log.e("REC_CRASH", "VM: startForegroundService FAILED: ${e.message}", e)
             _uiState.value = _uiState.value.copy(
                 isRecording = false,
                 isStarting = false,
@@ -113,7 +104,68 @@ class RecordingViewModel @Inject constructor(
             return
         }
 
-        // Observe service state
+        observeServiceState()
+    }
+
+    fun stopRecording() {
+        _uiState.value = _uiState.value.copy(isStopping = true)
+        val context = getApplication<Application>()
+        val intent = Intent(context, RecordingService::class.java).apply {
+            action = RecordingService.ACTION_STOP
+        }
+        context.startService(intent)
+    }
+
+    fun checkBatteryOptimization() {
+        val context = getApplication<Application>()
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val isIgnoring = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        _uiState.value = _uiState.value.copy(
+            batteryOptimizationDisabled = isIgnoring,
+            showBatteryOptDialog = !isIgnoring
+        )
+    }
+
+    fun dismissBatteryOptDialog() {
+        _uiState.value = _uiState.value.copy(showBatteryOptDialog = false)
+    }
+
+    fun openBatteryOptimizationSettings() {
+        val context = getApplication<Application>()
+        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            if (intent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(intent)
+            } else {
+                // Fallback: open app's battery optimization settings page
+                val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(fallback)
+            }
+        } catch (e: Exception) {
+            // Last resort: open app info page
+            val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try { context.startActivity(fallback) } catch (_: Exception) {}
+        }
+    }
+
+    fun reconnect(recordId: Long) {
+        _uiState.value = _uiState.value.copy(
+            currentRecordId = recordId,
+            isRecording = true
+        )
+        observeServiceState()
+    }
+
+    private fun observeServiceState() {
         viewModelScope.launch {
             RecordingService.transcriptState.collect { text ->
                 _uiState.value = _uiState.value.copy(transcript = text)
@@ -132,14 +184,15 @@ class RecordingViewModel @Inject constructor(
                 }
             }
         }
+        viewModelScope.launch {
+            RecordingService.statusMessage.collect { msg ->
+                _uiState.value = _uiState.value.copy(statusMessage = msg)
+            }
+        }
     }
 
-    fun stopRecording() {
-        _uiState.value = _uiState.value.copy(isStopping = true)
-        val context = getApplication<Application>()
-        val intent = Intent(context, RecordingService::class.java).apply {
-            action = RecordingService.ACTION_STOP
-        }
-        context.startService(intent)
+    companion object {
+        private val dateFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm")
+            .withZone(ZoneId.systemDefault())
     }
 }

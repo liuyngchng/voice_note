@@ -1,18 +1,19 @@
 package com.voicenote.app.ui.settings
 
+import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.voicenote.app.core.asr.ASRModelManager
+import com.voicenote.app.core.asr.DownloadStatus
 import com.voicenote.app.core.di.AppSettings
 import com.voicenote.app.core.di.SettingsDataStore
-import com.voicenote.app.core.llm.LLMModelInfo
-import com.voicenote.app.core.network.ConnectivityChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class TestResult(
@@ -21,74 +22,126 @@ data class TestResult(
     val message: String
 )
 
+data class ModelInfo(
+    val name: String,
+    val fileName: String,
+    val isDownloaded: Boolean,
+    val fileSize: Long,
+    val isDownloading: Boolean = false,
+    val downloadProgress: Float = 0f,
+    val statusText: String = "",
+    val downloadUrl: String? = null
+)
+
 data class SettingsUiState(
     val isLoading: Boolean = true,
-    val asrUrl: String = "",
-    val llmUrl: String = "",
-    val llmKey: String = "",
-    val llmModel: String = "",
-    val llmPrompt: String = "",
-    val asrMode: String = "offline",
     val offlineModelQuality: String = "int8",
-    val llmMode: String = "offline",
-    val llmModelInfo: String = "qwen2_5_0_5b_q4km",
     val isTesting: Boolean = false,
     val testResults: List<TestResult> = emptyList(),
     val showResults: Boolean = false,
-    val saveCount: Int = 0
+    val saveCount: Int = 0,
+    val punctModel: ModelInfo = ModelInfo("标点恢复模型", "punct_ct_transformer.onnx", false, 0)
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val connectivityChecker: ConnectivityChecker
+    private val asrModelManager: ASRModelManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+
+    private var punctIsDownload = true // true = download, false = import
 
     init {
         viewModelScope.launch {
             settingsDataStore.settingsFlow.collect { settings ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    asrUrl = settings.asrUrl,
-                    llmUrl = settings.llmUrl,
-                    llmKey = settings.llmKey,
-                    llmModel = settings.llmModel,
-                    llmPrompt = settings.llmPrompt,
-                    asrMode = settings.asrMode,
-                    offlineModelQuality = settings.offlineModelQuality,
-                    llmMode = settings.llmMode,
-                    llmModelInfo = settings.llmModelInfo
+                    offlineModelQuality = settings.offlineModelQuality
                 )
             }
         }
+        // Observe punctuation model download/import progress persistently
+        viewModelScope.launch {
+            asrModelManager.punctDownloadState.collect { state ->
+                if (_uiState.value.punctModel.isDownloading) {
+                    _uiState.value = _uiState.value.copy(
+                        punctModel = _uiState.value.punctModel.copy(
+                            downloadProgress = state.progress,
+                            statusText = when (state.status) {
+                                DownloadStatus.DOWNLOADING -> "正在下载模型..."
+                                DownloadStatus.UPLOADING -> "正在复制模型..."
+                                DownloadStatus.EXTRACTING -> "正在提取模型..."
+                                else -> ""
+                            },
+                            isDownloading = state.status == DownloadStatus.DOWNLOADING
+                                    || state.status == DownloadStatus.UPLOADING
+                                    || state.status == DownloadStatus.EXTRACTING,
+                            downloadUrl = state.downloadUrl
+                        )
+                    )
+                }
+            }
+        }
+        refreshModelStatus()
     }
 
-    fun updateAsrUrl(url: String) {
-        _uiState.value = _uiState.value.copy(asrUrl = url)
+    fun refreshModelStatus() {
+        val punctFile = File(asrModelManager.punctuationModelFilePath())
+        val punctState = asrModelManager.punctDownloadState.value
+        val opLabel = if (punctIsDownload) "下载" else "导入"
+        _uiState.value = _uiState.value.copy(
+            punctModel = ModelInfo(
+                name = "标点恢复模型",
+                fileName = "punct_ct_transformer.onnx",
+                isDownloaded = punctFile.exists(),
+                fileSize = if (punctFile.exists()) punctFile.length() else 0,
+                statusText = when (punctState.status) {
+                    DownloadStatus.COMPLETED -> "${opLabel}完成"
+                    DownloadStatus.FAILED -> "${opLabel}失败: ${punctState.error ?: ""}"
+                    else -> ""
+                },
+                downloadUrl = punctState.downloadUrl
+            )
+        )
     }
 
-    fun updateLlmUrl(url: String) {
-        _uiState.value = _uiState.value.copy(llmUrl = url)
+    fun downloadPunctuationModel() {
+        val current = _uiState.value.punctModel
+        if (current.isDownloading) return
+        punctIsDownload = true
+        _uiState.value = _uiState.value.copy(
+            punctModel = current.copy(isDownloading = true, downloadProgress = 0f, statusText = "准备下载...")
+        )
+        viewModelScope.launch {
+            asrModelManager.downloadPunctuationModel()
+                .onSuccess { Log.i(TAG, "Punctuation model downloaded successfully") }
+                .onFailure { e -> Log.e(TAG, "Punctuation model download failed: ${e.message}") }
+            refreshModelStatus()
+        }
     }
 
-    fun updateLlmKey(key: String) {
-        _uiState.value = _uiState.value.copy(llmKey = key)
+    fun deletePunctuationModel() {
+        val file = File(asrModelManager.punctuationModelFilePath())
+        if (file.exists()) file.delete()
+        refreshModelStatus()
     }
 
-    fun updateLlmModel(model: String) {
-        _uiState.value = _uiState.value.copy(llmModel = model)
-    }
-
-    fun updateLlmPrompt(prompt: String) {
-        _uiState.value = _uiState.value.copy(llmPrompt = prompt)
-    }
-
-    fun updateAsrMode(mode: String) {
-        _uiState.value = _uiState.value.copy(asrMode = mode)
-        viewModelScope.launch { settingsDataStore.updateAsrMode(mode) }
+    fun importPunctuationModel(uri: Uri) {
+        val current = _uiState.value.punctModel
+        if (current.isDownloading) return
+        punctIsDownload = false
+        _uiState.value = _uiState.value.copy(
+            punctModel = current.copy(isDownloading = true, downloadProgress = 0f, statusText = "正在导入...")
+        )
+        viewModelScope.launch {
+            asrModelManager.importPunctuationArchive(uri)
+                .onSuccess { Log.i(TAG, "Punctuation model imported successfully") }
+                .onFailure { e -> Log.e(TAG, "Punctuation model import failed: ${e.message}") }
+            refreshModelStatus()
+        }
     }
 
     fun updateOfflineModelQuality(quality: String) {
@@ -96,41 +149,16 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsDataStore.updateOfflineModelQuality(quality) }
     }
 
-    fun updateLlmMode(mode: String) {
-        _uiState.value = _uiState.value.copy(llmMode = mode)
-        viewModelScope.launch { settingsDataStore.updateLlmMode(mode) }
-    }
-
-    fun updateLlmModelInfo(info: String) {
-        _uiState.value = _uiState.value.copy(llmModelInfo = info)
-        viewModelScope.launch { settingsDataStore.updateLlmModelInfo(info) }
-    }
-
     fun save() {
-        val state = _uiState.value
         viewModelScope.launch {
-            settingsDataStore.updateAsrUrl(state.asrUrl)
-            settingsDataStore.updateLlmUrl(state.llmUrl)
-            settingsDataStore.updateLlmKey(state.llmKey)
-            settingsDataStore.updateLlmModel(state.llmModel)
-            settingsDataStore.updateLlmPrompt(state.llmPrompt)
-            settingsDataStore.updateAsrMode(state.asrMode)
-            settingsDataStore.updateOfflineModelQuality(state.offlineModelQuality)
-            settingsDataStore.updateLlmMode(state.llmMode)
-            settingsDataStore.updateLlmModelInfo(state.llmModelInfo)
+            settingsDataStore.updateOfflineModelQuality(_uiState.value.offlineModelQuality)
             _uiState.value = _uiState.value.copy(saveCount = _uiState.value.saveCount + 1)
         }
     }
 
     fun buildSaveSummary(): String {
         val s = _uiState.value
-        val asr = if (s.asrMode == "offline") "离线(${s.offlineModelQuality.uppercase()})" else "在线"
-        val llm = when {
-            s.llmMode == "online" && s.llmModel.isNotBlank() -> "在线(${s.llmModel})"
-            s.llmMode == "online" -> "在线"
-            else -> "离线(${LLMModelInfo.fromString(s.llmModelInfo).displayName})"
-        }
-        return "已保存 · 语音识别: $asr · AI 总结: $llm"
+        return "已保存 · 离线(${s.offlineModelQuality.uppercase()})"
     }
 
     fun testConnection() {
@@ -138,33 +166,25 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = state.copy(isTesting = true, testResults = emptyList(), showResults = false)
 
         viewModelScope.launch {
-            val asrDeferred = if (state.asrMode == "online") {
-                async {
-                    val result = connectivityChecker.checkAsrConnection(state.asrUrl)
-                    TestResult(
-                        name = "语音识别",
-                        success = result.isSuccess,
-                        message = result.getOrElse { it.message ?: "未知错误" }
-                    )
-                }
-            } else null
+            val results = mutableListOf<TestResult>()
 
-            val llmDeferred = if (state.llmMode == "online") {
-                async {
-                    val result = connectivityChecker.checkLlmConnection(
-                        state.llmUrl,
-                        state.llmKey,
-                        state.llmModel
-                    )
-                    TestResult(
-                        name = "AI 总结",
-                        success = result.isSuccess,
-                        message = result.getOrElse { it.message ?: "未知错误" }
-                    )
-                }
-            } else null
+            val modelFile = java.io.File(asrModelManager.modelFilePath(
+                com.voicenote.app.core.asr.ModelQuality.fromString(state.offlineModelQuality)
+            ))
+            val tokensFile = java.io.File(asrModelManager.tokensFilePath())
 
-            val results = listOfNotNull(asrDeferred?.await(), llmDeferred?.await())
+            val success = modelFile.exists() && tokensFile.exists()
+            val message = when {
+                !modelFile.exists() -> "离线模型未下载，请先下载"
+                !tokensFile.exists() -> "tokens.txt 缺失，请重新下载模型"
+                else -> "离线 ASR 准备就绪 (${state.offlineModelQuality.uppercase()})"
+            }
+
+            results.add(TestResult(
+                name = "语音识别 (离线)",
+                success = success,
+                message = message
+            ))
 
             _uiState.value = _uiState.value.copy(
                 isTesting = false,
@@ -176,5 +196,9 @@ class SettingsViewModel @Inject constructor(
 
     fun dismissResults() {
         _uiState.value = _uiState.value.copy(showResults = false, testResults = emptyList())
+    }
+
+    companion object {
+        private const val TAG = "SettingsViewModel"
     }
 }

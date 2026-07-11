@@ -37,6 +37,9 @@ final class HomeViewModel: ObservableObject {
 
     func loadRecords() {
         Task {
+            // 先恢复崩溃前未完成的录音
+            await container.recordingManager.recoverUnfinishedRecords()
+
             let result = try? await container.recordRepository.getAllRecords()
             await MainActor.run {
                 records = result ?? []

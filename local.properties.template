@@ -14,3 +14,13 @@ KEYSTORE_PASSWORD=
 KEY_ALIAS=smartbadge
 # 别名密码
 KEY_PASSWORD=
+
+## 生成签名文件
+
+keytool -genkey -v \
+    -keystore voice-note-release.keystore \
+    -alias voicenote \
+    -keyalg RSA -keysize 2048 -validity 10000 \
+    -storepass 'your_password' \
+    -keypass 'your_password' \
+    -dname "CN=voicenote, OU=dev, O=voicenote, L=Beijing, ST=Beijing, C=CN"

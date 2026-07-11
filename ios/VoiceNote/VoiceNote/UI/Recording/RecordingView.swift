@@ -4,43 +4,62 @@ import UniformTypeIdentifiers
 struct RecordingView: View {
     @ObservedObject var viewModel: RecordingViewModel
     let onBack: () -> Void
-    let onVisitComplete: (UUID) -> Void
+    let onRecordComplete: (UUID) -> Void
 
     @State private var hasNavigated = false
-    @State private var hasImported = false
+    @State private var dotPulse = false
+    @State private var hasStarted = false
 
     var body: some View {
-        Group {
-            if viewModel.isRecording {
-                recordingContent
+        VStack(spacing: 0) {
+            if let error = viewModel.errorMessage {
+                // 错误提示
+                VStack(spacing: 16) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.largeTitle)
+                        .foregroundColor(.orange)
+                    Text(error)
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                    Button("返回") { onBack() }
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 10)
+                        .background(Color.accentColor)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(.systemGroupedBackground))
             } else {
-                formContent
+                recordingContent
             }
         }
-        .navigationTitle(viewModel.isRecording ? "录音中" : "新建记录")
+        .navigationTitle("录音中")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button("返回") {
                     if viewModel.isRecording {
-                        viewModel.stopVisit(navigateToDetail: false)
+                        viewModel.stopRecording(navigateToDetail: false)
                     }
                     onBack()
                 }
             }
         }
-        .modifier(ToolbarBackgroundModifier(
-            isRecording: viewModel.isRecording
-        ))
-        .onChange(of: viewModel.isRecording) { newValue in
-            if !newValue, !hasNavigated, viewModel.shouldNavigateToDetail, let visitId = viewModel.currentVisitId {
-                hasNavigated = true
-                onVisitComplete(visitId)
+        .modifier(ToolbarBackgroundModifier(isRecording: viewModel.isRecording))
+        .onAppear {
+            if !hasStarted {
+                hasStarted = true
+                viewModel.startRecording()
             }
         }
-        .onChange(of: viewModel.importCompleted) { completed in
-            if completed {
-                onBack()
+        .onChange(of: viewModel.isRecording) { newValue in
+            if !newValue, !hasNavigated, viewModel.shouldNavigateToDetail, let recordId = viewModel.currentRecordId {
+                hasNavigated = true
+                onRecordComplete(recordId)
             }
         }
     }
@@ -51,73 +70,81 @@ struct RecordingView: View {
         VStack(spacing: 0) {
             recordingIndicator
 
-            if !viewModel.title.isEmpty {
-                Text(viewModel.title)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            if viewModel.isStarting {
+                Spacer()
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("正在启动录音...")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            } else {
+                // 音频波形可视化
+                AudioWaveformView(levels: viewModel.audioLevelHistory)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
-            }
+                    .padding(.top, 8)
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        if viewModel.transcript.isEmpty {
-                            Text("语音识别结果将在此显示")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary.opacity(0.4))
-                                .padding(.top, 80)
-                                .frame(maxWidth: .infinity)
-                        } else {
-                            Text(viewModel.transcript)
-                                .font(.body)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .id("transcript")
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            if viewModel.transcript.isEmpty {
+                                Text("语音识别结果将在此显示")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary.opacity(0.4))
+                                    .padding(.top, 80)
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Text(viewModel.displayTranscript)
+                                    .font(.body)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                            }
+                            // 底部锚点（与 Android LaunchedEffect + animateScrollTo 对齐）
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottomAnchor")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onChange(of: viewModel.transcript) { _ in
+                        withAnimation {
+                            proxy.scrollTo("bottomAnchor", anchor: .bottom)
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .onChange(of: viewModel.transcript) { _ in
-                    withAnimation {
-                        proxy.scrollTo("transcript", anchor: .bottom)
-                    }
-                }
-            }
-            .padding(.top, 12)
+                .padding(.top, 12)
 
-            VStack(spacing: 8) {
-                Button(action: {
-                    viewModel.stopVisit(navigateToDetail: true)
-                }) {
-                    HStack {
-                        if viewModel.isStopping {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle())
-                        } else {
-                            Image(systemName: "stop.fill")
+                VStack(spacing: 8) {
+                    Button(action: {
+                        viewModel.stopRecording(navigateToDetail: true)
+                    }) {
+                        HStack {
+                            if viewModel.isStopping {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle())
+                            } else {
+                                Image(systemName: "stop.fill")
+                            }
+                            Text("结束")
                         }
-                        Text("结束")
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .foregroundColor(.white)
+                        .background(Color.red)
+                        .clipShape(Capsule())
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .foregroundColor(.white)
-                    .background(Color.red)
-                    .clipShape(Capsule())
+                    .disabled(viewModel.isStopping)
+                    .padding(.horizontal, 16)
                 }
-                .disabled(viewModel.isStopping)
-                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
             }
-            .padding(.bottom, 24)
         }
         .background(Color(.systemGroupedBackground))
     }
 
-    @State private var dotPulse = false
-
     private var recordingIndicator: some View {
         HStack(spacing: 10) {
-            // 脉冲红点（对齐 iOS 语音备忘录）
             ZStack {
                 Circle()
                     .fill(Color.red.opacity(0.3))
@@ -151,64 +178,9 @@ struct RecordingView: View {
         .padding(.horizontal, 12)
         .padding(.top, 8)
     }
-
-    // MARK: - 表单
-
-    private var formContent: some View {
-        Form {
-            Section(header: Text("记录信息")) {
-                TextField("录音名称（可选）", text: $viewModel.title)
-
-                TextField("备注", text: $viewModel.notes)
-
-                TextField("描述", text: $viewModel.description)
-
-                TextField("参与人员（逗号分隔）", text: $viewModel.participants)
-            }
-
-            if let error = viewModel.errorMessage {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
-            }
-
-            Section {
-                Button(action: { viewModel.startVisit() }) {
-                    HStack {
-                        if viewModel.isStarting {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "mic.fill")
-                        }
-                        Text("开始录音")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .disabled(viewModel.isStarting || viewModel.isImporting)
-
-                Button(action: { viewModel.showFilePicker = true }) {
-                    HStack {
-                        if viewModel.isImporting {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "square.and.arrow.down")
-                        }
-                        Text(viewModel.isImporting ? "导入中..." : "导入音频")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .disabled(viewModel.isStarting || viewModel.isImporting)
-            }
-        }
-        .sheet(isPresented: $viewModel.showFilePicker) {
-            AudioFilePicker { url in
-                viewModel.importAudio(from: url)
-            }
-        }
-    }
 }
 
-// MARK: - 导航栏样式: iOS 16+ toolbarBackground / iOS 14/15 UINavigationBarAppearance
+// MARK: - 导航栏样式
 
 private struct ToolbarBackgroundModifier: ViewModifier {
     let isRecording: Bool
@@ -229,7 +201,6 @@ private struct ToolbarBackgroundModifier: ViewModifier {
     }
 }
 
-/// 修改当前 UINavigationController 的导航栏外观，离开时恢复
 private struct NavigationBarTinter: UIViewControllerRepresentable {
     let isRecording: Bool
 
@@ -297,37 +268,54 @@ private struct NavigationBarTinter: UIViewControllerRepresentable {
     }
 }
 
-// MARK: - 音频文件选择器 (UIDocumentPicker, iOS 14 兼容)
+// MARK: - 音频波形
 
-private struct AudioFilePicker: UIViewControllerRepresentable {
-    let onPick: (URL) -> Void
+private struct AudioWaveformView: View {
+    let levels: [Float]
+    private let barCount = 42
+    private let maxHeight: CGFloat = 48
 
-    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.audio], asCopy: true)
-        picker.delegate = context.coordinator
-        picker.allowsMultipleSelection = false
-        return picker
-    }
-
-    func updateUIViewController(_ uiView: UIDocumentPickerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onPick: onPick)
-    }
-
-    class Coordinator: NSObject, UIDocumentPickerDelegate {
-        let onPick: (URL) -> Void
-        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
-
-        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
-            guard let url = urls.first else { return }
-            // 获取安全访问权限
-            let secured = url.startAccessingSecurityScopedResource()
-            defer { if secured { url.stopAccessingSecurityScopedResource() } }
-            onPick(url)
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<barCount, id: \.self) { index in
+                WaveformBar(level: levelForBar(index))
+            }
         }
+        .frame(height: maxHeight)
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
 
-        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
+    private func levelForBar(_ index: Int) -> Float {
+        let historyIndex = levels.count - barCount + index
+        guard historyIndex >= 0, historyIndex < levels.count else {
+            return 0.03 // 最小高度，保持波形始终可见
+        }
+        return max(0.03, levels[historyIndex])
+    }
+}
+
+private struct WaveformBar: View {
+    let level: Float
+
+    /// 用平方根曲线提升中低音量的视觉高度，使波形更灵敏
+    private var scaledHeight: CGFloat {
+        let boosted = sqrt(max(0, level))       // sqrt 拉伸中低段
+        return max(4, CGFloat(boosted) * 44)
+    }
+
+    var body: some View {
+        Capsule()
+            .fill(colorForLevel(level))
+            .frame(width: 3, height: scaledHeight)
+            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: level)
+    }
+
+    private func colorForLevel(_ level: Float) -> Color {
+        switch level {
+        case 0..<0.25:  return .green
+        case 0.25..<0.5: return .yellow
+        default:         return .red
+        }
     }
 }
 

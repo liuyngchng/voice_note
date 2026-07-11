@@ -3,7 +3,6 @@ package com.voicenote.app.data.repository
 import com.voicenote.app.core.database.VoiceRecordDao
 import com.voicenote.app.core.database.VoiceRecordEntity
 import com.voicenote.app.domain.model.VoiceRecord
-import com.voicenote.app.domain.model.VoiceRecordSummary
 import com.voicenote.app.domain.repository.VoiceRecordRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -39,27 +38,9 @@ class VoiceRecordRepositoryImpl @Inject constructor(
         voiceRecordDao.update(VoiceRecordEntity.fromDomain(record))
     }
 
-    override suspend fun updateTranscript(id: Long, text: String) {
+    override suspend fun updateTranscriptWithFile(id: Long, transcriptFilePath: String) {
         val entity = voiceRecordDao.getById(id) ?: return
-        voiceRecordDao.update(entity.copy(transcriptText = text))
-    }
-
-    override suspend fun updateTranscriptWithFile(id: Long, text: String, transcriptFilePath: String) {
-        val entity = voiceRecordDao.getById(id) ?: return
-        voiceRecordDao.update(entity.copy(transcriptText = text, transcriptFilePath = transcriptFilePath))
-    }
-
-    override suspend fun updateSummary(id: Long, summary: VoiceRecordSummary) {
-        val entity = voiceRecordDao.getById(id) ?: return
-        voiceRecordDao.update(
-            entity.copy(
-                topicsJson = com.google.gson.Gson().toJson(summary.topics),
-                conclusionsJson = com.google.gson.Gson().toJson(summary.conclusions),
-                todosJson = com.google.gson.Gson().toJson(summary.todos),
-                nextSteps = summary.nextSteps,
-                summaryStatus = com.voicenote.app.domain.model.ProcessingStatus.COMPLETED.name
-            )
-        )
+        voiceRecordDao.update(entity.copy(transcriptFilePath = transcriptFilePath))
     }
 
     override suspend fun updateTranscriptStatus(id: Long, status: com.voicenote.app.domain.model.ProcessingStatus) {
@@ -67,9 +48,8 @@ class VoiceRecordRepositoryImpl @Inject constructor(
         voiceRecordDao.update(entity.copy(transcriptStatus = status.name))
     }
 
-    override suspend fun updateSummaryStatus(id: Long, status: com.voicenote.app.domain.model.ProcessingStatus) {
-        val entity = voiceRecordDao.getById(id) ?: return
-        voiceRecordDao.update(entity.copy(summaryStatus = status.name))
+    override suspend fun updateStartTime(id: Long, startTime: java.time.Instant) {
+        voiceRecordDao.updateStartTime(id, startTime.toEpochMilli())
     }
 
     override suspend fun updateAudioFilePath(id: Long, path: String, endTime: java.time.Instant) {

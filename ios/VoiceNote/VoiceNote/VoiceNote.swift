@@ -1,23 +1,108 @@
 import SwiftUI
 import AVFoundation
-import Network
 import os
 
 /// App 入口
-/// 对齐 Android: SmartBadgeApp.kt + MainActivity.kt
 @main
 struct SmartBadgeApp: App {
     @StateObject private var container = AppContainer()
+    @StateObject private var appState = AppState()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(container)
+                .environmentObject(appState)
         }
     }
 }
 
-// MARK: - 权限请求 (麦克风 + 局域网)
+// MARK: - App 全局状态
+
+/// 模型加载状态，对齐 Android: OfflineASRClient.ModelStatus
+enum ModelStatus {
+    case unknown
+    case missing
+    case loading
+    case ready
+    case error
+}
+
+@MainActor
+final class AppState: ObservableObject {
+    /// 模型加载状态
+    @Published var modelStatus: ModelStatus = .unknown
+    /// 模型加载错误描述
+    @Published var modelLoadError: String?
+
+    /// 在 app 启动时调用，加载离线模型（ASR + VAD + 标点）
+    func loadModelOnStartup(container: AppContainer) {
+        preloadModels(container: container)
+    }
+
+    /// 从设置页返回时刷新模型状态（用户可能刚下载或删除了模型）
+    func refreshModelStatus(container: AppContainer) {
+        // 正在加载中则跳过，避免重复启动加载任务
+        guard modelStatus != .loading else { return }
+        preloadModels(container: container)
+    }
+
+    // MARK: - 私有
+
+    private func preloadModels(container: AppContainer) {
+        let quality = ASRModelManager.savedQuality()
+
+        // 检查 ASR 模型文件 + tokens 是否在本地
+        guard ASRModelManager.isModelDownloaded(quality),
+              FileManager.default.fileExists(atPath: ASRModelManager.tokensFilePath().path)
+        else {
+            modelStatus = .missing
+            appLog("app", "[App] 离线语音模型未下载")
+            return
+        }
+
+        // ASR 已加载且 VAD 已就绪 → 直接标记 ready
+        let asrClient = container.offlineASRClient
+        if asrClient.isAvailable, asrClient.loadedQuality == quality {
+            modelStatus = .ready
+            appLog("app", "[App] 离线模型已加载，跳过")
+            return
+        }
+
+        modelStatus = .loading
+        appLog("app", "[App] 开始加载离线模型 (quality=\(quality.rawValue))")
+
+        Task.detached(priority: .utility) {
+            do {
+                // 1. 加载 ASR 模型
+                try asrClient.ensureRecognizer(quality: quality)
+                appLog("app", "[App] ASR 模型加载完成")
+
+                // 2. 加载 VAD
+                let vadReady = asrClient.ensureVad()
+                appLog("app", "[App] VAD \(vadReady ? "已就绪" : "不可用")")
+
+                // 3. 加载标点模型（可选，不存在则跳过）
+                container.offlinePunctuationClient.ensureInitialized()
+                appLog("app", "[App] 标点模型 \(container.offlinePunctuationClient.isAvailable ? "已加载" : "未安装，跳过")")
+
+                await MainActor.run {
+                    self.modelStatus = .ready
+                    self.modelLoadError = nil
+                    appLog("app", "[App] 全部模型加载完成")
+                }
+            } catch {
+                appLog("app", "[App] 模型加载失败: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.modelStatus = .error
+                    self.modelLoadError = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+// MARK: - 权限请求
 
 private let permLogger = Logger(subsystem: "com.voicenote", category: "app")
 
@@ -43,39 +128,6 @@ private struct PermissionModifier: ViewModifier {
             AVAudioSession.sharedInstance().requestRecordPermission { granted in
                 appLog("app","\(granted ? "[Perm] 麦克风权限已授予" : "[Perm] 麦克风权限被拒绝")")
             }
-
-            // 2. 局域网权限 — iOS 14+ 自动弹窗
-            //    用 NWConnection 触达本地 IP 触发系统对话框
-            let asrURL = UserDefaults.standard.string(forKey: "asr_url") ?? "ws://192.168.1.110:10095"
-            if let url = URL(string: asrURL),
-               let host = url.host,
-               let port = url.port {
-                appLog("app","[Perm] 触发局域网权限: \(host):\(port)")
-                let conn = NWConnection(
-                    host: NWEndpoint.Host(host),
-                    port: NWEndpoint.Port(integerLiteral: UInt16(port)),
-                    using: .tcp
-                )
-                conn.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        appLog("app","[Perm] 局域网连接就绪")
-                        conn.cancel()
-                    case .failed(let error):
-                        appLog("app","[Perm] 局域网连接失败: \(error.localizedDescription)")
-                        conn.cancel()
-                    default:
-                        break
-                    }
-                }
-                conn.start(queue: .global())
-                // 3 秒后取消，避免长时间挂起
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3) {
-                    conn.cancel()
-                }
-            } else {
-                appLog("app","[Perm] 局域网权限: ASR URL 解析失败，跳过")
-            }
         }
     }
 }
@@ -84,8 +136,8 @@ private struct PermissionModifier: ViewModifier {
 
 private struct RootView: View {
     @EnvironmentObject var container: AppContainer
+    @EnvironmentObject var appState: AppState
 
-    // 导航状态 (iOS 14 兼容: 使用 NavigationLink(isActive:) 替代 NavigationPath)
     @State private var showRecording = false
     @State private var showHistory = false
     @State private var showSettings = false
@@ -102,6 +154,16 @@ private struct RootView: View {
         }
         .navigationViewStyle(.stack)
         .modifier(PermissionModifier())
+        .onAppear {
+            appState.loadModelOnStartup(container: container)
+            appState.refreshModelStatus(container: container)
+        }
+        .onChange(of: showSettings) { isShowing in
+            if !isShowing {
+                // 从设置页返回时刷新模型状态（用户可能刚下载了模型）
+                appState.refreshModelStatus(container: container)
+            }
+        }
     }
 
     // MARK: - 隐藏 NavigationLink (程序化导航)
@@ -146,11 +208,14 @@ private struct RootView: View {
     private var homeScreen: some View {
         HomeView(
             viewModel: HomeViewModel(container: container),
-            onNewVisit: { showRecording = true },
-            onVisitTap: { id in
+            modelStatus: appState.modelStatus,
+            onNewRecord: { showRecording = true },
+            onRecordTap: { id in
                 detailId = id
                 showDetail = true
-            }
+            },
+            onSettingsTap: { showSettings = true },
+            onRefreshModelStatus: { appState.refreshModelStatus(container: container) }
         )
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -176,11 +241,10 @@ private struct RootView: View {
         RecordingView(
             viewModel: RecordingViewModel(container: container),
             onBack: { showRecording = false },
-            onVisitComplete: { _ in
+            onRecordComplete: { _ in
                 showRecording = false
             }
         )
-        .navigationBarBackButtonHidden(true)
     }
 
     // MARK: - Detail 详情页
@@ -188,10 +252,9 @@ private struct RootView: View {
     private func detailScreen(id: UUID) -> some View {
         DetailView(
             viewModel: DetailViewModel(container: container),
-            visitId: id,
+            recordId: id,
             onBack: { showDetail = false }
         )
-        .navigationBarBackButtonHidden(true)
     }
 
     // MARK: - History 历史页
@@ -199,9 +262,7 @@ private struct RootView: View {
     private var historyScreen: some View {
         HistoryView(
             viewModel: HistoryViewModel(container: container),
-            onVisitTap: { id in
-                // History 内部自己管理推入 Detail
-            },
+            onRecordTap: { id in },
             onBack: { showHistory = false }
         )
         .navigationBarBackButtonHidden(true)

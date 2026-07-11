@@ -2,7 +2,6 @@ import CoreData
 import Foundation
 
 /// 本地数据库管理（Core Data 实现）
-/// 对齐 Android: Room (AppDatabase.kt + VisitDao.kt)
 final class PersistenceController: ObservableObject {
     static let shared = PersistenceController()
 
@@ -75,6 +74,14 @@ final class PersistenceController: ObservableObject {
             return attr
         }
 
+        let doubleAttr: (String, Bool) -> NSAttributeDescription = { name, opt in
+            let attr = NSAttributeDescription()
+            attr.name = name
+            attr.attributeType = .doubleAttributeType
+            attr.isOptional = opt
+            return attr
+        }
+
         recordEntity.properties = [
             uuidAttr("id", false),
             makeAttr("title", .stringAttributeType, false),
@@ -83,13 +90,11 @@ final class PersistenceController: ObservableObject {
             makeAttr("speakersJSON", .stringAttributeType),
             dateAttr("startTime", false),
             dateAttr("endTime", true),
-            makeAttr("transcriptText", .stringAttributeType),
+            makeAttr("transcriptText", .stringAttributeType),          // 保留兼容，不再写入
             makeAttr("transcriptFilePath", .stringAttributeType),
             makeAttr("transcriptStatus", .stringAttributeType, false),
-            makeAttr("summaryStatus", .stringAttributeType, false),
             makeAttr("audioFilePath", .stringAttributeType),
-            makeAttr("summaryJSON", .stringAttributeType),
-            dateAttr("summaryGeneratedAt", true),
+            doubleAttr("transcribedDurationSeconds", true),             // 新增：已转录时长 checkpoint
         ]
 
         model.entities = [recordEntity]
@@ -111,8 +116,6 @@ final class VoiceRecordEntity: NSManagedObject {
     @NSManaged var transcriptText: String?
     @NSManaged var transcriptFilePath: String?
     @NSManaged var transcriptStatus: String
-    @NSManaged var summaryStatus: String
     @NSManaged var audioFilePath: String?
-    @NSManaged var summaryJSON: String?
-    @NSManaged var summaryGeneratedAt: Date?
+    @NSManaged var transcribedDurationSeconds: Double
 }

@@ -4,12 +4,17 @@ import android.util.Log
 import com.voicenote.app.core.common.MemoryWarningBus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+
+enum class ModelStatus { UNKNOWN, MISSING, LOADING, READY, ERROR }
 
 @Singleton
 class OfflineASRClient @Inject constructor(
@@ -23,6 +28,14 @@ class OfflineASRClient @Inject constructor(
     private var shouldReleaseAfterInference = false
     private var recognizerPtr: Long = 0
 
+    // ── VAD state ────────────────────────────────────────────────────────────
+    private var vadPtr: Long = 0
+    private var vadReady = false
+
+    // ── Model status (observable by UI) ─────────────────────────────────────
+    private val _modelStatus = MutableStateFlow(ModelStatus.UNKNOWN)
+    val modelStatus: StateFlow<ModelStatus> = _modelStatus.asStateFlow()
+
     init {
         scope.launch {
             MemoryWarningBus.events.collect { level ->
@@ -30,6 +43,8 @@ class OfflineASRClient @Inject constructor(
             }
         }
     }
+
+    // ── Recognizer ───────────────────────────────────────────────────────────
 
     @Synchronized
     fun ensureRecognizer(quality: ModelQuality) {
@@ -63,14 +78,19 @@ class OfflineASRClient @Inject constructor(
     }
 
     suspend fun processPCMChunk(pcmData: ByteArray): Result<String> {
+        val floats = convertPCMToFloats(pcmData)
+        return processFloats(floats)
+    }
+
+    /** Decode float samples directly, bypassing byte-to-float conversion. */
+    suspend fun processFloats(samples: FloatArray): Result<String> {
         stateLock.withLock {
             check(isInitialized && recognizerPtr != 0L) { "识别器未初始化" }
             isInferring = true
         }
 
         return try {
-            val floats = convertPCMToFloats(pcmData)
-            val text = nativeRecognize(recognizerPtr, floats)
+            val text = nativeRecognize(recognizerPtr, samples)
             if (text != null) Result.success(text)
             else Result.failure(Exception("识别失败"))
         } catch (e: Exception) {
@@ -102,18 +122,217 @@ class OfflineASRClient @Inject constructor(
         return floats
     }
 
+    // ── Voice Activity Detection ─────────────────────────────────────────────
+
+    /** Returns true if VAD was successfully initialized. */
+    fun ensureVad(): Boolean {
+        if (vadReady) return true
+        if (!isNativeAvailable) return false
+
+        val vadModelPath = asrModelManager.vadModelFilePath()
+        val vadModelFile = File(vadModelPath)
+
+        if (!vadModelFile.exists()) {
+            Log.w(TAG, "VAD 模型未下载，跳过语音活动检测")
+            return false
+        }
+
+        try {
+            vadPtr = nativeCreateVad(vadModelPath)
+            if (vadPtr == 0L) return false
+        } catch (e: Exception) {
+            Log.e(TAG, "创建 VAD 检测器失败: ${e.message}")
+            return false
+        }
+
+        vadReady = true
+        Log.i(TAG, "VAD 初始化完成")
+        return true
+    }
+
+    /** Feed raw PCM-16 audio to the VAD for speech detection. */
+    fun vadAcceptPCM(pcmData: ByteArray) {
+        if (!vadReady || vadPtr == 0L) return
+        val floats = convertPCMToFloats(pcmData)
+        nativeVadAcceptWaveform(vadPtr, floats, floats.size)
+    }
+
+    /** Feed audio samples to the VAD for speech detection. */
+    fun vadAcceptWaveform(samples: FloatArray) {
+        if (!vadReady || vadPtr == 0L) return
+        nativeVadAcceptWaveform(vadPtr, samples, samples.size)
+    }
+
+    /** Whether the VAD has completed speech segments ready for decoding. */
+    fun vadHasSpeechSegment(): Boolean {
+        if (!vadReady || vadPtr == 0L) return false
+        return !nativeVadEmpty(vadPtr)
+    }
+
+    /** Pull and decode all completed speech segments from the VAD. */
+    suspend fun vadDecodeSpeechSegments(): List<String> {
+        if (!vadReady || vadPtr == 0L) return emptyList()
+
+        val results = mutableListOf<String>()
+        while (!nativeVadEmpty(vadPtr)) {
+            val segment = nativeVadFront(vadPtr)
+            if (segment != null && segment.isNotEmpty()) {
+                val result = processFloats(segment)
+                result.onSuccess { text ->
+                    if (text.isNotBlank()) results.add(text)
+                }
+            }
+            nativeVadPop(vadPtr)
+        }
+        return results
+    }
+
+    /**
+     * Feed silence to the VAD to force completion of any in-progress speech segment.
+     * Call this when audio capture stops to avoid losing the tail of speech.
+     */
+    fun vadFlush() {
+        if (!vadReady || vadPtr == 0L) return
+        // VAD min_silence_duration is 0.5s at 16000 Hz → 8000 samples. Feed 0.6s for margin.
+        val silenceSamples = 16000 * 0.6f
+        val silence = FloatArray(silenceSamples.toInt()) // all zeros
+        nativeVadAcceptWaveform(vadPtr, silence, silence.size)
+        Log.i(TAG, "VAD flushed with ${silence.size} silence samples")
+    }
+
+    /** Whether the VAD is currently detecting speech. */
+    fun vadIsDetected(): Boolean {
+        if (!vadReady || vadPtr == 0L) return false
+        return nativeVadIsDetected(vadPtr)
+    }
+
+    // ── Offline Punctuation Restoration ──────────────────────────────────────
+
+    private var punctPtr: Long = 0
+    private var punctReady = false
+
+    /** Returns true if punctuation model was successfully loaded. */
+    fun ensurePunctuation(): Boolean {
+        if (punctReady) return true
+        if (!isNativeAvailable) return false
+
+        val punctModelPath = asrModelManager.punctuationModelFilePath()
+        val punctModelFile = File(punctModelPath)
+
+        if (!punctModelFile.exists()) {
+            Log.w(TAG, "标点模型未下载，跳过标点恢复")
+            return false
+        }
+
+        try {
+            punctPtr = nativeCreatePunctuation(punctModelPath)
+            if (punctPtr == 0L) return false
+        } catch (e: Exception) {
+            Log.e(TAG, "创建标点处理器失败: ${e.message}")
+            return false
+        }
+
+        punctReady = true
+        Log.i(TAG, "标点处理器初始化完成")
+        return true
+    }
+
+    /** Add punctuation to a complete text. Returns punctuated text. */
+    fun addPunctuation(text: String): String {
+        if (!punctReady || punctPtr == 0L || text.isBlank()) return text
+
+        return try {
+            val result = nativeAddPunctuation(punctPtr, text)
+            result ?: text
+        } catch (e: Exception) {
+            Log.w(TAG, "标点恢复失败: ${e.message}")
+            text
+        }
+    }
+
+    private fun destroyPunctuation() {
+        if (punctPtr != 0L) {
+            nativeDestroyPunctuation(punctPtr)
+            punctPtr = 0
+            punctReady = false
+            Log.i(TAG, "标点处理器已释放")
+        }
+    }
+
+    private fun destroyVad() {
+        if (vadPtr != 0L) {
+            nativeDestroyVad(vadPtr)
+            vadPtr = 0
+            vadReady = false
+            Log.i(TAG, "VAD 已释放")
+        }
+    }
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────
+
     @Synchronized
     fun reset() {
         if (recognizerPtr != 0L) {
             nativeDestroyRecognizer(recognizerPtr)
             recognizerPtr = 0
+            isInitialized = false
+            currentQuality = null
+            _modelStatus.value = ModelStatus.UNKNOWN
+            Log.i(TAG, "离线 ASR 模型已释放")
         }
-        isInitialized = false
-        currentQuality = null
-        Log.i(TAG, "离线 ASR 模型已释放")
+        destroyVad()
+        destroyPunctuation()
     }
 
     val isAvailable: Boolean get() = isInitialized
+
+    /** Check model files and preload into memory. Idempotent — no-op if already loaded. */
+    fun preloadIfAvailable(quality: ModelQuality) {
+        if (isInitialized && currentQuality == quality) {
+            _modelStatus.value = ModelStatus.READY
+            return
+        }
+
+        val modelFile = File(asrModelManager.modelFilePath(quality))
+        val tokensFile = File(asrModelManager.tokensFilePath())
+
+        if (!modelFile.exists() || !tokensFile.exists()) {
+            _modelStatus.value = ModelStatus.MISSING
+            Log.i(TAG, "Model files not found for ${quality.name}, needs download")
+            return
+        }
+
+        _modelStatus.value = ModelStatus.LOADING
+        scope.launch {
+            try {
+                ensureRecognizer(quality)
+                asrModelManager.ensureVadModelAvailable()
+                ensureVad()
+                ensurePunctuation()
+                _modelStatus.value = ModelStatus.READY
+                Log.i(TAG, "Preload complete: ${quality.name}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Preload failed: ${e.message}", e)
+                _modelStatus.value = ModelStatus.ERROR
+            }
+        }
+    }
+
+    fun refreshModelStatus(quality: ModelQuality) {
+        if (isInitialized && currentQuality == quality) {
+            _modelStatus.value = ModelStatus.READY
+            return
+        }
+        val modelFile = File(asrModelManager.modelFilePath(quality))
+        val tokensFile = File(asrModelManager.tokensFilePath())
+        if (modelFile.exists() && tokensFile.exists()) {
+            // Files exist but model not loaded — trigger the full preload pipeline
+            // (LOADING → ensureRecognizer → READY/ERROR) so the UI shows progress.
+            preloadIfAvailable(quality)
+        } else {
+            _modelStatus.value = ModelStatus.MISSING
+        }
+    }
 
     private fun handleMemoryWarning(level: Int) {
         scope.launch {
@@ -154,7 +373,21 @@ class OfflineASRClient @Inject constructor(
         }
     }
 
+    // ── Native declarations ──────────────────────────────────────────────────
+
     private external fun nativeCreateRecognizer(modelPath: String, tokensPath: String): Long
     private external fun nativeRecognize(recognizerPtr: Long, samples: FloatArray): String?
     private external fun nativeDestroyRecognizer(recognizerPtr: Long)
+
+    private external fun nativeCreateVad(modelPath: String): Long
+    private external fun nativeDestroyVad(vadPtr: Long)
+    private external fun nativeVadAcceptWaveform(vadPtr: Long, samples: FloatArray, n: Int)
+    private external fun nativeVadEmpty(vadPtr: Long): Boolean
+    private external fun nativeVadFront(vadPtr: Long): FloatArray?
+    private external fun nativeVadPop(vadPtr: Long)
+    private external fun nativeVadIsDetected(vadPtr: Long): Boolean
+
+    private external fun nativeCreatePunctuation(modelPath: String): Long
+    private external fun nativeAddPunctuation(punctPtr: Long, text: String): String?
+    private external fun nativeDestroyPunctuation(punctPtr: Long)
 }

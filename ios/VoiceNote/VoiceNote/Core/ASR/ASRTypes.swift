@@ -1,24 +1,10 @@
 import Foundation
 
-/// ASR 模式：在线（FunASR 服务端）或离线（SenseVoice 本地推理）
-enum ASRMode: String, CaseIterable, Codable {
-    case online = "online"
-    case offline = "offline"
-
-    var displayName: String {
-        switch self {
-        case .online: return "在线 (FunASR)"
-        case .offline: return "离线 (SenseVoice)"
-        }
-    }
-}
-
 /// 离线模型质量
 enum ModelQuality: String, CaseIterable, Codable {
     case int8 = "int8"
     case fp32 = "fp32"
 
-    /// 预估模型体积（含安全余量），单位 MB
     /// 预估下载+解压所需磁盘空间（含安全余量），单位 MB
     var estimatedSizeMB: Int {
         switch self {

@@ -14,28 +14,46 @@ import com.voicenote.app.ui.settings.SettingsScreen
 
 object Routes {
     const val HOME = "home"
-    const val RECORDING = "recording"
+    const val RECORDING = "recording?reconnectRecordId={reconnectRecordId}"
     const val DETAIL = "detail/{recordId}"
     const val HISTORY = "history"
     const val SETTINGS = "settings"
 
+    fun recording(reconnectRecordId: Long = 0) = "recording?reconnectRecordId=$reconnectRecordId"
     fun detail(recordId: Long) = "detail/$recordId"
 }
 
 @Composable
-fun NavGraph(navController: NavHostController) {
-    NavHost(navController = navController, startDestination = Routes.HOME) {
+fun NavGraph(
+    navController: NavHostController,
+    initialRecordId: Long = 0
+) {
+    val startDestination = if (initialRecordId > 0) {
+        Routes.recording(initialRecordId)
+    } else {
+        Routes.HOME
+    }
+
+    NavHost(navController = navController, startDestination = startDestination) {
         composable(Routes.HOME) {
             HomeScreen(
-                onStartRecording = { navController.navigate(Routes.RECORDING) },
+                onStartRecording = { navController.navigate(Routes.recording()) },
                 onRecordClick = { id -> navController.navigate(Routes.detail(id)) },
                 onHistoryClick = { navController.navigate(Routes.HISTORY) },
                 onSettingsClick = { navController.navigate(Routes.SETTINGS) }
             )
         }
 
-        composable(Routes.RECORDING) {
+        composable(
+            route = Routes.RECORDING,
+            arguments = listOf(navArgument("reconnectRecordId") {
+                type = NavType.LongType
+                defaultValue = 0L
+            })
+        ) { backStackEntry ->
+            val reconnectRecordId = backStackEntry.arguments?.getLong("reconnectRecordId") ?: 0L
             RecordingScreen(
+                reconnectRecordId = reconnectRecordId,
                 onBack = { navController.popBackStack() },
                 onRecordComplete = { _ ->
                     navController.navigate(Routes.HOME) {

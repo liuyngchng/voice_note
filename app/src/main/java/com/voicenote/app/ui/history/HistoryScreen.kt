@@ -129,7 +129,7 @@ fun HistoryScreen(
             OutlinedTextField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::search,
-                placeholder = { Text("搜索标题、备注或内容") },
+                placeholder = { Text("搜索") },
                 leadingIcon = {
                     Icon(Icons.Default.Search, contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
@@ -297,11 +297,11 @@ private fun RecordCard(record: VoiceRecord, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-                    if (record.summary != null) {
+                    if (record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Icon(
                             Icons.Default.CheckCircle,
-                            contentDescription = "已总结",
+                            contentDescription = "已转写",
                             modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
@@ -344,18 +344,14 @@ private fun RecordCard(record: VoiceRecord, onClick: () -> Unit) {
                         )
                     }
                 }
-                // Topics
-                record.summary?.let { summary ->
-                    if (summary.topics.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            summary.topics.take(3).joinToString(" / "),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                // Transcript status indicator
+                if (record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "已转写 · 点击查看",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                    )
                 }
             }
         }
