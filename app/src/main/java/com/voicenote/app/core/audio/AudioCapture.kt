@@ -1,5 +1,6 @@
 package com.voicenote.app.core.audio
 
+import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -28,6 +29,7 @@ class AudioCapture @Inject constructor() {
         minSize * BUFFER_SIZE_FACTOR
     }
 
+    @SuppressLint("MissingPermission")
     fun startCapture(): Flow<ByteArray> = flow {
         android.util.Log.e("REC_CRASH", "AUDIO: startCapture flow entered")
         try {

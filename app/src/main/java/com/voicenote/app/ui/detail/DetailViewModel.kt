@@ -101,10 +101,12 @@ class DetailViewModel @Inject constructor(
         if (!file.exists()) return "00:00"
         return try {
             val retriever = MediaMetadataRetriever()
-            retriever.use {
-                it.setDataSource(filePath)
-                val durationMs = it.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
+            try {
+                retriever.setDataSource(filePath)
+                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
                 formatDuration(durationMs / 1000L)
+            } finally {
+                retriever.release()
             }
         } catch (_: Exception) {
             "00:00"

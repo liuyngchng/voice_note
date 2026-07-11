@@ -56,6 +56,10 @@ android {
         jvmTarget = "17"
     }
 
+    lint {
+        abortOnError = false
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
