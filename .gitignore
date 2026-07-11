@@ -1,35 +1,41 @@
 *.iml
-.gradle/
-.idea/
 .DS_Store
 *.swp
 *.swo
-.kotlin/
 
-# Build outputs
+# ===== Android (root-level, legacy) =====
+.gradle/
+.idea/
+.kotlin/
 build/
-captures/
-.externalNativeBuild/
-.cxx/
-*.apk
-*.aab
-*.keystore
-!gradle/wrapper/gradle-wrapper.jar
+
+# ===== Android =====
+android/.gradle/
+android/.idea/
+android/.kotlin/
+android/build/
+android/captures/
+**/.externalNativeBuild/
+**/.cxx/
+android/*.apk
+android/*.aab
+android/*.keystore
+!android/gradle/wrapper/gradle-wrapper.jar
 
 # Local configuration
-local.properties
-gradle-local.properties
+android/local.properties
+android/gradle-local.properties
 
-# Android
-app/build/
-app/release/
-gen/
+# Android app
+android/app/build/
+android/app/release/
+android/gen/
+
+# Android native libs
+android/app/src/main/jniLibs/
 
 # Generated files
 bin/
-
-# Gradle wrapper (keep the jar, ignore properties if it contains sensitive data)
-# gradle/wrapper/gradle-wrapper.properties
 
 # ===== iOS / Xcode =====
 # Xcode 用户数据
@@ -57,7 +63,6 @@ ios/Podfile.lock
 
 # 离线 ASR 框架（预编译二进制，不提交 git）
 ios/VoiceNote/Libraries/
-app/src/main/jniLibs/
 
 # 离线 ASR 模型文件（体积大，不提交 git）
 models/

@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 
 VERSION="1.13.3"
 USE_STATIC=false
-JNILIBS_DIR="app/src/main/jniLibs"
+JNILIBS_DIR="android/app/src/main/jniLibs"
 ABIS=("arm64-v8a" "armeabi-v7a" "x86" "x86_64")
 
 while [[ $# -gt 0 ]]; do
