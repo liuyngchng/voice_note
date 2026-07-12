@@ -105,7 +105,9 @@ final class OfflineLLMClient {
         onProgress: ProgressHandler? = nil
     ) async -> Result<RecordSummary, Error> {
         do {
+            LogFile.shared.syncAppend("crash", "ensureModel 开始")
             try ensureModel(modelInfo)
+            LogFile.shared.syncAppend("crash", "ensureModel 完成")
         } catch {
             return .failure(error)
         }
@@ -175,12 +177,14 @@ final class OfflineLLMClient {
 
     /// 执行一次推理（用户 prompt + 系统 prompt），返回生成文本
     private func infer(userPrompt: String, systemPrompt: String?, maxTokens: Int) throws -> String {
+        LogFile.shared.syncAppend("crash", "bridge.generate 开始: prompt=\(userPrompt.count) chars, maxTokens=\(maxTokens)")
         let output = try bridge.generate(
             withPrompt: userPrompt,
             systemPrompt: systemPrompt,
             maxTokens: Int32(maxTokens),
             temperature: 0.3
         )
+        LogFile.shared.syncAppend("crash", "bridge.generate 完成: output=\(output.count) chars")
         guard !output.isEmpty else {
             throw OfflineLLMError.emptyResponse
         }

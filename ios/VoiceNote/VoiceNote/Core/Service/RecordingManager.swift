@@ -172,6 +172,7 @@ final class RecordingManager: ObservableObject {
             do {
                 let stream = try audioCapture.startCapturing()
                 Log.recording("音频流已启动，开始接收数据...")
+                Log.recording("▶ 转写开始")
                 var totalBytes = 0
                 var lastVadDecodeTime = Date()
 
@@ -220,7 +221,7 @@ final class RecordingManager: ObservableObject {
                         // 每 10 秒打一次日志（含 VAD 状态）
                         if totalBytes % 320_000 < audioData.count {
                             let detected = offlineClient.vadIsDetected ? "语音" : "静音"
-                            Log.recording("录音中: 已写入 \(totalBytes / 1000)KB [VAD: \(detected)]")
+                            Log.recordingDebug("录音中: 已写入 \(totalBytes / 1000)KB [VAD: \(detected)]")
                         }
                     } else {
                         // 非 VAD 模式: 通过 MainActor 累积 PCM 并按时间分块
@@ -282,7 +283,7 @@ final class RecordingManager: ObservableObject {
         // 增量写盘
         appendTranscriptChunk(text)
 
-        Log.recording("VAD 语音段 #\(index): \"\(text.prefix(40))...\"")
+        Log.recordingDebug("VAD 语音段 #\(index): \"\(text.prefix(40))...\"")
     }
 
     /// 将当前 buffer 作为一个片段发给离线 ASR
@@ -296,8 +297,6 @@ final class RecordingManager: ObservableObject {
         let offlineClient = container.offlineASRClient
         let repository = container.recordRepository
         let recordId = currentRecordId
-
-        Log.recording("发送片段 #\(index) (PCM \(chunk.count / 1000)KB)")
 
         Task.detached(priority: .utility) {
             let result = await offlineClient.processPCMChunk(pcmData: chunk)
@@ -333,7 +332,8 @@ final class RecordingManager: ObservableObject {
                 }
 
                 if self.pendingChunkCount == 0, !self.isRecording, let rid = recordId {
-                    Log.recording("全部片段完成，保存最终转写")
+                    let chunkCount = self.chunkIndex
+                    Log.recording("◀ 转写结束: 全部 \(chunkCount) 片段完成，保存最终转写")
                     let rawText = self.accumulatedTranscript
                     let punctClient = self.container.offlinePunctuationClient
                     let punctuated: String
@@ -656,6 +656,7 @@ final class LogFile {
 
     private let queue = DispatchQueue(label: "com.voicenote.logfile")
     private var fileHandle: FileHandle?
+    private var flushTimer: DispatchSourceTimer?
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
@@ -663,9 +664,14 @@ final class LogFile {
         return f
     }()
 
+    /// 日志文件路径（供外部查看/导出）
+    var logFileURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("app.log")
+    }
+
     private init() {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let url = dir.appendingPathComponent("app.log")
+        let url = logFileURL
         let maxSize = 2 * 1024 * 1024
         if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
            let size = attrs[.size] as? Int, size > maxSize {
@@ -674,6 +680,18 @@ final class LogFile {
         FileManager.default.createFile(atPath: url.path, contents: nil)
         fileHandle = try? FileHandle(forWritingTo: url)
         fileHandle?.seekToEndOfFile()
+        startPeriodicFlush()
+    }
+
+    /// 每隔 2 秒刷盘，常规崩溃最多丢 2 秒日志
+    private func startPeriodicFlush() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 2, repeating: 2)
+        timer.setEventHandler { [weak self] in
+            try? self?.fileHandle?.synchronizeFile()
+        }
+        timer.resume()
+        flushTimer = timer
     }
 
     func append(_ tag: String, _ msg: String) {
@@ -682,6 +700,18 @@ final class LogFile {
         queue.async { [weak self] in
             if let data = line.data(using: .utf8) {
                 try? self?.fileHandle?.write(contentsOf: data)
+            }
+        }
+    }
+
+    /// 同步写盘（用于崩溃诊断，确保关键时刻日志落盘）
+    func syncAppend(_ tag: String, _ msg: String) {
+        let ts = dateFormatter.string(from: Date())
+        let line = "[\(ts)] [\(tag)] \(msg)\n"
+        queue.sync { [weak self] in
+            if let data = line.data(using: .utf8) {
+                try? self?.fileHandle?.write(contentsOf: data)
+                try? self?.fileHandle?.synchronizeFile()
             }
         }
     }
@@ -699,6 +729,11 @@ enum Log {
     static func asr(_ msg: String) {
         asrLogger.info("\(msg)")
         LogFile.shared.append("asr", msg)
+    }
+
+    static func recordingDebug(_ msg: String) {
+        logger.debug("\(msg)")
+        LogFile.shared.append("recording-debug", msg)
     }
 
     static func asrDebug(_ msg: String) {

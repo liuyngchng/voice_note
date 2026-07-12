@@ -218,6 +218,8 @@ final class DetailViewModel: ObservableObject {
         let offlineClient = container.offlineLLMClient
         let repository = container.recordRepository
 
+        Log.llm("[总结] 用户触发总结生成: transcript=\(transcript.count) chars")
+        LogFile.shared.syncAppend("crash", "generateSummary 开始: transcript=\(transcript.count)")
         isGeneratingSummary = true
         summaryProgressMessage = nil
         summaryError = nil

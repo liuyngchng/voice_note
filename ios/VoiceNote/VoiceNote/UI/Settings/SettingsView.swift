@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showValidationAlert = false
     @State private var modelFilePickerTarget: FilePickerTarget? = nil
     @State private var filePickerErrorMessage: String? = nil
+    @State private var showLogShare = false
     @StateObject private var modelDownloadManager = ASRModelManager()
     @StateObject private var punctuationModelManager = PunctuationModelManager()
     @StateObject private var llmModelManager = LLMModelManager()
@@ -45,6 +46,22 @@ struct SettingsView: View {
             // MARK: - 离线 LLM 总结模型
             Section(header: Text("大语言模型")) {
                 llmModelStatusSection
+            }
+
+            // 诊断日志
+            Section(header: Text("诊断")) {
+                Button {
+                    viewModel.shareLogFile()
+                } label: {
+                    HStack {
+                        Image(systemName: "doc.text.magnifyingglass")
+                        Text("导出诊断日志")
+                        Spacer()
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             // 版本号
@@ -161,6 +178,12 @@ struct SettingsView: View {
                 }
         }
     }
+        .sheet(isPresented: $showLogShare) {
+            ShareSheet(activityItems: [viewModel.logFileURL])
+        }
+        .onChange(of: viewModel.logShareTrigger) { _ in
+            showLogShare = true
+        }
     }
 
     // MARK: - ASR 模型状态
@@ -887,4 +910,16 @@ private struct ModelFilePicker: UIViewControllerRepresentable {
 
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {}
     }
+}
+
+// MARK: - 分享面板
+
+private struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiView: UIActivityViewController, context: Context) {}
 }

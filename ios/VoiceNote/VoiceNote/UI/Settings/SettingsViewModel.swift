@@ -182,4 +182,19 @@ final class SettingsViewModel: ObservableObject {
         await llmModelManager.deleteModel(llmModelInfo)
     }
 
+    // MARK: - 诊断日志
+
+    /// 日志文件 URL（供导出）
+    var logFileURL: URL {
+        LogFile.shared.logFileURL
+    }
+
+    func shareLogFile() {
+        // 触发前先同步刷盘
+        LogFile.shared.syncAppend("diag", "用户导出日志")
+        logShareTrigger.toggle()
+    }
+
+    @Published var logShareTrigger = false
+
 }
