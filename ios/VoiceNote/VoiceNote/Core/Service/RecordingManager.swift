@@ -704,6 +704,20 @@ final class LogFile {
         }
     }
 
+    /// 清除日志文件
+    func clear() {
+        let url = logFileURL
+        queue.async { [weak self] in
+            try? self?.fileHandle?.close()
+            self?.fileHandle = nil
+            // 截断文件到 0
+            try? FileManager.default.removeItem(at: url)
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            self?.fileHandle = try? FileHandle(forWritingTo: url)
+            self?.fileHandle?.seekToEndOfFile()
+        }
+    }
+
     /// 同步写盘（用于崩溃诊断，确保关键时刻日志落盘）
     func syncAppend(_ tag: String, _ msg: String) {
         let ts = dateFormatter.string(from: Date())

@@ -195,6 +195,11 @@ final class SettingsViewModel: ObservableObject {
         logShareTrigger.toggle()
     }
 
+    func clearLog() {
+        LogFile.shared.syncAppend("diag", "用户清除日志")
+        LogFile.shared.clear()
+    }
+
     @Published var logShareTrigger = false
 
 }

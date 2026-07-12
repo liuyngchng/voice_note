@@ -94,10 +94,7 @@ static NSString *const LlamaBridgeErrorDomain = @"LlamaBridgeErrorDomain";
     // 模型参数
     llama_model_params modelParams = llama_model_default_params();
     modelParams.n_gpu_layers = gpuLayers;
-    // Metal newBufferWithBytesNoCopy 要求 buffer 大小按 4096 字节页面对齐，
-    // 但 mmap 的 GGUF tensor 数据不一定满足此条件。GPU 模式下禁用 mmap，
-    // 让 llama.cpp 分配自己的对齐缓冲区。
-    modelParams.use_mmap = (gpuLayers == 0);
+    modelParams.use_mmap = true;
 
     // 加载模型（循环：先尝试 GPU，失败则回退到 CPU）
     int effectiveGpuLayers = gpuLayers;

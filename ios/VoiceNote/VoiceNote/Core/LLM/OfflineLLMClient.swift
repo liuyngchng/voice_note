@@ -52,6 +52,9 @@ final class OfflineLLMClient {
             throw OfflineLLMError.modelNotDownloaded(modelInfo)
         }
 
+        // 确保模型文件页对齐，避免 Metal mmap buffer 对齐错误
+        LLMModelManager.padFileToPageAlignment(at: URL(fileURLWithPath: modelPath))
+
         // 低内存设备使用 CPU only，避免 Metal GPU 内存压力
         let physicalMemory = ProcessInfo.processInfo.physicalMemory
         let isLowMemory = physicalMemory < 3 * 1024 * 1024 * 1024  // < 3GB

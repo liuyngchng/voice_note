@@ -62,6 +62,16 @@ struct SettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
+                Button {
+                    viewModel.clearLog()
+                } label: {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("清除日志")
+                            .foregroundColor(.red)
+                        Spacer()
+                    }
+                }
             }
 
             // 版本号
