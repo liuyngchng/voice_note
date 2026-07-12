@@ -12,6 +12,7 @@ final class DetailViewModel: ObservableObject {
 
     /// 文本总结状态
     @Published var isGeneratingSummary = false
+    @Published var summaryProgressMessage: String?
     @Published var summaryError: String?
 
     @Published var audioPlayer = AudioPlayer()
@@ -218,6 +219,7 @@ final class DetailViewModel: ObservableObject {
         let repository = container.recordRepository
 
         isGeneratingSummary = true
+        summaryProgressMessage = nil
         summaryError = nil
 
         // 3. 先更新状态为 processing
@@ -225,12 +227,18 @@ final class DetailViewModel: ObservableObject {
             try? await repository.updateSummaryStatus(id, status: .processing)
         }
 
-        // 4. 执行离线推理
-        Task {
+        // 4. 执行离线推理（带进度回调）
+        Task { [weak self] in
+            guard let self else { return }
             let summaryResult = await offlineClient.generateSummary(
                 transcript: transcript,
                 modelInfo: modelInfo,
-                customPrompt: nil
+                customPrompt: nil,
+                onProgress: { [weak self] message in
+                    Task { @MainActor [weak self] in
+                        self?.summaryProgressMessage = message
+                    }
+                }
             )
 
             await MainActor.run {
@@ -240,6 +248,7 @@ final class DetailViewModel: ObservableObject {
                         await MainActor.run {
                             self.summaryError = nil
                             self.isGeneratingSummary = false
+                            self.summaryProgressMessage = nil
                             self.refresh()
                         }
                     }
@@ -249,6 +258,7 @@ final class DetailViewModel: ObservableObject {
                         self.summaryError = error.localizedDescription
                     }
                     self.isGeneratingSummary = false
+                    self.summaryProgressMessage = nil
                     Task {
                         try? await repository.updateSummaryStatus(id, status: .unavailable)
                         await MainActor.run { self.refresh() }

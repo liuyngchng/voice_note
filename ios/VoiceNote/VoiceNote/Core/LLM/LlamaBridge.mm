@@ -96,44 +96,79 @@ static NSString *const LlamaBridgeErrorDomain = @"LlamaBridgeErrorDomain";
     modelParams.n_gpu_layers = gpuLayers;
     modelParams.use_mmap = true;
 
-    // 加载模型
-    _model = llama_load_model_from_file(cPath, modelParams);
-    if (!_model) {
-        if (error) {
-            *error = [NSError errorWithDomain:LlamaBridgeErrorDomain
-                                         code:-3
-                                     userInfo:@{NSLocalizedDescriptionKey: @"加载模型失败，可能文件损坏或内存不足"}];
+    // 加载模型（循环：先尝试 GPU，失败则回退到 CPU）
+    int effectiveGpuLayers = gpuLayers;
+    bool didFallback = false;
+
+    for (int attempt = 0; attempt < 2; attempt++) {
+        modelParams.n_gpu_layers = effectiveGpuLayers;
+
+        _model = llama_load_model_from_file(cPath, modelParams);
+        if (!_model) {
+            if (effectiveGpuLayers > 0 && attempt == 0) {
+                // GPU 模型加载失败，回退 CPU 重试
+                os_log_info(OS_LOG_DEFAULT, "[LlamaBridge] GPU 模型加载失败，回退到 CPU-only 模式");
+                effectiveGpuLayers = 0;
+                didFallback = true;
+                llama_backend_free();
+                llama_backend_init();
+                continue;
+            }
+            if (error) {
+                *error = [NSError errorWithDomain:LlamaBridgeErrorDomain
+                                             code:-3
+                                         userInfo:@{NSLocalizedDescriptionKey: @"加载模型失败，可能文件损坏或内存不足"}];
+            }
+            llama_backend_free();
+            return NO;
         }
-        llama_backend_free();
-        return NO;
+
+        // 获取词表
+        _vocab = llama_model_get_vocab(_model);
+
+        // 上下文参数
+        llama_context_params ctxParams = llama_context_default_params();
+        ctxParams.n_ctx = ctxLen;
+        ctxParams.n_batch = 512;
+        ctxParams.n_threads = (int)sysconf(_SC_NPROCESSORS_ONLN);
+        if (ctxParams.n_threads < 1) ctxParams.n_threads = 1;
+        ctxParams.n_threads_batch = ctxParams.n_threads;
+
+        // 创建推理上下文
+        _ctx = llama_new_context_with_model(_model, ctxParams);
+        if (!_ctx) {
+            llama_model_free(_model);
+            _model = nullptr;
+            _vocab = nullptr;
+
+            if (effectiveGpuLayers > 0 && attempt == 0) {
+                // GPU 上下文创建失败（通常 Metal shader 编译被 jetsam），回退 CPU
+                os_log_info(OS_LOG_DEFAULT, "[LlamaBridge] GPU 上下文创建失败（Metal 初始化错误），回退到 CPU-only 模式");
+                effectiveGpuLayers = 0;
+                didFallback = true;
+                llama_backend_free();
+                llama_backend_init();
+                continue;
+            }
+
+            llama_backend_free();
+            if (error) {
+                // CPU 模式也失败：给出不同的错误提示
+                NSString *msg = didFallback
+                    ? @"CPU 模式也无法创建推理上下文，请尝试释放更多内存后重试"
+                    : @"创建推理上下文失败，尝试减小上下文长度";
+                *error = [NSError errorWithDomain:LlamaBridgeErrorDomain
+                                             code:-4
+                                         userInfo:@{NSLocalizedDescriptionKey: msg}];
+            }
+            return NO;
+        }
+
+        // 成功
+        break;
     }
 
-    // 获取词表
-    _vocab = llama_model_get_vocab(_model);
-
-    // 上下文参数
-    llama_context_params ctxParams = llama_context_default_params();
-    ctxParams.n_ctx = ctxLen;
-    ctxParams.n_batch = 512;
-    ctxParams.n_threads = (int)sysconf(_SC_NPROCESSORS_ONLN);
-    if (ctxParams.n_threads < 1) ctxParams.n_threads = 1;
-    ctxParams.n_threads_batch = ctxParams.n_threads;
-
-    // 创建推理上下文
-    _ctx = llama_new_context_with_model(_model, ctxParams);
-    if (!_ctx) {
-        llama_model_free(_model);
-        _model = nullptr;
-        llama_backend_free();
-        if (error) {
-            *error = [NSError errorWithDomain:LlamaBridgeErrorDomain
-                                         code:-4
-                                     userInfo:@{NSLocalizedDescriptionKey: @"创建推理上下文失败，尝试减小上下文长度"}];
-        }
-        return NO;
-    }
-
-    _gpuLayers = gpuLayers;
+    _gpuLayers = effectiveGpuLayers;
     _ctxLen = ctxLen;
     _isLoaded = YES;
 
@@ -141,8 +176,9 @@ static NSString *const LlamaBridgeErrorDomain = @"LlamaBridgeErrorDomain";
     char descBuf[256] = {0};
     llama_model_desc(_model, descBuf, sizeof(descBuf));
     uint64_t nParams = llama_model_n_params(_model);
-    os_log_info(OS_LOG_DEFAULT, "[LlamaBridge] 模型就绪: %s, params=%lluM, ctx=%d, gpu=%d",
-                descBuf, (unsigned long long)(nParams / 1'000'000), ctxLen, gpuLayers);
+    os_log_info(OS_LOG_DEFAULT, "[LlamaBridge] 模型就绪: %s, params=%lluM, ctx=%d, gpu=%d%s",
+                descBuf, (unsigned long long)(nParams / 1'000'000), ctxLen, effectiveGpuLayers,
+                didFallback ? " (GPU→CPU 回退)" : "");
 
     return YES;
 }
@@ -315,6 +351,16 @@ static NSString *const LlamaBridgeErrorDomain = @"LlamaBridgeErrorDomain";
                 result.size(), result.size() > 0 ? tokens.size() : 0);
 
     return [NSString stringWithUTF8String:result.c_str()];
+}
+
+// MARK: - 清除上下文
+
+- (void)clearContext {
+    if (_ctx) {
+        llama_memory_t mem = llama_get_memory(_ctx);
+        llama_memory_clear(mem, true);
+        os_log_info(OS_LOG_DEFAULT, "[LlamaBridge] KV cache 已清除");
+    }
 }
 
 // MARK: - 卸载

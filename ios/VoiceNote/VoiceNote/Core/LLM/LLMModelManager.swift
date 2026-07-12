@@ -12,7 +12,9 @@ final class LLMModelManager: ObservableObject {
 
     enum DownloadState: Equatable {
         case idle
+        case queued
         case downloading(progress: Double)
+        case importing(progress: Double)
         case completed(Date)
         case failed(String)
     }
@@ -61,8 +63,7 @@ final class LLMModelManager: ObservableObject {
     }
 
     static nonisolated func savedModelInfo() -> LLMModelInfo {
-        let raw = UserDefaults.standard.string(forKey: "llm_model_info") ?? ""
-        return LLMModelInfo(rawValue: raw) ?? .qwen2_5_1_5b_q4km
+        .qwen2_5_1_5b_q4km
     }
 
     // MARK: - 磁盘空间检查
@@ -84,92 +85,79 @@ final class LLMModelManager: ObservableObject {
         }
     }
 
-    // MARK: - 从 ModelScope 下载
+    // MARK: - 从 ModelScope 下载（入队，立即返回）
 
-    func downloadFromModelScope(_ info: LLMModelInfo) async throws {
+    func downloadFromModelScope(_ info: LLMModelInfo) {
+        guard !isDownloading else { return }
         guard let urlString = info.modelscopeDownloadURL,
               let url = URL(string: urlString)
         else {
             downloadState = .failed("该模型暂不支持 ModelScope 下载")
-            throw LLMDownloadError.noURL
+            return
         }
-        try await download(from: url, source: .modelscope, info: info)
+        Log.llm("[LLM] 用户触发下载 ModelScope: \(info.rawValue)")
+        isDownloading = true
+        activeSource = .modelscope
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._downloadFromModelScope(url: url, info: info)
+            }
+        }
     }
 
-    // MARK: - 从 GitHub 下载
+    // MARK: - 从 GitHub 下载（入队，立即返回）
 
-    func downloadFromGitHub(_ info: LLMModelInfo) async throws {
+    func downloadFromGitHub(_ info: LLMModelInfo) {
+        guard !isDownloading else { return }
         guard let urlString = info.githubDownloadURL,
               let url = URL(string: urlString)
         else {
             downloadState = .failed("该模型暂未配置 GitHub 镜像，请使用 ModelScope 下载或手动上传")
-            throw LLMDownloadError.noURL
-        }
-        try await download(from: url, source: .github, info: info)
-    }
-
-    // MARK: - 导入本地文件
-
-    func importFromFile(_ sourceURL: URL, info: LLMModelInfo) async throws {
-        guard !isDownloading else {
-            Log.llm("操作已在进行中，忽略重复请求")
             return
         }
+        Log.llm("[LLM] 用户触发下载 GitHub: \(info.rawValue)")
+        isDownloading = true
+        activeSource = .github
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._downloadFromGitHub(url: url, info: info)
+            }
+        }
+    }
+
+    // MARK: - 导入本地文件（入队，立即返回）
+
+    func importFromFile(_ sourceURL: URL, info: LLMModelInfo, cleanup: (() -> Void)? = nil) {
+        guard !isDownloading else { return }
+        Log.llm("[LLM] 用户触发导入: \(sourceURL.lastPathComponent)")
         isDownloading = true
         activeSource = .import_
-
-        guard Self.hasSufficientDiskSpace(for: info) else {
-            let msg = "磁盘空间不足，需要至少 \(info.estimatedSizeMB) MB"
-            downloadState = .failed(msg)
-            isDownloading = false
-            throw LLMDownloadError.insufficientDiskSpace
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._importFromFile(sourceURL, info: info, cleanup: cleanup)
+            }
         }
-
-        let fm = FileManager.default
-        try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
-
-        let targetURL = Self.modelFilePath(info)
-        try? fm.removeItem(at: targetURL)
-
-        do {
-            try fm.copyItem(at: sourceURL, to: targetURL)
-        } catch {
-            let msg = "文件导入失败: \(error.localizedDescription)"
-            downloadState = .failed(msg)
-            isDownloading = false
-            throw LLMDownloadError.fileImportFailed(error.localizedDescription)
-        }
-
-        // 验证文件大小合理 (>10MB)
-        let fileSize = Self.downloadedModelSize(info)
-        guard fileSize > 10_000_000 else {
-            try? fm.removeItem(at: targetURL)
-            let msg = "导入的文件过小 (\(fileSize / 1_048_576)MB)，可能不是有效的 GGUF 模型"
-            downloadState = .failed(msg)
-            isDownloading = false
-            throw LLMDownloadError.invalidFile(msg)
-        }
-
-        isDownloading = false
-        downloadState = .completed(Date())
-        Log.llm("模型导入完成: \(info.rawValue) (\(fileSize / 1_048_576)MB)")
     }
 
-    // MARK: - 通用下载
+    // MARK: - Private: 实际下载逻辑（由队列串行调用）
 
-    private func download(from url: URL, source: DownloadSource, info: LLMModelInfo) async throws {
-        guard !isDownloading else {
-            Log.llm("操作已在进行中，忽略重复请求")
-            return
-        }
-        isDownloading = true
-        activeSource = source
+    private func _downloadFromModelScope(url: URL, info: LLMModelInfo) async {
+        await _download(from: url, source: .modelscope, info: info)
+    }
 
+    private func _downloadFromGitHub(url: URL, info: LLMModelInfo) async {
+        await _download(from: url, source: .github, info: info)
+    }
+
+    private func _download(from url: URL, source: DownloadSource, info: LLMModelInfo) async {
         guard Self.hasSufficientDiskSpace(for: info) else {
             let msg = "磁盘空间不足，需要至少 \(info.estimatedSizeMB) MB"
             downloadState = .failed(msg)
             isDownloading = false
-            throw LLMDownloadError.insufficientDiskSpace
+            return
         }
 
         let fm = FileManager.default
@@ -187,11 +175,11 @@ final class LLMModelManager: ObservableObject {
             if error is CancellationError {
                 Log.llm("下载已取消")
                 downloadState = .idle
-                throw error
+                return
             }
             let msg = "下载失败: \(error.localizedDescription)"
             downloadState = .failed(msg)
-            throw error
+            return
         }
 
         // 验证
@@ -199,13 +187,89 @@ final class LLMModelManager: ObservableObject {
             let msg = "下载完成但文件验证失败"
             downloadState = .failed(msg)
             isDownloading = false
-            throw LLMDownloadError.verificationFailed
+            return
         }
 
         let fileSize = Self.downloadedModelSize(info)
         isDownloading = false
         downloadState = .completed(Date())
         Log.llm("模型下载完成: \(info.rawValue) (\(fileSize / 1_048_576)MB), 来源=\(source.rawValue)")
+    }
+
+    private func _importFromFile(_ sourceURL: URL, info: LLMModelInfo, cleanup: (() -> Void)?) async {
+        defer { cleanup?() }
+
+        guard Self.hasSufficientDiskSpace(for: info) else {
+            let msg = "磁盘空间不足，需要至少 \(info.estimatedSizeMB) MB"
+            downloadState = .failed(msg)
+            isDownloading = false
+            return
+        }
+
+        // 校验 GGUF 魔术字（文件头 4 字节必须为 "GGUF"）
+        downloadState = .importing(progress: 0)
+        guard Self.isValidGGUFFile(at: sourceURL) else {
+            let msg = "文件格式无效：所选文件不是 GGUF 格式模型。\n请确认选择了正确的 .gguf 文件。"
+            downloadState = .failed(msg)
+            isDownloading = false
+            return
+        }
+
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
+
+        let targetURL = Self.modelFilePath(info)
+        try? fm.removeItem(at: targetURL)
+
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                try fm.copyItem(at: sourceURL, to: targetURL)
+            }.value
+        } catch {
+            let msg = "文件导入失败: \(error.localizedDescription)"
+            downloadState = .failed(msg)
+            isDownloading = false
+            return
+        }
+
+        // 被取消则跳过后续验证，避免状态冲突
+        if Task.isCancelled {
+            Log.llm("[LLM] 导入已被用户取消，跳过后续处理")
+            return
+        }
+
+        // 验证文件大小合理 (>10MB)
+        let fileSize = Self.downloadedModelSize(info)
+        guard fileSize > 10_000_000 else {
+            try? fm.removeItem(at: targetURL)
+            let msg = "导入的文件过小 (\(fileSize / 1_048_576)MB)，可能不是有效的 GGUF 模型"
+            downloadState = .failed(msg)
+            isDownloading = false
+            return
+        }
+
+        if Task.isCancelled {
+            Log.llm("[LLM] 导入已被用户取消，跳过完成标记")
+            return
+        }
+        isDownloading = false
+        downloadState = .completed(Date())
+        Log.llm("模型导入完成: \(info.rawValue) (\(fileSize / 1_048_576)MB)")
+    }
+
+    /// 校验文件是否为 GGUF 格式（检查文件头魔术字 "GGUF"）
+    static nonisolated func isValidGGUFFile(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            return false
+        }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: 4), data.count == 4 else {
+            return false
+        }
+        // GGUF 魔术字: 0x47 0x47 0x55 0x46 ("GGUF")
+        let magic: [UInt8] = [0x47, 0x47, 0x55, 0x46]
+        return data.elementsEqual(magic)
     }
 
     private func performDownload(from url: URL, to targetURL: URL) async throws {
@@ -267,23 +331,29 @@ final class LLMModelManager: ObservableObject {
         currentTask = nil
         downloadSession?.invalidateAndCancel()
         downloadSession = nil
+        Task { await ModelOperationQueue.shared.cancelCurrent() }
+        if case .queued = downloadState { downloadState = .idle }
         isDownloading = false
         downloadState = .idle
     }
 
     // MARK: - 删除
 
-    func deleteModel(_ info: LLMModelInfo) {
+    func deleteModel(_ info: LLMModelInfo) async {
         let path = Self.modelFilePath(info)
-        try? FileManager.default.removeItem(at: path)
-        Log.llm("模型已删除: \(info.rawValue)")
+        let dirPath = Self.modelsDirectory.path
+        let rawValue = info.rawValue
 
-        // 如果目录空了也清理
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: Self.modelsDirectory.path),
-           contents.isEmpty {
-            try? FileManager.default.removeItem(at: Self.modelsDirectory)
-        }
+        await Task.detached(priority: .userInitiated) {
+            try? FileManager.default.removeItem(at: path)
+            // 如果目录空了也清理
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: dirPath),
+               contents.isEmpty {
+                try? FileManager.default.removeItem(atPath: dirPath)
+            }
+        }.value
 
+        Log.llm("模型已删除: \(rawValue)")
         downloadState = .idle
         downloadProgress = 0
     }

@@ -43,14 +43,7 @@ struct SettingsView: View {
             }
 
             // MARK: - 离线 LLM 总结模型
-            Section(header: Text("离线大语言模型")) {
-                Picker("模型选择", selection: $viewModel.llmModelInfo) {
-                    ForEach(LLMModelInfo.allCases, id: \.self) { info in
-                        Text(info.displayName).tag(info)
-                    }
-                }
-                .pickerStyle(.menu)
-
+            Section(header: Text("大语言模型")) {
                 llmModelStatusSection
             }
 
@@ -145,10 +138,7 @@ struct SettingsView: View {
             case .asrModel:
                 ModelFilePicker(allowedContentTypes: [.bz2, UTType(filenameExtension: "tar") ?? .data]) { url, cleanup in
                     Log.asr("[SettingsView] 用户选择了ASR模型文件: \(url.lastPathComponent)")
-                    Task {
-                        await viewModel.importModel(from: url)
-                        cleanup()
-                    }
+                    viewModel.importModel(from: url, cleanup: cleanup)
                 } onError: { msg in
                     Log.asr("[SettingsView] ASR文件选择失败: \(msg)")
                     filePickerErrorMessage = msg
@@ -156,27 +146,21 @@ struct SettingsView: View {
             case .punctModel:
                 ModelFilePicker(allowedContentTypes: [.bz2, UTType(filenameExtension: "tar") ?? .data, UTType(filenameExtension: "onnx") ?? .data]) { url, cleanup in
                     Log.asr("[SettingsView] 用户选择了标点模型文件: \(url.lastPathComponent)")
-                    Task {
-                        await viewModel.importPunctuationModel(from: url)
-                        cleanup()
-                    }
+                    viewModel.importPunctuationModel(from: url, cleanup: cleanup)
                 } onError: { msg in
                     Log.asr("[SettingsView] 标点文件选择失败: \(msg)")
                     filePickerErrorMessage = msg
                 }
             case .llmModel:
                 ModelFilePicker(allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data]) { url, cleanup in
-                    Log.llm("[SettingsView] 用户选择了 LLM 模型文件: \(url.lastPathComponent)")
-                    Task {
-                        await viewModel.importLLMModel(from: url)
-                        cleanup()
-                    }
+                    Log.llm("[SettingsView] 用户选择了LLM模型文件: \(url.lastPathComponent)")
+                    viewModel.importLLMModel(from: url, cleanup: cleanup)
                 } onError: { msg in
-                    Log.llm("[SettingsView] LLM 文件选择失败: \(msg)")
+                    Log.llm("[SettingsView] LLM文件选择失败: \(msg)")
                     filePickerErrorMessage = msg
                 }
-            }
         }
+    }
     }
 
     // MARK: - ASR 模型状态
@@ -191,8 +175,14 @@ struct SettingsView: View {
                 asrModelNotDownloadedRow
             }
 
+        case .queued:
+            asrQueuedRow
+
         case .downloading(let progress):
             asrDownloadingRow(progress)
+
+        case .importing(let progress):
+            asrImportingRow(progress)
 
         case .extracting(let progress):
             asrExtractingRow(progress)
@@ -205,6 +195,38 @@ struct SettingsView: View {
 
         case .failed(let error):
             asrDownloadFailedRow(error)
+        }
+    }
+
+    private var asrQueuedRow: some View {
+        HStack {
+            Image(systemName: "clock").foregroundColor(.orange)
+            Text("排队中...").font(.caption).foregroundColor(.orange)
+            Spacer()
+        }
+    }
+
+    private func asrImportingRow(_ progress: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text("导入中...")
+                Spacer()
+                if progress > 0 {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Button {
+                    viewModel.cancelDownload()
+                } label: {
+                    Text("取消").foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
+            }
+            if progress > 0 {
+                ProgressView(value: progress)
+            }
         }
     }
 
@@ -222,6 +244,8 @@ struct SettingsView: View {
                 Image(systemName: "trash")
                     .font(.body)
                     .foregroundColor(.red)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
         }
@@ -246,15 +270,18 @@ struct SettingsView: View {
             Text("下载地址")
                 .font(.subheadline)
                 .foregroundColor(.primary)
-            Button {
-                UIPasteboard.general.string = urlString
-            } label: {
-                HStack(spacing: 4) {
-                    Text(urlString)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.blue)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+            HStack(spacing: 4) {
+                Text(urlString)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .onTapGesture {
+                        UIPasteboard.general.string = urlString
+                    }
+                Button {
+                    UIPasteboard.general.string = urlString
+                } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 10))
                         .foregroundColor(.blue)
@@ -320,7 +347,8 @@ struct SettingsView: View {
             Divider()
             HStack(spacing: 12) {
                 Button {
-                    Task { await viewModel.startDownload() }
+                    Log.asr("[ASR] 用户点击重试下载")
+                    viewModel.startDownload()
                 } label: {
                     Label("重试", systemImage: "arrow.clockwise")
                 }
@@ -343,7 +371,7 @@ struct SettingsView: View {
     private var asrActionButtonsRow: some View {
         HStack(spacing: 12) {
             Button {
-                Task { await viewModel.startDownload() }
+                viewModel.startDownload()
             } label: {
                 Label("下载", systemImage: "square.and.arrow.down")
             }
@@ -375,8 +403,14 @@ struct SettingsView: View {
                 punctModelNotDownloadedRow
             }
 
+        case .queued:
+            punctQueuedRow
+
         case .downloading(let progress):
             punctDownloadingRow(progress)
+
+        case .importing(let progress):
+            punctImportingRow(progress)
 
         case .extracting(let progress):
             punctExtractingRow(progress)
@@ -392,6 +426,38 @@ struct SettingsView: View {
         }
     }
 
+    private var punctQueuedRow: some View {
+        HStack {
+            Image(systemName: "clock").foregroundColor(.orange)
+            Text("排队中...").font(.caption).foregroundColor(.orange)
+            Spacer()
+        }
+    }
+
+    private func punctImportingRow(_ progress: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text("导入中...")
+                Spacer()
+                if progress > 0 {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Button {
+                    viewModel.cancelPunctuationDownload()
+                } label: {
+                    Text("取消").foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
+            }
+            if progress > 0 {
+                ProgressView(value: progress)
+            }
+        }
+    }
+
     private var punctModelReadyRow: some View {
         HStack {
             Label("标点模型已就绪", systemImage: "checkmark.circle.fill")
@@ -403,6 +469,8 @@ struct SettingsView: View {
                 Image(systemName: "trash")
                     .font(.body)
                     .foregroundColor(.red)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
         }
@@ -430,15 +498,18 @@ struct SettingsView: View {
             Text("下载地址")
                 .font(.subheadline)
                 .foregroundColor(.primary)
-            Button {
-                UIPasteboard.general.string = urlString
-            } label: {
-                HStack(spacing: 4) {
-                    Text(urlString)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.blue)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+            HStack(spacing: 4) {
+                Text(urlString)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .onTapGesture {
+                        UIPasteboard.general.string = urlString
+                    }
+                Button {
+                    UIPasteboard.general.string = urlString
+                } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.system(size: 10))
                         .foregroundColor(.blue)
@@ -504,7 +575,8 @@ struct SettingsView: View {
             Divider()
             HStack(spacing: 12) {
                 Button {
-                    Task { await viewModel.startPunctuationDownload() }
+                    Log.asr("[标点] 用户点击重试下载")
+                    viewModel.startPunctuationDownload()
                 } label: {
                     Label("重试", systemImage: "arrow.clockwise")
                 }
@@ -527,7 +599,7 @@ struct SettingsView: View {
     private var punctActionButtonsRow: some View {
         HStack(spacing: 12) {
             Button {
-                Task { await viewModel.startPunctuationDownload() }
+                viewModel.startPunctuationDownload()
             } label: {
                 Label("下载", systemImage: "square.and.arrow.down")
             }
@@ -559,8 +631,14 @@ struct SettingsView: View {
                 llmModelNotDownloadedRow
             }
 
+        case .queued:
+            llmQueuedRow
+
         case .downloading(let progress):
             llmDownloadingRow(progress)
+
+        case .importing(let progress):
+            llmImportingRow(progress)
 
         case .completed:
             llmModelReadyRow
@@ -570,6 +648,14 @@ struct SettingsView: View {
 
         case .failed(let error):
             llmDownloadFailedRow(error)
+        }
+    }
+
+    private var llmQueuedRow: some View {
+        HStack {
+            Image(systemName: "clock").foregroundColor(.orange)
+            Text("排队中...").font(.caption).foregroundColor(.orange)
+            Spacer()
         }
     }
 
@@ -588,6 +674,8 @@ struct SettingsView: View {
                 Image(systemName: "trash")
                     .font(.body)
                     .foregroundColor(.red)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
         }
@@ -608,62 +696,87 @@ struct SettingsView: View {
     }
 
     private var llmDownloadAddressRow: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let msURL = viewModel.llmModelInfo.modelscopeDownloadURL ?? ""
+        return VStack(alignment: .leading, spacing: 4) {
             Text("下载地址")
                 .font(.subheadline)
                 .foregroundColor(.primary)
-            if let msURL = viewModel.llmModelInfo.modelscopeDownloadURL {
-                HStack(spacing: 4) {
-                    Text("ModelScope: \(msURL)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.blue)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                    Button {
+            HStack(spacing: 4) {
+                Text(msURL)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.blue)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .onTapGesture {
                         UIPasteboard.general.string = msURL
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 10))
-                            .foregroundColor(.blue)
                     }
+                Button {
+                    UIPasteboard.general.string = msURL
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundColor(.blue)
                 }
-            }
-            if viewModel.llmModelInfo.modelscopeDownloadURL == nil {
-                Text("注：自定义模型需手动上传 GGUF 文件")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
         }
     }
 
     private func llmDownloadingRow(_ progress: Double) -> some View {
-        let sourceName = llmModelManager.activeSource.rawValue
+        let isImport = llmModelManager.activeSource == .import_
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 ProgressView()
-                Text("\(sourceName)下载中...")
+                Text(isImport ? "导入中..." : "下载中...")
                 Spacer()
-                Text("\(Int(progress * 100))%")
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
+                if !isImport {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Button {
+                    viewModel.cancelLLMDownload()
+                } label: {
+                    Text("取消").foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
             }
-            ProgressView(value: progress)
-            Button {
-                viewModel.cancelLLMDownload()
-            } label: {
-                Text("取消").foregroundColor(.red)
+            if !isImport {
+                ProgressView(value: progress)
             }
-            .buttonStyle(.borderless)
-            .font(.caption)
+        }
+    }
+
+    private func llmImportingRow(_ progress: Double) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ProgressView()
+                Text("导入中...")
+                Spacer()
+                if progress > 0 {
+                    Text("\(Int(progress * 100))%")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Button {
+                    viewModel.cancelLLMDownload()
+                } label: {
+                    Text("取消").foregroundColor(.red)
+                }
+                .buttonStyle(.borderless)
+            }
+            if progress > 0 {
+                ProgressView(value: progress)
+            }
         }
     }
 
     private func llmDownloadFailedRow(_ error: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let isImport = llmModelManager.activeSource == .import_
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.red)
-                Text("下载失败")
+                Text(isImport ? "导入失败" : "下载失败")
                     .font(.subheadline)
                     .foregroundColor(.red)
             }
@@ -672,27 +785,44 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
             llmDownloadAddressRow
             Divider()
-            llmActionButtonsRow
+            HStack(spacing: 12) {
+                Button {
+                    Log.llm("[LLM] 用户点击重试下载")
+                    viewModel.startLLMFromModelScope()
+                } label: {
+                    Label("重试", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+                .disabled(llmModelManager.isDownloading)
+                Spacer()
+                Button {
+                    Log.llm("[SettingsView] LLM上传按钮点击(失败行)")
+                    modelFilePickerTarget = .llmModel
+                } label: {
+                    Label("上传", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+            }
         }
     }
 
     private var llmActionButtonsRow: some View {
         HStack(spacing: 12) {
-            if viewModel.llmModelInfo.modelscopeDownloadURL != nil {
-                Button {
-                    Task { await viewModel.startLLMFromModelScope() }
-                } label: {
-                    Label("下载", systemImage: "square.and.arrow.down")
-                }
-                .buttonStyle(.borderless)
-                .font(.subheadline)
-                .disabled(llmModelManager.isDownloading)
+            Button {
+                viewModel.startLLMFromModelScope()
+            } label: {
+                Label("下载", systemImage: "square.and.arrow.down")
             }
+            .buttonStyle(.borderless)
+            .font(.subheadline)
+            .disabled(llmModelManager.isDownloading)
 
             Spacer()
 
             Button {
-                Log.llm("[SettingsView] LLM 上传按钮点击")
+                Log.llm("[SettingsView] LLM上传按钮点击(操作行)")
                 modelFilePickerTarget = .llmModel
             } label: {
                 Label("上传", systemImage: "square.and.arrow.up")
@@ -702,6 +832,7 @@ struct SettingsView: View {
             .disabled(llmModelManager.isDownloading)
         }
     }
+
 }
 
 // MARK: - 模型文件选择器（UIDocumentPicker 包装，避免 SwiftUI fileImporter 在 Form 中的兼容问题）

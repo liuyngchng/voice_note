@@ -258,10 +258,16 @@ struct DetailView: View {
                             .padding(.horizontal)
                     }
                 } else if record.summaryStatus == .processing {
-                    HStack {
+                    VStack(spacing: 8) {
                         ProgressView()
-                        Text("正在生成总结...")
-                            .foregroundColor(.secondary)
+                        if let progressMsg = viewModel.summaryProgressMessage {
+                            Text(progressMsg)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("正在生成总结...")
+                                .foregroundColor(.secondary)
+                        }
                     }
                     .padding()
                     .frame(maxWidth: .infinity)
@@ -290,8 +296,11 @@ struct DetailView: View {
                             } else {
                                 Image(systemName: "sparkles")
                             }
-                            Text(viewModel.isGeneratingSummary ? "生成中..." : "生成总结")
+                            Text(viewModel.isGeneratingSummary
+                                 ? (viewModel.summaryProgressMessage ?? "生成中...")
+                                 : "生成总结")
                                 .font(.subheadline)
+                                .lineLimit(1)
                         }
                     }
                     .disabled(viewModel.isGeneratingSummary)

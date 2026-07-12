@@ -41,6 +41,8 @@
 		793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D02FE40E9000752EE2 /* AudioPlayer.swift */; };
 		79815C502FE4BD21005AFCD5 /* VoiceNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */; };
 		79888F1E2FE7B6DE00B2EF86 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C722FA2A71904AA69777663D /* onnxruntime.xcframework */; };
+		79DC9BE43003A7B400832F6B /* ModelOperationQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DC9BE33003A7B300832F6B /* ModelOperationQueue.swift */; };
+		79DC9BE83003C13F00832F6B /* silero_vad.onnx in Resources */ = {isa = PBXBuildFile; fileRef = 79DC9BE73003C13F00832F6B /* silero_vad.onnx */; };
 		9730040B87D9451D99A16193 /* sherpa-onnx.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF97AAB0F9B846ACB94816D0 /* sherpa-onnx.xcframework */; };
 		F13E8ACE65FD424DA02045CA /* OfflinePunctuationClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58186E45AB5B44DCAAB2D85A /* OfflinePunctuationClient.swift */; };
 /* End PBXBuildFile section */
@@ -111,6 +113,8 @@
 		793370AE2FE40E1700752EE2 /* RecordRepositoryImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordRepositoryImpl.swift; sourceTree = "<group>"; };
 		793370D02FE40E9000752EE2 /* AudioPlayer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
 		79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VoiceNote.swift; sourceTree = "<group>"; };
+		79DC9BE33003A7B300832F6B /* ModelOperationQueue.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelOperationQueue.swift; sourceTree = "<group>"; };
+		79DC9BE73003C13F00832F6B /* silero_vad.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; path = silero_vad.onnx; sourceTree = "<group>"; };
 		B22EA984B8E94E578EA8F067 /* ASRModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ASRModelManager.swift; sourceTree = "<group>"; };
 		C22B6898F5C744A3942E396B /* OfflineASRClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflineASRClient.swift; sourceTree = "<group>"; };
 		C5BFA3FA83F94117A2CA12EB /* VoiceNote-Bridging-Header.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = "VoiceNote-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -184,6 +188,7 @@
 		79336FCD2FE40A2000752EE2 /* VoiceNote */ = {
 			isa = PBXGroup;
 			children = (
+				79DC9BE53003C13F00832F6B /* Resources */,
 				79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */,
 				7933709D2FE40E1700752EE2 /* Core */,
 				793370AC2FE40E1700752EE2 /* Data */,
@@ -299,6 +304,7 @@
 		7933709D2FE40E1700752EE2 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				79DC9BE33003A7B300832F6B /* ModelOperationQueue.swift */,
 				792C0D5530038C6E0086B344 /* LLM */,
 				7933709E2FE40E1700752EE2 /* Database */,
 				793370A22FE40E1700752EE2 /* DI */,
@@ -394,6 +400,22 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		79DC9BE53003C13F00832F6B /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				79DC9BE63003C13F00832F6B /* VAD */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		79DC9BE63003C13F00832F6B /* VAD */ = {
+			isa = PBXGroup;
+			children = (
+				79DC9BE73003C13F00832F6B /* silero_vad.onnx */,
+			);
+			path = VAD;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -458,6 +480,9 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
+				KnownAssetTags = (
+					New,
+				);
 				LastSwiftUpdateCheck = 1420;
 				LastUpgradeCheck = 1420;
 				TargetAttributes = {
@@ -499,6 +524,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				79DC9BE83003C13F00832F6B /* silero_vad.onnx in Resources */,
 				79336FD62FE40A2200752EE2 /* Preview Assets.xcassets in Resources */,
 				79336FD32FE40A2200752EE2 /* Assets.xcassets in Resources */,
 			);
@@ -537,6 +563,7 @@
 				793370B22FE40E1800752EE2 /* HomeView.swift in Sources */,
 				793370B72FE40E1800752EE2 /* AppTheme.swift in Sources */,
 				793370B52FE40E1800752EE2 /* DetailView.swift in Sources */,
+				79DC9BE43003A7B400832F6B /* ModelOperationQueue.swift in Sources */,
 				792C0D5D30038C6E0086B344 /* OfflineLLMClient.swift in Sources */,
 				793370B92FE40E1800752EE2 /* HistoryView.swift in Sources */,
 				793370B82FE40E1800752EE2 /* HistoryViewModel.swift in Sources */,

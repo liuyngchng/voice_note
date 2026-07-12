@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @ObservedObject var viewModel: HomeViewModel
     let modelStatus: ModelStatus
+    let modelLoadingMessage: String?
     let onNewRecord: () -> Void
     let onRecordTap: (UUID) -> Void
     let onSettingsTap: () -> Void
@@ -70,9 +71,15 @@ struct HomeView: View {
             HStack(spacing: 10) {
                 ProgressView()
                     .scaleEffect(0.8)
-                Text("正在加载语音识别模型...")
-                    .font(.subheadline)
-                    .foregroundColor(.primary)
+                if let msg = modelLoadingMessage {
+                    Text("正在加载\(msg)...")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                } else {
+                    Text("正在加载离线模型...")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

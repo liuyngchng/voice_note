@@ -32,6 +32,8 @@ enum ModelStatus {
 final class AppState: ObservableObject {
     /// 模型加载状态
     @Published var modelStatus: ModelStatus = .unknown
+    /// 当前正在加载的模型名称（如 "LLM 模型"）
+    @Published var modelLoadingMessage: String?
     /// 模型加载错误描述
     @Published var modelLoadError: String?
 
@@ -48,6 +50,13 @@ final class AppState: ObservableObject {
     }
 
     // MARK: - 私有
+
+    @Sendable
+    private func updateLoadingMessage(_ msg: String) async {
+        await MainActor.run { [weak self] in
+            self?.modelLoadingMessage = msg
+        }
+    }
 
     private func preloadModels(container: AppContainer) {
         let quality = ASRModelManager.savedQuality()
@@ -70,31 +79,72 @@ final class AppState: ObservableObject {
         }
 
         modelStatus = .loading
+        modelLoadingMessage = "ASR 模型"
+        let overallStart = CFAbsoluteTimeGetCurrent()
         appLog("app", "[App] 开始加载离线模型 (quality=\(quality.rawValue))")
 
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
             do {
                 // 1. 加载 ASR 模型
+                await self.updateLoadingMessage("ASR 语音识别模型")
+                let asrStart = CFAbsoluteTimeGetCurrent()
+                appLog("app", "[App] → 开始加载 ASR 模型...")
                 try asrClient.ensureRecognizer(quality: quality)
-                appLog("app", "[App] ASR 模型加载完成")
+                let asrElapsed = Int((CFAbsoluteTimeGetCurrent() - asrStart) * 1000)
+                appLog("app", "[App] ← ASR 模型加载完成 (\(asrElapsed)ms)")
 
                 // 2. 加载 VAD
+                await self.updateLoadingMessage("VAD 语音活动检测")
+                let vadStart = CFAbsoluteTimeGetCurrent()
+                appLog("app", "[App] → 开始加载 VAD...")
                 let vadReady = asrClient.ensureVad()
-                appLog("app", "[App] VAD \(vadReady ? "已就绪" : "不可用")")
+                let vadElapsed = Int((CFAbsoluteTimeGetCurrent() - vadStart) * 1000)
+                appLog("app", "[App] ← VAD \(vadReady ? "已就绪" : "不可用") (\(vadElapsed)ms)")
 
                 // 3. 加载标点模型（可选，不存在则跳过）
+                await self.updateLoadingMessage("标点模型")
+                let punctStart = CFAbsoluteTimeGetCurrent()
+                appLog("app", "[App] → 开始加载标点模型...")
                 container.offlinePunctuationClient.ensureInitialized()
-                appLog("app", "[App] 标点模型 \(container.offlinePunctuationClient.isAvailable ? "已加载" : "未安装，跳过")")
+                let punctElapsed = Int((CFAbsoluteTimeGetCurrent() - punctStart) * 1000)
+                appLog("app", "[App] ← 标点模型 \(container.offlinePunctuationClient.isAvailable ? "已加载" : "未安装，跳过") (\(punctElapsed)ms)")
 
+                // 4. 预加载 LLM 模型（可选，未下载则跳过）
+                let llmInfo: LLMModelInfo = .qwen2_5_1_5b_q4km
+                if LLMModelManager.isModelDownloaded(llmInfo) {
+                    let llmClient = container.offlineLLMClient
+                    if !llmClient.isAvailable {
+                        do {
+                            await self.updateLoadingMessage("LLM 大语言模型")
+                            let llmStart = CFAbsoluteTimeGetCurrent()
+                            appLog("app", "[App] → 开始加载 LLM 模型...")
+                            try llmClient.ensureModel(llmInfo)
+                            let llmElapsed = Int((CFAbsoluteTimeGetCurrent() - llmStart) * 1000)
+                            appLog("app", "[App] ← LLM 模型预加载完成 (\(llmElapsed)ms)")
+                        } catch {
+                            appLog("app", "[App] ← LLM 模型预加载失败（非致命）: \(error.localizedDescription)")
+                        }
+                    } else {
+                        appLog("app", "[App] LLM 模型已加载，跳过")
+                    }
+                } else {
+                    appLog("app", "[App] LLM 模型未下载，跳过预加载")
+                }
+
+                let totalElapsed = Int((CFAbsoluteTimeGetCurrent() - overallStart) * 1000)
                 await MainActor.run {
                     self.modelStatus = .ready
+                    self.modelLoadingMessage = nil
                     self.modelLoadError = nil
-                    appLog("app", "[App] 全部模型加载完成")
+                    appLog("app", "[App] 全部模型加载完成 (总耗时 \(totalElapsed)ms)")
                 }
             } catch {
-                appLog("app", "[App] 模型加载失败: \(error.localizedDescription)")
+                let totalElapsed = Int((CFAbsoluteTimeGetCurrent() - overallStart) * 1000)
+                appLog("app", "[App] 模型加载失败 (耗时 \(totalElapsed)ms): \(error.localizedDescription)")
                 await MainActor.run {
                     self.modelStatus = .error
+                    self.modelLoadingMessage = nil
                     self.modelLoadError = error.localizedDescription
                 }
             }
@@ -209,6 +259,7 @@ private struct RootView: View {
         HomeView(
             viewModel: HomeViewModel(container: container),
             modelStatus: appState.modelStatus,
+            modelLoadingMessage: appState.modelLoadingMessage,
             onNewRecord: { showRecording = true },
             onRecordTap: { id in
                 detailId = id

@@ -19,64 +19,27 @@ enum LLMMode: String, CaseIterable, Codable {
 /// 对齐 ModelQuality 模式
 enum LLMModelInfo: String, CaseIterable, Codable {
     case qwen2_5_1_5b_q4km = "qwen2_5_1_5b_q4km"
-    case qwen2_5_0_5b_q4km = "qwen2_5_0_5b_q4km"
-    case custom = "custom"
 
     /// 预估模型文件大小，单位 MB
-    var estimatedSizeMB: Int {
-        switch self {
-        case .qwen2_5_1_5b_q4km:   return 986
-        case .qwen2_5_0_5b_q4km:   return 352
-        case .custom:               return 500
-        }
-    }
+    var estimatedSizeMB: Int { 986 }
 
-    var displayName: String {
-        switch self {
-        case .qwen2_5_1_5b_q4km:   return "Qwen2.5-1.5B (~\(estimatedSizeMB)MB)"
-        case .qwen2_5_0_5b_q4km:   return "Qwen2.5-0.5B (~\(estimatedSizeMB)MB)"
-        case .custom:               return "自定义模型"
-        }
-    }
+    var displayName: String { "Qwen2.5-1.5B (~\(estimatedSizeMB)MB)" }
 
     /// GGUF 模型文件名
-    var modelFilename: String {
-        switch self {
-        case .qwen2_5_1_5b_q4km:   return "qwen2.5-1.5b-instruct-q4_k_m.gguf"
-        case .qwen2_5_0_5b_q4km:   return "qwen2.5-0.5b-instruct-q4_k_m.gguf"
-        case .custom:               return "custom.gguf"
-        }
-    }
+    var modelFilename: String { "qwen2.5-1.5b-instruct-q4_k_m.gguf" }
 
     /// ModelScope 直链下载 URL
     var modelscopeDownloadURL: String? {
-        switch self {
-        case .qwen2_5_1_5b_q4km:
-            return "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf"
-        case .qwen2_5_0_5b_q4km:
-            return "https://modelscope.cn/models/qwen/Qwen2.5-0.5B-Instruct-gguf/resolve/master/qwen2.5-0.5b-instruct-q4_k_m.gguf"
-        case .custom:
-            return nil
-        }
+        "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf"
     }
 
     /// ModelScope 页面 URL（供手动下载参考）
     var modelscopePageURL: String? {
-        switch self {
-        case .qwen2_5_1_5b_q4km:
-            return "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
-        case .qwen2_5_0_5b_q4km:
-            return "https://modelscope.cn/models/qwen/Qwen2.5-0.5B-Instruct-gguf"
-        case .custom:
-            return nil
-        }
+        "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
     }
 
     /// GitHub Releases 兜底下载 URL（可选，后续补充）
-    var githubDownloadURL: String? {
-        // TODO: 后续补充 GitHub Releases 镜像地址
-        return nil
-    }
+    var githubDownloadURL: String? { nil }
 }
 
 // MARK: - 日志

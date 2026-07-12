@@ -14,7 +14,9 @@ final class ASRModelManager: ObservableObject {
 
     enum DownloadState: Equatable {
         case idle
+        case queued
         case downloading(progress: Double)
+        case importing(progress: Double)
         case extracting(progress: Double)
         case completed(Date)
         case failed(String)
@@ -133,23 +135,45 @@ final class ASRModelManager: ObservableObject {
         }
     }
 
-    // MARK: - 下载（下载 tar.bz2 → 解压 → 提取文件）
+    // MARK: - 下载（入队，立即返回）
 
     /// 下载模型（tar.bz2 归档），解压并提取模型文件和 tokens.txt
-    func downloadModel(quality: ModelQuality) async throws {
-        guard !isDownloading else {
-            Log.asr("操作已在進行中，忽略重复请求")
-            return
-        }
+    func downloadModel(quality: ModelQuality) {
+        guard !isDownloading else { return }
+        Log.asr("[ASR] 用户触发下载 \(quality.rawValue)")
         isDownloading = true
         activeOperation = .download
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._downloadModel(quality: quality)
+            }
+        }
+    }
 
+    /// 从本地文件导入模型
+    func importModel(from sourceURL: URL, quality: ModelQuality, cleanup: (() -> Void)? = nil) {
+        guard !isDownloading else { return }
+        Log.asr("[ASR] 用户触发导入: \(sourceURL.lastPathComponent)")
+        isDownloading = true
+        activeOperation = .import_
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._importModel(from: sourceURL, quality: quality, cleanup: cleanup)
+            }
+        }
+    }
+
+    // MARK: - Private: 实际下载/导入逻辑
+
+    private func _downloadModel(quality: ModelQuality) async {
         guard Self.hasSufficientDiskSpace(for: quality) else {
             let msg = "磁盘空间不足，需要至少 \(quality.estimatedSizeMB) MB"
             Log.asr("下载失败: \(msg)")
             downloadState = .failed(msg)
             isDownloading = false
-            throw DownloadError.insufficientDiskSpace
+            return
         }
         Log.asr("磁盘空间检查通过，需要 ~\(quality.estimatedSizeMB)MB")
 
@@ -166,7 +190,6 @@ final class ASRModelManager: ObservableObject {
             Log.asrDebug("临时文件已清理")
         }
 
-        // 下载 tar.bz2
         Log.asr("开始下载模型: \(quality.rawValue) 来自 \(Self.baseURL)/\(archiveFilename)")
         downloadState = .downloading(progress: 0)
         do {
@@ -176,35 +199,27 @@ final class ASRModelManager: ObservableObject {
             if error is CancellationError {
                 Log.asr("下载已取消")
                 downloadState = .idle
-                throw error
+                return
             }
             let msg = "下载失败: \(error.localizedDescription)"
             Log.asr(msg)
             downloadState = .failed(msg)
-            throw error
+            return
         }
         Log.asr("归档下载完成: \(archiveFilename)")
 
-        // 共用：解压 → 提取 → 验证
-        try await processArchive(at: archiveURL, quality: quality)
+        try? await processArchive(at: archiveURL, quality: quality)
     }
 
-    /// 从本地文件导入模型（用户提前下载好的 .tar.bz2 或 .tar）
-    /// 安全范围访问由调用方（ModelFilePicker）管理，调用方会在 import 完成后释放
-    func importModel(from sourceURL: URL, quality: ModelQuality) async throws {
-        guard !isDownloading else {
-            Log.asr("操作已在進行中，忽略重复请求")
-            return
-        }
-        isDownloading = true
-        activeOperation = .import_
+    private func _importModel(from sourceURL: URL, quality: ModelQuality, cleanup: (() -> Void)?) async {
+        defer { cleanup?() }
 
         guard Self.hasSufficientDiskSpace(for: quality) else {
             let msg = "磁盘空间不足，需要至少 \(quality.estimatedSizeMB) MB"
             Log.asr("导入失败: \(msg)")
             downloadState = .failed(msg)
             isDownloading = false
-            throw DownloadError.insufficientDiskSpace
+            return
         }
         Log.asr("磁盘空间检查通过，需要 ~\(quality.estimatedSizeMB)MB")
 
@@ -214,7 +229,6 @@ final class ASRModelManager: ObservableObject {
         let tempDir = fm.temporaryDirectory.appendingPathComponent("model-import")
         try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
 
-        // 根据源文件扩展名决定临时文件名
         let srcExt = sourceURL.pathExtension.lowercased()
         let isTar = (srcExt == "tar")
         let archiveFilename = isTar ? "uploaded.tar" : "uploaded.tar.bz2"
@@ -225,14 +239,9 @@ final class ASRModelManager: ObservableObject {
             Log.asrDebug("临时文件已清理")
         }
 
-        // 读取用户选择的文件到临时目录
-        // 在后台线程执行文件 I/O（大文件可能耗时数十秒），避免阻塞 UI
-        // 分两级尝试：先用 Data(contentsOf:)（通过文件协调器触发下载），
-        // 失败则用 FileHandle 流式读取作为兜底
         Log.asr("开始导入文件: \(sourceURL.lastPathComponent) (类型: \(isTar ? "tar" : "bz2"))")
-        downloadState = .downloading(progress: 0)
+        downloadState = .importing(progress: 0)
         do {
-            // 在后台线程执行所有阻塞 I/O，让主线程可以刷新进度 UI
             try await Task.detached(priority: .userInitiated) {
                 let fm = FileManager.default
                 try? fm.removeItem(at: archiveURL)
@@ -252,14 +261,18 @@ final class ASRModelManager: ObservableObject {
             let msg = "文件读取失败: \(error.localizedDescription)"
             Log.asr(msg)
             downloadState = .failed(msg)
-            throw DownloadError.fileImportFailed(error.localizedDescription)
+            return
+        }
+
+        if Task.isCancelled {
+            Log.asr("[ASR] 导入已被用户取消，跳过后续处理")
+            return
         }
 
         let fileSize = (try? archiveURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         Log.asr("导入文件就绪: \(sourceURL.lastPathComponent) (\(fileSize / 1_048_576)MB)")
 
-        // 共用：解压 → 提取 → 验证
-        try await processArchive(at: archiveURL, quality: quality, isTar: isTar)
+        try? await processArchive(at: archiveURL, quality: quality, isTar: isTar)
     }
 
     // MARK: - 共用处理流程（解压 → 提取 → 验证）
@@ -522,6 +535,8 @@ final class ASRModelManager: ObservableObject {
         currentTask = nil
         downloadSession?.invalidateAndCancel()
         downloadSession = nil
+        Task { await ModelOperationQueue.shared.cancelCurrent() }
+        if case .queued = downloadState { downloadState = .idle }
         isDownloading = false
         downloadState = .idle
     }
@@ -529,20 +544,28 @@ final class ASRModelManager: ObservableObject {
     // MARK: - 删除
 
     /// 删除指定质量的模型文件
-    func deleteModel(quality: ModelQuality) {
+    func deleteModel(quality: ModelQuality) async {
         let modelPath = Self.modelFilePath(quality)
-        try? FileManager.default.removeItem(at: modelPath)
-        Log.asr("模型已删除: \(quality.rawValue)")
+        let tokensPath = Self.tokensFilePath()
+        let dirPath = Self.modelsDirectory
+        let qualityRawValue = quality.rawValue
+
+        // 检查是否需要清理 tokens 和目录（在后台线程执行以避免阻塞 UI）
+        let otherQuality: ModelQuality = (quality == .int8) ? .fp32 : .int8
+        let shouldCleanAll = !Self.isModelDownloaded(otherQuality)
+
+        await Task.detached(priority: .userInitiated) {
+            try? FileManager.default.removeItem(at: modelPath)
+            if shouldCleanAll {
+                try? FileManager.default.removeItem(at: tokensPath)
+                try? FileManager.default.removeItem(at: dirPath)
+            }
+        }.value
+
+        Log.asr("模型已删除: \(qualityRawValue)")
+        if shouldCleanAll { Log.asr("所有模型已清空") }
         downloadState = .idle
         downloadProgress = 0
-
-        // 如果另一种质量的模型也不存在，连 tokens.txt 一起清掉
-        let otherQuality: ModelQuality = (quality == .int8) ? .fp32 : .int8
-        if !Self.isModelDownloaded(otherQuality) {
-            try? FileManager.default.removeItem(at: Self.tokensFilePath())
-            try? FileManager.default.removeItem(at: Self.modelsDirectory)
-            Log.asr("所有模型已清空")
-        }
     }
 }
 

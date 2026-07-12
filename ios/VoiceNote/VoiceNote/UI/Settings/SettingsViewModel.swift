@@ -9,8 +9,8 @@ final class SettingsViewModel: ObservableObject {
     // MARK: - 标点模型设置
     @Published var punctuationModelState: ModelState = .idle
 
-    // MARK: - LLM 模型设置
-    @Published var llmModelInfo: LLMModelInfo
+    // MARK: - LLM 模型（固定 Qwen2.5-1.5B）
+    let llmModelInfo: LLMModelInfo = .qwen2_5_1_5b_q4km
 
     enum ModelState {
         case idle
@@ -35,7 +35,6 @@ final class SettingsViewModel: ObservableObject {
 
     private struct Snapshot: Equatable {
         var offlineModelQuality: ModelQuality
-        var llmModelInfo: LLMModelInfo
     }
 
     var appVersion: String {
@@ -50,18 +49,16 @@ final class SettingsViewModel: ObservableObject {
     }
 
     var hasChanges: Bool {
-        Snapshot(offlineModelQuality: offlineModelQuality, llmModelInfo: llmModelInfo) != saved
+        Snapshot(offlineModelQuality: offlineModelQuality) != saved
     }
 
     init() {
         let defaults = UserDefaults.standard
         let quality = ModelQuality(rawValue: defaults.string(forKey: "offline_model_quality") ?? "") ?? .int8
-        let llmInfo = LLMModelInfo(rawValue: defaults.string(forKey: "llm_model_info") ?? "") ?? .qwen2_5_1_5b_q4km
 
         offlineModelQuality = quality
-        llmModelInfo = llmInfo
         previousModelQuality = quality
-        saved = Snapshot(offlineModelQuality: quality, llmModelInfo: llmInfo)
+        saved = Snapshot(offlineModelQuality: quality)
     }
 
     private var saveGeneration = 0
@@ -72,9 +69,8 @@ final class SettingsViewModel: ObservableObject {
 
         let defaults = UserDefaults.standard
         defaults.set(offlineModelQuality.rawValue, forKey: "offline_model_quality")
-        defaults.set(llmModelInfo.rawValue, forKey: "llm_model_info")
 
-        saved = Snapshot(offlineModelQuality: offlineModelQuality, llmModelInfo: llmModelInfo)
+        saved = Snapshot(offlineModelQuality: offlineModelQuality)
 
         let generation = saveGeneration + 1
         saveGeneration = generation
@@ -90,40 +86,34 @@ final class SettingsViewModel: ObservableObject {
 
     // MARK: - ASR 模型下载（委托给 ASRModelManager）
 
-    var modelDownloadManager: ASRModelManager?
+    var modelDownloadManager = ASRModelManager()
 
     var modelDownloadState: ASRModelManager.DownloadState {
-        modelDownloadManager?.downloadState ?? .idle
+        modelDownloadManager.downloadState
     }
 
     var modelDownloadProgress: Double {
-        modelDownloadManager?.downloadProgress ?? 0
+        modelDownloadManager.downloadProgress
     }
 
     var isModelDownloaded: Bool {
         ASRModelManager.isModelDownloaded(offlineModelQuality)
     }
 
-    func startDownload() async {
-        guard let manager = modelDownloadManager else { return }
-        do {
-            try await manager.downloadModel(quality: offlineModelQuality)
-        } catch {}
+    func startDownload() {
+        modelDownloadManager.downloadModel(quality: offlineModelQuality)
     }
 
-    func importModel(from url: URL) async {
-        guard let manager = modelDownloadManager else { return }
-        do {
-            try await manager.importModel(from: url, quality: offlineModelQuality)
-        } catch {}
+    func importModel(from url: URL, cleanup: (() -> Void)? = nil) {
+        modelDownloadManager.importModel(from: url, quality: offlineModelQuality, cleanup: cleanup)
     }
 
     func cancelDownload() {
-        modelDownloadManager?.cancelDownload()
+        modelDownloadManager.cancelDownload()
     }
 
     func deleteModel() async {
-        modelDownloadManager?.deleteModel(quality: offlineModelQuality)
+        await modelDownloadManager.deleteModel(quality: offlineModelQuality)
     }
 
     // MARK: - 标点模型
@@ -136,16 +126,12 @@ final class SettingsViewModel: ObservableObject {
     /// 标点模型下载管理器
     var punctuationModelManager = PunctuationModelManager()
 
-    func startPunctuationDownload() async {
-        do {
-            try await punctuationModelManager.downloadModel()
-        } catch {}
+    func startPunctuationDownload() {
+        punctuationModelManager.downloadModel()
     }
 
-    func importPunctuationModel(from url: URL) async {
-        do {
-            try await punctuationModelManager.importModel(from: url)
-        } catch {}
+    func importPunctuationModel(from url: URL, cleanup: (() -> Void)? = nil) {
+        punctuationModelManager.importModel(from: url, cleanup: cleanup)
     }
 
     func cancelPunctuationDownload() {
@@ -153,7 +139,7 @@ final class SettingsViewModel: ObservableObject {
     }
 
     func deletePunctuationModel() async {
-        punctuationModelManager.deleteModel()
+        await punctuationModelManager.deleteModel()
     }
 
     // MARK: - FP32 内存警告
@@ -178,27 +164,22 @@ final class SettingsViewModel: ObservableObject {
 
     // MARK: - LLM 模型下载（委托给 LLMModelManager）
 
-    var llmModelManager: LLMModelManager?
+    var llmModelManager = LLMModelManager()
 
-    func startLLMFromModelScope() async {
-        guard let manager = llmModelManager else { return }
-        do {
-            try await manager.downloadFromModelScope(llmModelInfo)
-        } catch {}
+    func startLLMFromModelScope() {
+        llmModelManager.downloadFromModelScope(llmModelInfo)
     }
 
-    func importLLMModel(from url: URL) async {
-        guard let manager = llmModelManager else { return }
-        do {
-            try await manager.importFromFile(url, info: llmModelInfo)
-        } catch {}
+    func importLLMModel(from url: URL, cleanup: (() -> Void)? = nil) {
+        llmModelManager.importFromFile(url, info: llmModelInfo, cleanup: cleanup)
     }
 
     func cancelLLMDownload() {
-        llmModelManager?.cancelDownload()
+        llmModelManager.cancelDownload()
     }
 
     func deleteLLMModel() async {
-        llmModelManager?.deleteModel(llmModelInfo)
+        await llmModelManager.deleteModel(llmModelInfo)
     }
+
 }

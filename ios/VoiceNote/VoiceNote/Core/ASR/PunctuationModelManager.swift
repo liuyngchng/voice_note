@@ -14,7 +14,9 @@ final class PunctuationModelManager: ObservableObject {
 
     enum DownloadState: Equatable {
         case idle
+        case queued
         case downloading(progress: Double)
+        case importing(progress: Double)
         case extracting(progress: Double)
         case completed(Date)
         case failed(String)
@@ -52,16 +54,38 @@ final class PunctuationModelManager: ObservableObject {
         FileManager.default.fileExists(atPath: modelFilePath().path)
     }
 
-    // MARK: - 下载（下载 tar.bz2 → 解压 → 提取 ONNX）
+    // MARK: - 下载（入队，立即返回）
 
-    func downloadModel() async throws {
-        guard !isDownloading else {
-            Log.asr("标点模型操作已在进行中，忽略重复请求")
-            return
-        }
+    func downloadModel() {
+        guard !isDownloading else { return }
+        Log.asr("[标点] 用户触发下载")
         isDownloading = true
         activeOperation = .download
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._downloadModel()
+            }
+        }
+    }
 
+    /// 从本地文件导入（入队，立即返回）
+    func importModel(from sourceURL: URL, cleanup: (() -> Void)? = nil) {
+        guard !isDownloading else { return }
+        Log.asr("[标点] 用户触发导入: \(sourceURL.lastPathComponent)")
+        isDownloading = true
+        activeOperation = .import_
+        downloadState = .queued
+        Task {
+            await ModelOperationQueue.shared.enqueue { [weak self] in
+                await self?._importModel(from: sourceURL, cleanup: cleanup)
+            }
+        }
+    }
+
+    // MARK: - Private: 实际下载逻辑
+
+    private func _downloadModel() async {
         let fm = FileManager.default
         try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
 
@@ -69,15 +93,12 @@ final class PunctuationModelManager: ObservableObject {
         try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
         let archiveURL = tempDir.appendingPathComponent(Self.archiveFilename)
 
-        defer {
-            try? fm.removeItem(at: tempDir)
-        }
+        defer { try? fm.removeItem(at: tempDir) }
 
-        // 下载 tar.bz2
         guard let url = URL(string: "\(Self.baseURL)/\(Self.archiveFilename)") else {
             downloadState = .failed("无效的下载地址")
             isDownloading = false
-            throw DownloadError.invalidURL
+            return
         }
 
         Log.asr("开始下载标点模型: \(url.absoluteString)")
@@ -89,11 +110,11 @@ final class PunctuationModelManager: ObservableObject {
             isDownloading = false
             if error is CancellationError {
                 downloadState = .idle
-                throw error
+                return
             }
             let msg = "下载失败: \(error.localizedDescription)"
             downloadState = .failed(msg)
-            throw error
+            return
         }
 
         // 解压 tar.bz2 → 提取 ONNX
@@ -105,20 +126,103 @@ final class PunctuationModelManager: ObservableObject {
             isDownloading = false
             let msg = "解压失败: \(error.localizedDescription)"
             downloadState = .failed(msg)
-            throw DownloadError.extractionFailed(error.localizedDescription)
+            return
         }
 
         guard Self.isModelDownloaded() else {
             let msg = "完成但验证失败，文件缺失"
             downloadState = .failed(msg)
             isDownloading = false
-            throw DownloadError.verificationFailed
+            return
         }
 
         isDownloading = false
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: Self.modelFilePath().path)[.size] as? UInt64) ?? 0
         downloadState = .completed(Date())
         Log.asr("标点模型安装完成: \(fileSize) bytes")
+    }
+
+    private func _importModel(from sourceURL: URL, cleanup: (() -> Void)?) async {
+        defer { cleanup?() }
+
+        let fm = FileManager.default
+        try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
+
+        let fileName = sourceURL.lastPathComponent.lowercased()
+
+        if fileName.hasSuffix(".onnx") {
+            let targetURL = Self.modelFilePath()
+            downloadState = .importing(progress: 0)
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    let fm = FileManager.default
+                    try? fm.removeItem(at: targetURL)
+                    let data = try Data(contentsOf: sourceURL, options: [])
+                    try data.write(to: targetURL)
+                }.value
+            } catch {
+                isDownloading = false
+                downloadState = .failed("文件导入失败: \(error.localizedDescription)")
+                return
+            }
+            if Task.isCancelled {
+                Log.asr("[标点] 导入已被用户取消，跳过后续处理")
+                return
+            }
+            isDownloading = false
+            downloadState = .completed(Date())
+            Log.asr("标点 ONNX 模型导入完成")
+            return
+        }
+
+        // 导入 bzip2/tar 压缩归档
+        let tempDir = fm.temporaryDirectory.appendingPathComponent("punct-import")
+        try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempDir) }
+
+        let srcExt = sourceURL.pathExtension.lowercased()
+        let isTar = (srcExt == "tar")
+        let archiveName = isTar ? "uploaded.tar" : "uploaded.tar.bz2"
+        let archiveURL = tempDir.appendingPathComponent(archiveName)
+
+        downloadState = .importing(progress: 0)
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                let fm = FileManager.default
+                try? fm.removeItem(at: archiveURL)
+                let data = try Data(contentsOf: sourceURL, options: [])
+                try data.write(to: archiveURL)
+            }.value
+        } catch {
+            isDownloading = false
+            downloadState = .failed("文件读取失败: \(error.localizedDescription)")
+            return
+        }
+
+        if Task.isCancelled {
+            Log.asr("[标点] 导入已被用户取消，跳过解压处理")
+            return
+        }
+
+        do {
+            try await extractPunctModel(from: archiveURL, isTar: isTar)
+        } catch {
+            isDownloading = false
+            downloadState = .failed(error.localizedDescription)
+            return
+        }
+
+        if Task.isCancelled { return }
+
+        guard Self.isModelDownloaded() else {
+            downloadState = .failed("完成但验证失败，文件缺失")
+            isDownloading = false
+            return
+        }
+
+        isDownloading = false
+        downloadState = .completed(Date())
+        Log.asr("标点模型导入完成")
     }
 
     private func downloadArchive(from url: URL, to targetURL: URL) async throws {
@@ -250,137 +354,35 @@ final class PunctuationModelManager: ObservableObject {
         }
     }
 
-    // MARK: - 导入
-
-    /// 安全范围访问由调用方（ModelFilePicker）管理，调用方会在 import 完成后释放
-    func importModel(from sourceURL: URL) async throws {
-        guard !isDownloading else { return }
-        isDownloading = true
-        activeOperation = .import_
-
-        let fm = FileManager.default
-        try? fm.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
-
-        let fileName = sourceURL.lastPathComponent.lowercased()
-
-        // 支持直接导入 ONNX 文件，也支持导入 tar.bz2 / tar 归档
-        // 所有文件 I/O 在后台线程执行，避免阻塞 UI
-        if fileName.hasSuffix(".onnx") {
-            let targetURL = Self.modelFilePath()
-            downloadState = .downloading(progress: 0)
-            do {
-                try await Task.detached(priority: .userInitiated) {
-                    let fm = FileManager.default
-                    try? fm.removeItem(at: targetURL)
-                    let data = try Data(contentsOf: sourceURL, options: [])
-                    try data.write(to: targetURL)
-                }.value
-            } catch {
-                isDownloading = false
-                downloadState = .failed("文件导入失败: \(error.localizedDescription)")
-                throw DownloadError.fileImportFailed(error.localizedDescription)
-            }
-        } else if fileName.hasSuffix(".tar.bz2") || fileName.hasSuffix(".bz2") {
-            // 导入 bzip2 压缩归档：先复制到本地临时目录，再解压提取
-            let tempDir = fm.temporaryDirectory.appendingPathComponent("punct-import")
-            try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            let archiveURL = tempDir.appendingPathComponent("uploaded.tar.bz2")
-            defer { try? fm.removeItem(at: tempDir) }
-
-            downloadState = .downloading(progress: 0)
-            do {
-                try await Task.detached(priority: .userInitiated) {
-                    let fm = FileManager.default
-                    try? fm.removeItem(at: archiveURL)
-                    let data = try Data(contentsOf: sourceURL, options: [])
-                    try data.write(to: archiveURL)
-                }.value
-            } catch {
-                isDownloading = false
-                downloadState = .failed("文件读取失败: \(error.localizedDescription)")
-                throw DownloadError.fileImportFailed(error.localizedDescription)
-            }
-
-            downloadState = .extracting(progress: 0.5)
-            do {
-                try await extractPunctModel(from: archiveURL, isTar: false)
-            } catch {
-                isDownloading = false
-                downloadState = .failed(error.localizedDescription)
-                throw error
-            }
-        } else if fileName.hasSuffix(".tar") {
-            // 导入未压缩 tar 归档：先复制到本地临时目录，再提取
-            let tempDir = fm.temporaryDirectory.appendingPathComponent("punct-import")
-            try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            let archiveURL = tempDir.appendingPathComponent("uploaded.tar")
-            defer { try? fm.removeItem(at: tempDir) }
-
-            downloadState = .downloading(progress: 0)
-            do {
-                try await Task.detached(priority: .userInitiated) {
-                    let fm = FileManager.default
-                    try? fm.removeItem(at: archiveURL)
-                    let data = try Data(contentsOf: sourceURL, options: [])
-                    try data.write(to: archiveURL)
-                }.value
-            } catch {
-                isDownloading = false
-                downloadState = .failed("文件读取失败: \(error.localizedDescription)")
-                throw DownloadError.fileImportFailed(error.localizedDescription)
-            }
-
-            downloadState = .extracting(progress: 0.5)
-            do {
-                try await extractPunctModel(from: archiveURL, isTar: true)
-            } catch {
-                isDownloading = false
-                downloadState = .failed(error.localizedDescription)
-                throw error
-            }
-        } else {
-            // 尝试直接复制（当作 ONNX 文件）
-            let targetURL = Self.modelFilePath()
-            downloadState = .downloading(progress: 0)
-            do {
-                try await Task.detached(priority: .userInitiated) {
-                    let fm = FileManager.default
-                    try? fm.removeItem(at: targetURL)
-                    let data = try Data(contentsOf: sourceURL, options: [])
-                    try data.write(to: targetURL)
-                }.value
-            } catch {
-                isDownloading = false
-                downloadState = .failed("文件导入失败: \(error.localizedDescription)")
-                throw DownloadError.fileImportFailed(error.localizedDescription)
-            }
-        }
-
-        isDownloading = false
-        downloadState = .completed(Date())
-        Log.asr("标点模型导入完成")
-    }
-
     // MARK: - 取消
 
     func cancelDownload() {
+        Log.asr("[标点] 用户取消操作")
         currentTask?.cancel()
         currentTask = nil
         downloadSession?.invalidateAndCancel()
         downloadSession = nil
+        Task { await ModelOperationQueue.shared.cancelCurrent() }
+        if case .queued = downloadState { downloadState = .idle }
         isDownloading = false
         downloadState = .idle
     }
 
     // MARK: - 删除
 
-    func deleteModel() {
-        try? FileManager.default.removeItem(at: Self.modelFilePath())
-        // 清理空目录
-        if let contents = try? FileManager.default.contentsOfDirectory(atPath: Self.modelsDirectory.path),
-           contents.isEmpty {
-            try? FileManager.default.removeItem(at: Self.modelsDirectory)
-        }
+    func deleteModel() async {
+        let modelPath = Self.modelFilePath()
+        let dirPath = Self.modelsDirectory.path
+
+        await Task.detached(priority: .userInitiated) {
+            try? FileManager.default.removeItem(at: modelPath)
+            // 清理空目录
+            if let contents = try? FileManager.default.contentsOfDirectory(atPath: dirPath),
+               contents.isEmpty {
+                try? FileManager.default.removeItem(atPath: dirPath)
+            }
+        }.value
+
         downloadState = .idle
         downloadProgress = 0
         Log.asr("标点模型已删除")

@@ -38,6 +38,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// 卸载模型，释放内存
 - (void)unloadModel;
 
+/// 清除 KV cache（多次推理之间调用，避免上下文污染）
+- (void)clearContext;
+
 /// 模型是否已加载
 @property (nonatomic, readonly) BOOL isLoaded;
 
