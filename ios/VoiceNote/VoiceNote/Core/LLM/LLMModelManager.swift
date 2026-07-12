@@ -190,9 +190,6 @@ final class LLMModelManager: ObservableObject {
             return
         }
 
-        // 补齐文件到 4096 字节对齐，确保 Metal mmap buffer 可用
-        Self.padFileToPageAlignment(at: targetURL)
-
         let fileSize = Self.downloadedModelSize(info)
         isDownloading = false
         downloadState = .completed(Date())
@@ -252,9 +249,6 @@ final class LLMModelManager: ObservableObject {
             return
         }
 
-        // 补齐文件到 4096 字节对齐，确保 Metal mmap buffer 可用
-        Self.padFileToPageAlignment(at: targetURL)
-
         if Task.isCancelled {
             Log.llm("[LLM] 导入已被用户取消，跳过完成标记")
             return
@@ -262,35 +256,6 @@ final class LLMModelManager: ObservableObject {
         isDownloading = false
         downloadState = .completed(Date())
         Log.llm("模型导入完成: \(info.rawValue) (\(fileSize / 1_048_576)MB)")
-    }
-
-    // MARK: - 页对齐补齐（修复 Metal mmap buffer 对齐问题）
-
-    /// Metal `newBufferWithBytesNoCopy` 要求 buffer 大小按 4096 字节页面对齐。
-    /// GGUF 模型文件大小不一定满足此条件，在文件末尾补齐零字节即可解决。
-    /// llama.cpp 按 header offset 读取 tensor，末尾填充数据不会被访问。
-    static nonisolated func padFileToPageAlignment(at url: URL) {
-        let pageSize: UInt64 = 4096
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let fileSize = attrs[.size] as? UInt64,
-              fileSize > 0
-        else { return }
-
-        let remainder = fileSize % pageSize
-        guard remainder != 0 else {
-            Log.llm("[LLM] 模型文件已页对齐: \(fileSize) bytes")
-            return
-        }
-
-        let padding = pageSize - remainder
-        Log.llm("[LLM] 补齐模型文件到页对齐: \(fileSize) → \(fileSize + padding) bytes (+\(padding))")
-
-        guard let handle = try? FileHandle(forWritingTo: url) else { return }
-        defer { try? handle.close() }
-
-        try? handle.seekToEnd()
-        let paddingData = Data(count: Int(padding))
-        try? handle.write(contentsOf: paddingData)
     }
 
     /// 校验文件是否为 GGUF 格式（检查文件头魔术字 "GGUF"）
