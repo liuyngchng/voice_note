@@ -104,7 +104,7 @@ ios/
 
 ## 构建前准备
 
-### 1. 下载 XCFrameworks（必须）
+### 1. 下载 ASR XCFrameworks（必须）
 
 离线 ASR 依赖的 XCFrameworks 不提交 git（文件太大），首次 clone 后运行：
 
@@ -115,7 +115,34 @@ bash ../scripts/download_ios_frameworks.sh
 
 这会从 GitHub Releases 下载 `sherpa-onnx.xcframework` 和 `onnxruntime.xcframework`，放到 `VoiceNote/Libraries/` 下。
 
-### 2. 打开工程
+### 2. 构建 llama.cpp XCFramework（离线 LLM 必须）
+
+离线文本总结需要 llama.cpp，同样不提交 git。需要先 clone llama.cpp 仓库，用其自带脚本构建：
+
+```bash
+# 克隆 llama.cpp（如已有则跳过）
+git clone https://github.com/ggerganov/llama.cpp.git
+cd llama.cpp
+
+# 仅构建 iOS arm64（跳过 visionOS/macOS/tvOS，更快）
+bash build-ios-only.sh
+
+# 复制到项目
+cp -R build-apple/llama.xcframework /path/to/voice_note/ios/VoiceNote/Libraries/
+```
+
+`build-ios-only.sh` 位于 llama.cpp 仓库根目录（由本仓库提供），会生成带 Metal GPU 加速的 `llama.xcframework`。
+
+### 3. 在 Xcode 中添加 XCFrameworks
+
+打开工程后，将 `VoiceNote/Libraries/` 下的三个 xcframework 拖入 Xcode：
+- `onnxruntime.xcframework`
+- `sherpa-onnx.xcframework`
+- `llama.xcframework`
+
+确保 Target → General → Frameworks, Libraries, and Embedded Content 中设为 **Embed & Sign**。
+
+### 4. 打开工程
 
 用 Xcode 打开 `VoiceNote/VoiceNote.xcodeproj`，选择真机运行。
 

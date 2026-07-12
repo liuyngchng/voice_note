@@ -10,6 +10,10 @@ final class DetailViewModel: ObservableObject {
     /// 从 .txt 文件加载的转写文本（DB 不再存储全文）
     @Published var transcriptText: String?
 
+    /// 文本总结状态
+    @Published var isGeneratingSummary = false
+    @Published var summaryError: String?
+
     @Published var audioPlayer = AudioPlayer()
 
     private let container: AppContainer
@@ -77,6 +81,7 @@ final class DetailViewModel: ObservableObject {
 
         let needsRefresh = record.transcriptStatus == .processing
             || record.transcriptStatus == .pending
+            || record.summaryStatus == .processing
 
         if needsRefresh {
             refreshTimer = Timer.publish(every: 2, on: .main, in: .common)
@@ -183,6 +188,73 @@ final class DetailViewModel: ObservableObject {
 
             isRetryingTranscript = false
             refresh()
+        }
+    }
+
+    // MARK: - 文本总结（离线 LLM，手动触发）
+
+    func generateSummary() {
+        guard let id = currentRecordId, !isGeneratingSummary else { return }
+
+        // 1. 获取转写文本
+        let transcript = transcriptText ?? ""
+        guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            summaryError = "没有转写文本，无法生成总结"
+            return
+        }
+        guard transcript != "暂时无法获取转写内容" else {
+            summaryError = "转写未成功，无法生成总结"
+            return
+        }
+
+        // 2. 检查离线 LLM 模型
+        let modelInfo = LLMModelManager.savedModelInfo()
+        guard LLMModelManager.isModelDownloaded(modelInfo) else {
+            summaryError = "离线 LLM 模型未下载，请在设置中下载后重试"
+            return
+        }
+
+        let offlineClient = container.offlineLLMClient
+        let repository = container.recordRepository
+
+        isGeneratingSummary = true
+        summaryError = nil
+
+        // 3. 先更新状态为 processing
+        Task {
+            try? await repository.updateSummaryStatus(id, status: .processing)
+        }
+
+        // 4. 执行离线推理
+        Task {
+            let summaryResult = await offlineClient.generateSummary(
+                transcript: transcript,
+                modelInfo: modelInfo,
+                customPrompt: nil
+            )
+
+            await MainActor.run {
+                if case .success(let summary) = summaryResult {
+                    Task {
+                        try? await repository.updateSummary(id, summary: summary)
+                        await MainActor.run {
+                            self.summaryError = nil
+                            self.isGeneratingSummary = false
+                            self.refresh()
+                        }
+                    }
+                } else {
+                    self.summaryError = "离线总结生成失败"
+                    if case .failure(let error) = summaryResult {
+                        self.summaryError = error.localizedDescription
+                    }
+                    self.isGeneratingSummary = false
+                    Task {
+                        try? await repository.updateSummaryStatus(id, status: .unavailable)
+                        await MainActor.run { self.refresh() }
+                    }
+                }
+            }
         }
     }
 

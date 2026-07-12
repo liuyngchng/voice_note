@@ -60,6 +60,7 @@ struct DetailView: View {
             Picker("", selection: $selectedTab) {
                 Text("音频").tag(0)
                 Text("转写").tag(1)
+                Text("总结").tag(2)
             }
             .pickerStyle(.segmented)
             .padding(.horizontal, 12)
@@ -69,6 +70,7 @@ struct DetailView: View {
             switch selectedTab {
             case 0: basicInfoTab(record)
             case 1: transcriptTab(record)
+            case 2: summaryTab(record)
             default: EmptyView()
             }
         }
@@ -197,6 +199,109 @@ struct DetailView: View {
         }
     }
 
+    // MARK: - 总结（离线 LLM，手动触发）
+
+    private func summaryTab(_ record: VoiceRecord) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let summary = record.summary {
+                    let isEmpty = summary.topics.isEmpty
+                        && summary.conclusions.isEmpty
+                        && summary.todos.isEmpty
+                        && summary.nextSteps.isEmpty
+
+                    if isEmpty {
+                        Text("未能提取到有效总结内容\n转写文本可能过短或信息不足")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if !summary.topics.isEmpty {
+                                summarySection("议题", summary.topics, color: .blue)
+                            }
+                            if !summary.conclusions.isEmpty {
+                                summarySection("结论", summary.conclusions, color: .green)
+                            }
+                            if !summary.todos.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label("待办", systemImage: "list.bullet")
+                                        .font(.subheadline)
+                                        .foregroundColor(.orange)
+                                    ForEach(summary.todos) { todo in
+                                        HStack {
+                                            Text("• \(todo.task)")
+                                            if !todo.owner.isEmpty {
+                                                Text("(\(todo.owner))")
+                                                    .foregroundColor(.secondary)
+                                                    .font(.caption)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if !summary.nextSteps.isEmpty {
+                                summarySection("后续", summary.nextSteps, color: .purple)
+                            }
+                        }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(10)
+                    }
+
+                    if let generatedAt = record.summaryGeneratedAt {
+                        Text("生成于 \(formattedDateTime(generatedAt))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                    }
+                } else if record.summaryStatus == .processing {
+                    HStack {
+                        ProgressView()
+                        Text("正在生成总结...")
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                } else if record.summaryStatus == .unavailable {
+                    VStack(spacing: 8) {
+                        Text(viewModel.summaryError ?? "总结生成失败")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                }
+
+                // 手动触发按钮：转写完成后可生成总结
+                if record.transcriptStatus == .completed
+                    || record.transcriptStatus == .unavailable
+                {
+                    Divider().padding(.horizontal)
+                    Button {
+                        viewModel.generateSummary()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if viewModel.isGeneratingSummary {
+                                ProgressView().scaleEffect(0.8)
+                            } else {
+                                Image(systemName: "sparkles")
+                            }
+                            Text(viewModel.isGeneratingSummary ? "生成中..." : "生成总结")
+                                .font(.subheadline)
+                        }
+                    }
+                    .disabled(viewModel.isGeneratingSummary)
+                    .padding(.bottom, 8)
+                }
+            }
+            .padding()
+        }
+    }
+
     // MARK: - 音频播放区域
 
     private var audioPlaybackSection: some View {
@@ -288,6 +393,40 @@ struct DetailView: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    private func formattedDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "MM月dd日 HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private func summarySection(_ title: String, _ items: [String], color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 5)
+                Text(title)
+                    .font(.subheadline)
+                    .bold()
+                    .foregroundColor(.primary)
+            }
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .top, spacing: 6) {
+                    Text("•")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(width: 14, alignment: .leading)
+                    Text(item)
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 
     private var transcriptFileName: String {

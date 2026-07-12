@@ -94,7 +94,10 @@ final class PersistenceController: ObservableObject {
             makeAttr("transcriptFilePath", .stringAttributeType),
             makeAttr("transcriptStatus", .stringAttributeType, false),
             makeAttr("audioFilePath", .stringAttributeType),
-            doubleAttr("transcribedDurationSeconds", true),             // 新增：已转录时长 checkpoint
+            doubleAttr("transcribedDurationSeconds", true),             // 已转录时长 checkpoint
+            makeAttr("summaryJSON", .stringAttributeType),              // AI 总结 JSON
+            makeAttr("summaryStatus", .stringAttributeType),            // 总结状态
+            dateAttr("summaryGeneratedAt", true),                       // 总结生成时间
         ]
 
         model.entities = [recordEntity]
@@ -118,4 +121,7 @@ final class VoiceRecordEntity: NSManagedObject {
     @NSManaged var transcriptStatus: String
     @NSManaged var audioFilePath: String?
     @NSManaged var transcribedDurationSeconds: Double
+    @NSManaged var summaryJSON: String?
+    @NSManaged var summaryStatus: String?
+    @NSManaged var summaryGeneratedAt: Date?
 }

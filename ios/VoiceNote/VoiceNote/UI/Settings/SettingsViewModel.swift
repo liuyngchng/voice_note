@@ -9,6 +9,9 @@ final class SettingsViewModel: ObservableObject {
     // MARK: - 标点模型设置
     @Published var punctuationModelState: ModelState = .idle
 
+    // MARK: - LLM 模型设置
+    @Published var llmModelInfo: LLMModelInfo
+
     enum ModelState {
         case idle
         case downloading(progress: Double)
@@ -32,6 +35,7 @@ final class SettingsViewModel: ObservableObject {
 
     private struct Snapshot: Equatable {
         var offlineModelQuality: ModelQuality
+        var llmModelInfo: LLMModelInfo
     }
 
     var appVersion: String {
@@ -46,16 +50,18 @@ final class SettingsViewModel: ObservableObject {
     }
 
     var hasChanges: Bool {
-        Snapshot(offlineModelQuality: offlineModelQuality) != saved
+        Snapshot(offlineModelQuality: offlineModelQuality, llmModelInfo: llmModelInfo) != saved
     }
 
     init() {
         let defaults = UserDefaults.standard
         let quality = ModelQuality(rawValue: defaults.string(forKey: "offline_model_quality") ?? "") ?? .int8
+        let llmInfo = LLMModelInfo(rawValue: defaults.string(forKey: "llm_model_info") ?? "") ?? .qwen2_5_1_5b_q4km
 
         offlineModelQuality = quality
+        llmModelInfo = llmInfo
         previousModelQuality = quality
-        saved = Snapshot(offlineModelQuality: quality)
+        saved = Snapshot(offlineModelQuality: quality, llmModelInfo: llmInfo)
     }
 
     private var saveGeneration = 0
@@ -66,8 +72,9 @@ final class SettingsViewModel: ObservableObject {
 
         let defaults = UserDefaults.standard
         defaults.set(offlineModelQuality.rawValue, forKey: "offline_model_quality")
+        defaults.set(llmModelInfo.rawValue, forKey: "llm_model_info")
 
-        saved = Snapshot(offlineModelQuality: offlineModelQuality)
+        saved = Snapshot(offlineModelQuality: offlineModelQuality, llmModelInfo: llmModelInfo)
 
         let generation = saveGeneration + 1
         saveGeneration = generation
@@ -167,5 +174,31 @@ final class SettingsViewModel: ObservableObject {
     func cancelFP32Switch() {
         showFP32Warning = false
         offlineModelQuality = previousModelQuality
+    }
+
+    // MARK: - LLM 模型下载（委托给 LLMModelManager）
+
+    var llmModelManager: LLMModelManager?
+
+    func startLLMFromModelScope() async {
+        guard let manager = llmModelManager else { return }
+        do {
+            try await manager.downloadFromModelScope(llmModelInfo)
+        } catch {}
+    }
+
+    func importLLMModel(from url: URL) async {
+        guard let manager = llmModelManager else { return }
+        do {
+            try await manager.importFromFile(url, info: llmModelInfo)
+        } catch {}
+    }
+
+    func cancelLLMDownload() {
+        llmModelManager?.cancelDownload()
+    }
+
+    func deleteLLMModel() async {
+        llmModelManager?.deleteModel(llmModelInfo)
     }
 }

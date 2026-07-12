@@ -34,4 +34,10 @@ protocol RecordRepository {
 
     /// 清空所有记录
     func deleteAllRecords() async throws
+
+    /// 更新 AI 总结
+    func updateSummary(_ recordId: UUID, summary: RecordSummary) async throws
+
+    /// 更新总结状态
+    func updateSummaryStatus(_ recordId: UUID, status: ProcessingStatus) async throws
 }

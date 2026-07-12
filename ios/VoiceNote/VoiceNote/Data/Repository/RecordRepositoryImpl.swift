@@ -27,6 +27,7 @@ final class RecordRepositoryImpl: RecordRepository {
                 entity.speakersJSON = try? self.encoder.encodeString(record.speakers)
                 entity.startTime = record.startTime
                 entity.transcriptStatus = record.transcriptStatus.rawValue
+                entity.summaryStatus = record.summaryStatus.rawValue
                 do {
                     try self.context.save()
                     c.resume(returning: record.id)
@@ -150,6 +151,30 @@ final class RecordRepositoryImpl: RecordRepository {
         }
     }
 
+    func updateSummary(_ recordId: UUID, summary: RecordSummary) async throws {
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.summaryJSON = try? self.encoder.encodeString(summary)
+                entity.summaryStatus = ProcessingStatus.completed.rawValue
+                entity.summaryGeneratedAt = Date()
+                try? self.context.save()
+                c.resume()
+            }
+        }
+    }
+
+    func updateSummaryStatus(_ recordId: UUID, status: ProcessingStatus) async throws {
+        await withCheckedContinuation { c in
+            context.perform {
+                guard let entity = try? self.fetchEntity(id: recordId) else { c.resume(); return }
+                entity.summaryStatus = status.rawValue
+                try? self.context.save()
+                c.resume()
+            }
+        }
+    }
+
     func deleteAllRecords() async throws {
         await withCheckedContinuation { c in
             context.perform {
@@ -189,7 +214,10 @@ final class RecordRepositoryImpl: RecordRepository {
             transcriptFilePath: e.transcriptFilePath,
             transcriptStatus: ProcessingStatus(rawValue: e.transcriptStatus) ?? .pending,
             audioFilePath: e.audioFilePath,
-            transcribedDurationSeconds: e.transcribedDurationSeconds
+            transcribedDurationSeconds: e.transcribedDurationSeconds,
+            summaryStatus: ProcessingStatus(rawValue: e.summaryStatus ?? "") ?? .pending,
+            summary: try? decoder.decode(RecordSummary.self, from: e.summaryJSON),
+            summaryGeneratedAt: e.summaryGeneratedAt
         )
     }
 }

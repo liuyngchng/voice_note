@@ -9,6 +9,8 @@ final class AppContainer: ObservableObject {
     let modelDownloadManager = ASRModelManager()
     let offlineASRClient = OfflineASRClient()
     let offlinePunctuationClient = OfflinePunctuationClient()
+    let offlineLLMClient = OfflineLLMClient()
+    let llmModelManager = LLMModelManager()
 
     lazy var recordRepository: RecordRepository = RecordRepositoryImpl(container: self)
     lazy var recordingManager = RecordingManager(container: self)
