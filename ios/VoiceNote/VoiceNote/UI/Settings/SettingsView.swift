@@ -57,7 +57,7 @@ struct SettingsView: View {
                 }
                 HStack {
                     Text("模型").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
-                    TextField("deepseek-chat", text: $viewModel.llmModelName)
+                    TextField("deepseek-v4-flash", text: $viewModel.llmModelName)
                         .font(.caption)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)

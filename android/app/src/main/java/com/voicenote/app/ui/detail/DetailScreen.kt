@@ -198,7 +198,8 @@ fun DetailScreen(
                             isGenerating = uiState.isGeneratingSummary,
                             progressMessage = uiState.summaryProgressMessage,
                             errorMessage = uiState.summaryError,
-                            onGenerate = viewModel::generateSummary
+                            onGenerate = viewModel::generateSummary,
+                            onShareSummary = viewModel::shareSummary
                         )
                     }
                 }
@@ -553,7 +554,8 @@ private fun SummaryTab(
     isGenerating: Boolean,
     progressMessage: String,
     errorMessage: String?,
-    onGenerate: () -> Unit
+    onGenerate: () -> Unit,
+    onShareSummary: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -671,14 +673,15 @@ private fun SummaryTab(
             }
         }
 
-        // Generate button — always shown when transcript is completed/unavailable
+        // Generate / Share buttons — always shown when transcript is completed/unavailable
         if (record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
             || record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE
         ) {
             HorizontalDivider()
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 TextButton(
                     onClick = onGenerate,
@@ -692,6 +695,14 @@ private fun SummaryTab(
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("生成总结")
+                    }
+                }
+                // 导出按钮：仅在总结已存在时显示
+                if (record.summary != null) {
+                    TextButton(onClick = onShareSummary) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("导出")
                     }
                 }
             }

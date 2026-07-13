@@ -42,6 +42,12 @@ struct DetailView: View {
         }
         .onAppear { viewModel.loadRecord(id: recordId) }
         .onDisappear { viewModel.audioPlayer.stop() }
+        .onChange(of: viewModel.summaryExportURL) { url in
+            if let url {
+                activeSheet = nil
+                DispatchQueue.main.async { activeSheet = .share(url) }
+            }
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .transcript:
@@ -257,6 +263,19 @@ struct DetailView: View {
                             .foregroundColor(.secondary)
                             .padding(.horizontal)
                     }
+
+                    // 导出总结按钮
+                    Divider().padding(.horizontal)
+                    Button {
+                        viewModel.exportSummary()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "square.and.arrow.up")
+                            Text("导出总结")
+                                .font(.subheadline)
+                        }
+                    }
+                    .padding(.bottom, 8)
                 } else if record.summaryStatus == .processing {
                     VStack(spacing: 8) {
                         ProgressView()

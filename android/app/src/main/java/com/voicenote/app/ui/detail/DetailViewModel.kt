@@ -750,6 +750,66 @@ class DetailViewModel @Inject constructor(
         }
     }
 
+    fun shareSummary() {
+        val record = _uiState.value.record ?: return
+        val summary = record.summary ?: return
+        val text = formatSummaryAsText(summary)
+        if (text.isBlank()) return
+
+        val context = getApplication<Application>()
+        try {
+            val fileName = "总结_${record.title.replace("/", "_")}.txt"
+            val file = File(context.cacheDir, fileName)
+            file.writeText(text)
+
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(intent, "分享总结")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(error = "分享失败")
+        }
+    }
+
+    private fun formatSummaryAsText(summary: com.voicenote.app.domain.model.RecordSummary): String {
+        val sb = StringBuilder()
+        if (summary.topics.isNotEmpty()) {
+            sb.appendLine("【议题】")
+            summary.topics.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        if (summary.conclusions.isNotEmpty()) {
+            sb.appendLine("【结论】")
+            summary.conclusions.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        if (summary.todos.isNotEmpty()) {
+            sb.appendLine("【待办】")
+            summary.todos.forEach { todo ->
+                var line = "  • ${todo.task}"
+                if (todo.owner.isNotBlank()) line += "（${todo.owner}）"
+                if (todo.deadline.isNotBlank()) line += " 截止: ${todo.deadline}"
+                sb.appendLine(line)
+            }
+            sb.appendLine()
+        }
+        if (summary.nextSteps.isNotEmpty()) {
+            sb.appendLine("【后续步骤】")
+            summary.nextSteps.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        return sb.toString().trimEnd()
+    }
+
     private suspend fun refreshRecord(recordId: Long) {
         val updated = recordRepository.getRecordById(recordId)
         if (updated != null) {

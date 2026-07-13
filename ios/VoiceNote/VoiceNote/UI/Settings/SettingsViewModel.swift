@@ -66,18 +66,21 @@ final class SettingsViewModel: ObservableObject {
         let defaults = UserDefaults.standard
         let quality = ModelQuality(rawValue: defaults.string(forKey: "offline_model_quality") ?? "") ?? .int8
 
+        let apiURL = defaults.string(forKey: "llm_online_api_url") ?? OnlineLLMClient.apiBaseURL
+        let apiKey = defaults.string(forKey: "llm_online_api_key") ?? ""
+        let model = defaults.string(forKey: "llm_online_model_name") ?? OnlineLLMClient.modelName
+
         offlineModelQuality = quality
         previousModelQuality = quality
-
-        llmAPIURL = defaults.string(forKey: "llm_online_api_url") ?? OnlineLLMClient.apiURL
-        llmAPIKey = defaults.string(forKey: "llm_online_api_key") ?? ""
-        llmModelName = defaults.string(forKey: "llm_online_model_name") ?? OnlineLLMClient.modelName
+        llmAPIURL = apiURL
+        llmAPIKey = apiKey
+        llmModelName = model
 
         saved = Snapshot(
             offlineModelQuality: quality,
-            llmAPIURL: llmAPIURL,
-            llmAPIKey: llmAPIKey,
-            llmModelName: llmModelName
+            llmAPIURL: apiURL,
+            llmAPIKey: apiKey,
+            llmModelName: model
         )
     }
 

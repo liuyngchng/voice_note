@@ -253,7 +253,7 @@ fun SettingsScreen(
                         value = uiState.llmModelName,
                         onValueChange = viewModel::updateLLMModelName,
                         label = { Text("模型名称") },
-                        placeholder = { Text("deepseek-chat") },
+                        placeholder = { Text("deepseek-v4-flash") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )

@@ -32,7 +32,7 @@ final class OnlineLLMClient {
 
     /// 模型名称
     static var modelName: String {
-        UserDefaults.standard.string(forKey: "llm_online_model_name") ?? "deepseek-chat"
+        UserDefaults.standard.string(forKey: "llm_online_model_name") ?? "deepseek-v4-flash"
     }
 
     // MARK: - URL 构建
@@ -203,7 +203,11 @@ final class OnlineLLMClient {
         }
 
         // 4. 解析合并后的 JSON
-        return parseJsonContent(mergedText)
+        do {
+            return .success(try parseJsonContent(mergedText))
+        } catch {
+            return .failure(error)
+        }
     }
 
     // MARK: - API 调用
@@ -264,24 +268,24 @@ final class OnlineLLMClient {
 
     /// 解析 JSON 内容为 RecordSummary
     /// 对齐 Android: parseJsonContent()
-    private func parseJsonContent(_ content: String) -> Result<RecordSummary, Error> {
-        do {
-            Log.llm("[在线] parseJsonContent: content=\(content.count) chars")
-            let jsonStr = extractJSON(from: content)
-            let summary = try parseRecordSummary(from: jsonStr)
+    private func parseJsonContent(_ content: String) throws -> RecordSummary {
+        Log.llm("[在线] parseJsonContent: content=\(content.count) chars")
+        let jsonStr = extractJSON(from: content)
+
+        if let summary = try? parseRecordSummary(from: jsonStr) {
             Log.llm("[在线] 解析完成: topics=\(summary.topics.count), conclusions=\(summary.conclusions.count), todos=\(summary.todos.count), nextSteps=\(summary.nextSteps.count)")
-            return .success(summary)
-        } catch {
-            // JSON 解析失败，将纯文本作为结论
-            let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return .failure(OnlineLLMError.emptyResponse) }
-            return .success(RecordSummary(
-                topics: [],
-                conclusions: [trimmed],
-                todos: [],
-                nextSteps: []
-            ))
+            return summary
         }
+
+        // JSON 解析失败，将纯文本作为结论
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw OnlineLLMError.emptyResponse }
+        return RecordSummary(
+            topics: [],
+            conclusions: [trimmed],
+            todos: [],
+            nextSteps: []
+        )
     }
 
     /// 从 LLM 返回内容中提取 JSON 字符串

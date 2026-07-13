@@ -19,7 +19,7 @@ data class AppSettings(
     // 在线 LLM 配置
     val llmApiEndpoint: String = "https://api.deepseek.com",
     val llmApiKey: String = "",
-    val llmModelName: String = "deepseek-chat"
+    val llmModelName: String = "deepseek-v4-flash"
 )
 
 @Singleton
@@ -38,7 +38,7 @@ class SettingsDataStore @Inject constructor(
             offlineModelQuality = prefs[Keys.OFFLINE_MODEL_QUALITY] ?: "int8",
             llmApiEndpoint = prefs[Keys.LLM_API_ENDPOINT] ?: "https://api.deepseek.com",
             llmApiKey = prefs[Keys.LLM_API_KEY] ?: "",
-            llmModelName = prefs[Keys.LLM_MODEL_NAME] ?: "deepseek-chat"
+            llmModelName = prefs[Keys.LLM_MODEL_NAME] ?: "deepseek-v4-flash"
         )
     }
 

@@ -19,7 +19,7 @@ import android.util.Log
 data class LLMConfig(
     val apiEndpoint: String = "https://api.deepseek.com",
     val apiKey: String = "",
-    val modelName: String = "deepseek-chat"
+    val modelName: String = "deepseek-v4-flash"
 ) {
     val isValid: Boolean get() = apiEndpoint.isNotBlank() && apiKey.isNotBlank()
 }

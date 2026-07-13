@@ -46,7 +46,7 @@ data class SettingsUiState(
     // 在线 LLM 配置
     val llmApiEndpoint: String = "https://api.deepseek.com",
     val llmApiKey: String = "",
-    val llmModelName: String = "deepseek-chat"
+    val llmModelName: String = "deepseek-v4-flash"
 )
 
 @HiltViewModel

@@ -14,6 +14,8 @@ final class DetailViewModel: ObservableObject {
     @Published var isGeneratingSummary = false
     @Published var summaryProgressMessage: String?
     @Published var summaryError: String?
+    /// 总结导出文件 URL（设置后触发分享 sheet）
+    @Published var summaryExportURL: URL?
 
     @Published var audioPlayer = AudioPlayer()
 
@@ -273,6 +275,51 @@ final class DetailViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - 导出总结
+
+    func exportSummary() {
+        guard let summary = record?.summary else { return }
+        let text = formatSummaryAsText(summary)
+        guard !text.isEmpty else { return }
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = "总结_\(record?.title ?? "untitled").txt"
+            .replacingOccurrences(of: "/", with: "_")
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+        summaryExportURL = fileURL
+    }
+
+    private func formatSummaryAsText(_ summary: RecordSummary) -> String {
+        var lines: [String] = []
+        if !summary.topics.isEmpty {
+            lines.append("【议题】")
+            lines.append(contentsOf: summary.topics.map { "  • \($0)" })
+            lines.append("")
+        }
+        if !summary.conclusions.isEmpty {
+            lines.append("【结论】")
+            lines.append(contentsOf: summary.conclusions.map { "  • \($0)" })
+            lines.append("")
+        }
+        if !summary.todos.isEmpty {
+            lines.append("【待办】")
+            for todo in summary.todos {
+                var parts = "  • \(todo.task)"
+                if !todo.owner.isEmpty { parts += "（\(todo.owner)）" }
+                if !todo.deadline.isEmpty { parts += " 截止: \(todo.deadline)" }
+                lines.append(parts)
+            }
+            lines.append("")
+        }
+        if !summary.nextSteps.isEmpty {
+            lines.append("【后续步骤】")
+            lines.append(contentsOf: summary.nextSteps.map { "  • \($0)" })
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func readPCMFromWAV(at path: String) -> Data? {
