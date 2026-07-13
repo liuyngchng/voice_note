@@ -9,6 +9,7 @@ struct SettingsView: View {
     @State private var showValidationAlert = false
     @State private var modelFilePickerTarget: FilePickerTarget? = nil
     @State private var filePickerErrorMessage: String? = nil
+    @State private var showAPIKey = false
     @State private var showLogShare = false
     @StateObject private var modelDownloadManager = ASRModelManager()
     @StateObject private var punctuationModelManager = PunctuationModelManager()
@@ -41,26 +42,82 @@ struct SettingsView: View {
                 punctModelStatusSection
             }
 
-            // MARK: - 在线大模型配置
-            Section(header: Text("在线大模型"), footer: Text("使用 DeepSeek 等 OpenAI 兼容 API 生成文本总结。仅需填写 base URL，/v1/chat/completions 会自动追加。")) {
+            // MARK: - 大语言模型配置
+            Section(header: Text("大语言模型"), footer: Text("使用 DeepSeek 等 OpenAI 兼容 API 生成文本总结。仅需填写 base URL，/v1/chat/completions 会自动追加。")) {
                 HStack {
-                    Text("地址").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
+                    Text("API 地址").font(.caption).foregroundColor(.secondary).frame(width: 60, alignment: .leading)
                     TextField("https://api.deepseek.com", text: $viewModel.llmAPIURL)
                         .font(.caption)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                 }
                 HStack {
-                    Text("Key").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
-                    SecureField("sk-...", text: $viewModel.llmAPIKey)
-                        .font(.caption)
+                    Text("API Key").font(.caption).foregroundColor(.secondary).frame(width: 60, alignment: .leading)
+                    if showAPIKey {
+                        TextField("sk-...", text: $viewModel.llmAPIKey)
+                            .font(.caption)
+                    } else {
+                        SecureField("sk-...", text: $viewModel.llmAPIKey)
+                            .font(.caption)
+                    }
+                    Button {
+                        showAPIKey.toggle()
+                    } label: {
+                        Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.borderless)
                 }
                 HStack {
-                    Text("模型").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
+                    Text("模型名称").font(.caption).foregroundColor(.secondary).frame(width: 60, alignment: .leading)
                     TextField("deepseek-v4-flash", text: $viewModel.llmModelName)
                         .font(.caption)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
+                }
+            }
+
+            // 测试连接
+            Section {
+                Button {
+                    viewModel.testConnection()
+                } label: {
+                    HStack {
+                        Spacer()
+                        if viewModel.isTesting {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                            Text("测试中...")
+                                .padding(.leading, 8)
+                        } else {
+                            Image(systemName: "network")
+                            Text("测试连接")
+                        }
+                        Spacer()
+                    }
+                }
+                .disabled(viewModel.isTesting)
+
+                // 内联显示测试结果（不依赖 alert，iOS 14+ 均可靠显示）
+                if viewModel.showTestResults {
+                    ForEach(viewModel.testResults) { result in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(result.success ? .green : .red)
+                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.name)
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                Text(result.message)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
+                        .padding(.vertical, 4)
+                    }
                 }
             }
 
@@ -151,6 +208,15 @@ struct SettingsView: View {
                 title: Text("保存失败"),
                 message: Text(viewModel.validationError ?? "输入有误"),
                 dismissButton: .cancel(Text("好"))
+            )
+        }
+        .alert(isPresented: $viewModel.showTestResults) {
+            Alert(
+                title: Text("连接测试结果"),
+                message: Text(viewModel.testResults.map { r in
+                    "\(r.success ? "✅" : "❌") \(r.name)\n\(r.message)"
+                }.joined(separator: "\n\n")),
+                dismissButton: .default(Text("确定"), action: viewModel.dismissTestResults)
             )
         }
         .alert(isPresented: $viewModel.showFP32Warning) {

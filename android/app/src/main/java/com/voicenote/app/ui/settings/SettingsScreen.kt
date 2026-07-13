@@ -204,7 +204,7 @@ fun SettingsScreen(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        "在线大语言模型",
+                        "大语言模型",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )

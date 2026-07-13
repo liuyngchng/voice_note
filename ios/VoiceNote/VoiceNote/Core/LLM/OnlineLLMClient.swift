@@ -49,6 +49,78 @@ final class OnlineLLMClient {
 
     // MARK: - 公开接口
 
+    /// 测试 API 连接（对齐 Android: testConnection）
+    /// - Parameters:
+    ///   - apiBase: API 地址（可选，默认从 UserDefaults 读取）
+    ///   - apiKey: API Key（可选，默认从 UserDefaults 读取）
+    ///   - model: 模型名称（可选，默认从 UserDefaults 读取）
+    func testConnection(apiBase: String? = nil, apiKey: String? = nil, model: String? = nil) async -> Result<String, Error> {
+        let apiBase = apiBase ?? Self.apiBaseURL
+        let apiKey = apiKey ?? Self.apiKey
+        let model = model ?? Self.modelName
+
+        guard !apiBase.isEmpty, !apiKey.isEmpty else {
+            return .failure(OnlineLLMError.noAPIKey)
+        }
+
+        let urlString = Self.buildURL(apiBase)
+        guard let url = URL(string: urlString) else {
+            return .failure(OnlineLLMError.invalidURL)
+        }
+
+        // 使用短超时的独立 session，确保快速反馈
+        let testConfig = URLSessionConfiguration.default
+        testConfig.timeoutIntervalForRequest = 15
+        testConfig.timeoutIntervalForResource = 20
+        testConfig.waitsForConnectivity = false
+        let testSession = URLSession(configuration: testConfig)
+
+        let body: [String: Any] = [
+            "model": model,
+            "messages": [
+                ["role": "user", "content": "你好，请回复'连接成功'"]
+            ],
+            "max_tokens": 20
+        ]
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 15
+            let bodyData = try JSONSerialization.data(withJSONObject: body)
+            request.httpBody = bodyData
+
+            let (data, response) = try await testSession.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                return .failure(OnlineLLMError.invalidResponse)
+            }
+
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                return .failure(OnlineLLMError.authFailed)
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let bodyStr = String(data: data, encoding: .utf8) ?? ""
+                let errorMsg: String
+                if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let error = json["error"] as? [String: Any],
+                   let message = error["message"] as? String {
+                    errorMsg = message
+                } else {
+                    errorMsg = "HTTP \(httpResponse.statusCode)"
+                }
+                return .failure(OnlineLLMError.httpError(httpResponse.statusCode, errorMsg))
+            }
+
+            return .success("连接成功 (\(model))")
+        } catch {
+            return .failure(error)
+        }
+    }
+
     /// 生成会议总结（自动判断是否需要分段）
     /// - Parameters:
     ///   - transcript: 转写全文

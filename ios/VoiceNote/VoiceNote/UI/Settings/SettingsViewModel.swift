@@ -213,4 +213,99 @@ final class SettingsViewModel: ObservableObject {
 
     @Published var logShareTrigger = false
 
+    // MARK: - 连接测试
+
+    struct TestResult: Identifiable {
+        let id = UUID()
+        let name: String
+        let success: Bool
+        let message: String
+    }
+
+    @Published var isTesting = false
+    @Published var testResults: [TestResult] = []
+    @Published var showTestResults = false
+
+    func testConnection() {
+        guard !isTesting else { return }
+        isTesting = true
+        testResults = []
+        showTestResults = false
+
+        // 捕获当前表单值，避免测试过程中用户修改
+        let currentAPIURL = llmAPIURL
+        let currentAPIKey = llmAPIKey
+        let currentModelName = llmModelName
+
+        print("[TestConnection] 开始测试连接...")
+        print("[TestConnection] API URL: \(currentAPIURL.isEmpty ? "(空)" : currentAPIURL)")
+        print("[TestConnection] API Key: \(currentAPIKey.isEmpty ? "(空)" : "已填写(\(currentAPIKey.count)字符)")")
+        print("[TestConnection] Model: \(currentModelName.isEmpty ? "(空)" : currentModelName)")
+
+        Task {
+            var results: [TestResult] = []
+
+            do {
+                // 1. 测试离线 ASR 模型
+                let modelFile = ASRModelManager.modelFilePath(offlineModelQuality)
+                let tokensFile = ASRModelManager.tokensFilePath()
+                let fm = FileManager.default
+
+                let asrSuccess = fm.fileExists(atPath: modelFile.path) && fm.fileExists(atPath: tokensFile.path)
+                let asrMessage: String
+                if !fm.fileExists(atPath: modelFile.path) {
+                    asrMessage = "离线模型未下载，请先下载"
+                } else if !fm.fileExists(atPath: tokensFile.path) {
+                    asrMessage = "tokens.txt 缺失，请重新下载模型"
+                } else {
+                    asrMessage = "离线 ASR 准备就绪 (\(offlineModelQuality.rawValue.uppercased()))"
+                }
+                results.append(TestResult(name: "语音识别 (离线)", success: asrSuccess, message: asrMessage))
+                print("[TestConnection] ASR 检查完成: success=\(asrSuccess), msg=\(asrMessage)")
+
+                // 2. 测试在线 LLM API（使用当前表单值，而非 UserDefaults 中已保存的值）
+                if !currentAPIKey.isEmpty && !currentAPIURL.isEmpty {
+                    let client = OnlineLLMClient()
+                    print("[TestConnection] 开始测试 LLM API...")
+                    let result = await client.testConnection(
+                        apiBase: currentAPIURL,
+                        apiKey: currentAPIKey,
+                        model: currentModelName
+                    )
+                    switch result {
+                    case .success(let msg):
+                        print("[TestConnection] LLM API 成功: \(msg)")
+                        results.append(TestResult(name: "大语言模型", success: true, message: msg))
+                    case .failure(let error):
+                        print("[TestConnection] LLM API 失败: \(error.localizedDescription)")
+                        results.append(TestResult(name: "大语言模型", success: false, message: error.localizedDescription))
+                    }
+                } else {
+                    print("[TestConnection] 未配置 LLM API 凭据，跳过 LLM 测试")
+                    results.append(TestResult(name: "大语言模型", success: false, message: "未配置 API 地址或密钥"))
+                }
+            } catch {
+                print("[TestConnection] 测试异常: \(error.localizedDescription)")
+                results.append(TestResult(name: "测试异常", success: false, message: error.localizedDescription))
+            }
+
+            print("[TestConnection] 测试完成，\(results.count) 项结果")
+            for r in results {
+                print("[TestConnection]   \(r.success ? "✅" : "❌") \(r.name): \(r.message)")
+            }
+
+            await MainActor.run {
+                print("[TestConnection] 设置 showTestResults = true")
+                isTesting = false
+                testResults = results
+                showTestResults = true
+            }
+        }
+    }
+
+    func dismissTestResults() {
+        print("[TestConnection] dismissTestResults")
+        showTestResults = false
+        testResults = []
+    }
 }
