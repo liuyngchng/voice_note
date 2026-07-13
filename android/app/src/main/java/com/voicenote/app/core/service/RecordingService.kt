@@ -515,11 +515,12 @@ class RecordingService : Service() {
                     .setOnAudioFocusChangeListener { focusChange ->
                         when (focusChange) {
                             AudioManager.AUDIOFOCUS_LOSS -> {
-                                Log.w(TAG, "Audio focus lost — stopping recording")
-                                stopRecording()
+                                // Don't stop — user may be on speakerphone and wants to
+                                // capture both sides of the conversation.
+                                Log.w(TAG, "Audio focus lost — continuing recording (e.g. phone call)")
                             }
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                                Log.w(TAG, "Audio focus transient loss")
+                                Log.w(TAG, "Audio focus transient loss — continuing")
                             }
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                                 // Continue recording, other app is ducking
