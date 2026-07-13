@@ -670,9 +670,13 @@ class DetailViewModel @Inject constructor(
                     return@launch
                 }
 
-                _uiState.value = _uiState.value.copy(summaryProgressMessage = "正在请求 AI 总结...")
-
-                val result = onlineLLMClient.generateSummary(transcript, config)
+                val result = onlineLLMClient.generateSummary(
+                    transcript = transcript,
+                    config = config,
+                    onProgress = { msg ->
+                        _uiState.value = _uiState.value.copy(summaryProgressMessage = msg)
+                    }
+                )
 
                 result.onSuccess { summary ->
                     recordRepository.updateSummary(record.id, summary)
