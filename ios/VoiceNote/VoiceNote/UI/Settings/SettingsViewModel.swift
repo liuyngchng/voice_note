@@ -9,8 +9,10 @@ final class SettingsViewModel: ObservableObject {
     // MARK: - 标点模型设置
     @Published var punctuationModelState: ModelState = .idle
 
-    // MARK: - LLM 模型（固定 Qwen2.5-1.5B）
-    let llmModelInfo: LLMModelInfo = .qwen2_5_1_5b_q4km
+    // MARK: - 在线 LLM 配置
+    @Published var llmAPIURL: String
+    @Published var llmAPIKey: String
+    @Published var llmModelName: String
 
     enum ModelState {
         case idle
@@ -35,6 +37,9 @@ final class SettingsViewModel: ObservableObject {
 
     private struct Snapshot: Equatable {
         var offlineModelQuality: ModelQuality
+        var llmAPIURL: String
+        var llmAPIKey: String
+        var llmModelName: String
     }
 
     var appVersion: String {
@@ -49,7 +54,12 @@ final class SettingsViewModel: ObservableObject {
     }
 
     var hasChanges: Bool {
-        Snapshot(offlineModelQuality: offlineModelQuality) != saved
+        Snapshot(
+            offlineModelQuality: offlineModelQuality,
+            llmAPIURL: llmAPIURL,
+            llmAPIKey: llmAPIKey,
+            llmModelName: llmModelName
+        ) != saved
     }
 
     init() {
@@ -58,7 +68,17 @@ final class SettingsViewModel: ObservableObject {
 
         offlineModelQuality = quality
         previousModelQuality = quality
-        saved = Snapshot(offlineModelQuality: quality)
+
+        llmAPIURL = defaults.string(forKey: "llm_online_api_url") ?? OnlineLLMClient.apiURL
+        llmAPIKey = defaults.string(forKey: "llm_online_api_key") ?? ""
+        llmModelName = defaults.string(forKey: "llm_online_model_name") ?? OnlineLLMClient.modelName
+
+        saved = Snapshot(
+            offlineModelQuality: quality,
+            llmAPIURL: llmAPIURL,
+            llmAPIKey: llmAPIKey,
+            llmModelName: llmModelName
+        )
     }
 
     private var saveGeneration = 0
@@ -69,8 +89,16 @@ final class SettingsViewModel: ObservableObject {
 
         let defaults = UserDefaults.standard
         defaults.set(offlineModelQuality.rawValue, forKey: "offline_model_quality")
+        defaults.set(llmAPIURL, forKey: "llm_online_api_url")
+        defaults.set(llmAPIKey, forKey: "llm_online_api_key")
+        defaults.set(llmModelName, forKey: "llm_online_model_name")
 
-        saved = Snapshot(offlineModelQuality: offlineModelQuality)
+        saved = Snapshot(
+            offlineModelQuality: offlineModelQuality,
+            llmAPIURL: llmAPIURL,
+            llmAPIKey: llmAPIKey,
+            llmModelName: llmModelName
+        )
 
         let generation = saveGeneration + 1
         saveGeneration = generation
@@ -160,26 +188,6 @@ final class SettingsViewModel: ObservableObject {
     func cancelFP32Switch() {
         showFP32Warning = false
         offlineModelQuality = previousModelQuality
-    }
-
-    // MARK: - LLM 模型下载（委托给 LLMModelManager）
-
-    var llmModelManager = LLMModelManager()
-
-    func startLLMFromModelScope() {
-        llmModelManager.downloadFromModelScope(llmModelInfo)
-    }
-
-    func importLLMModel(from url: URL, cleanup: (() -> Void)? = nil) {
-        llmModelManager.importFromFile(url, info: llmModelInfo, cleanup: cleanup)
-    }
-
-    func cancelLLMDownload() {
-        llmModelManager.cancelDownload()
-    }
-
-    func deleteLLMModel() async {
-        await llmModelManager.deleteModel(llmModelInfo)
     }
 
     // MARK: - 诊断日志

@@ -192,10 +192,15 @@ final class DetailViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 文本总结（离线 LLM，手动触发）
+    // MARK: - 文本总结（在线 LLM，手动触发）
+    // 对齐 Android: DetailViewModel.generateSummary()
+
+    private let onlineLLMClient = OnlineLLMClient()
 
     func generateSummary() {
-        guard let id = currentRecordId, !isGeneratingSummary else { return }
+        // 防重复点击
+        guard !isGeneratingSummary else { return }
+        guard let id = currentRecordId else { return }
 
         // 1. 获取转写文本
         let transcript = transcriptText ?? ""
@@ -208,20 +213,17 @@ final class DetailViewModel: ObservableObject {
             return
         }
 
-        // 2. 检查离线 LLM 模型
-        let modelInfo = LLMModelManager.savedModelInfo()
-        guard LLMModelManager.isModelDownloaded(modelInfo) else {
-            summaryError = "离线 LLM 模型未下载，请在设置中下载后重试"
+        // 2. 检查 LLM 配置
+        guard !OnlineLLMClient.apiKey.isEmpty else {
+            summaryError = "请在设置中配置在线大语言模型的 API Key"
             return
         }
 
-        let offlineClient = container.offlineLLMClient
         let repository = container.recordRepository
 
-        Log.llm("[总结] 用户触发总结生成: transcript=\(transcript.count) chars")
-        LogFile.shared.syncAppend("crash", "generateSummary 开始: transcript=\(transcript.count)")
+        Log.llm("[总结] 用户触发在线总结生成: transcript=\(transcript.count) chars")
         isGeneratingSummary = true
-        summaryProgressMessage = nil
+        summaryProgressMessage = "正在连接 LLM..."
         summaryError = nil
 
         // 3. 先更新状态为 processing
@@ -229,12 +231,12 @@ final class DetailViewModel: ObservableObject {
             try? await repository.updateSummaryStatus(id, status: .processing)
         }
 
-        // 4. 执行离线推理（带进度回调）
+        // 4. 执行在线推理（带进度回调）
         Task { [weak self] in
             guard let self else { return }
-            let summaryResult = await offlineClient.generateSummary(
+
+            let summaryResult = await onlineLLMClient.generateSummary(
                 transcript: transcript,
-                modelInfo: modelInfo,
                 customPrompt: nil,
                 onProgress: { [weak self] message in
                     Task { @MainActor [weak self] in
@@ -255,10 +257,13 @@ final class DetailViewModel: ObservableObject {
                         }
                     }
                 } else {
-                    self.summaryError = "离线总结生成失败"
+                    let errorMessage: String
                     if case .failure(let error) = summaryResult {
-                        self.summaryError = error.localizedDescription
+                        errorMessage = error.localizedDescription
+                    } else {
+                        errorMessage = "在线总结生成失败"
                     }
+                    self.summaryError = errorMessage
                     self.isGeneratingSummary = false
                     self.summaryProgressMessage = nil
                     Task {

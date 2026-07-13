@@ -12,12 +12,10 @@ struct SettingsView: View {
     @State private var showLogShare = false
     @StateObject private var modelDownloadManager = ASRModelManager()
     @StateObject private var punctuationModelManager = PunctuationModelManager()
-    @StateObject private var llmModelManager = LLMModelManager()
 
     enum FilePickerTarget: String, Identifiable {
         case asrModel
         case punctModel
-        case llmModel
         var id: String { rawValue }
     }
 
@@ -43,9 +41,27 @@ struct SettingsView: View {
                 punctModelStatusSection
             }
 
-            // MARK: - 离线 LLM 总结模型
-            Section(header: Text("大语言模型")) {
-                llmModelStatusSection
+            // MARK: - 在线大模型配置
+            Section(header: Text("在线大模型"), footer: Text("使用 DeepSeek 等 OpenAI 兼容 API 生成文本总结。仅需填写 base URL，/v1/chat/completions 会自动追加。")) {
+                HStack {
+                    Text("地址").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
+                    TextField("https://api.deepseek.com", text: $viewModel.llmAPIURL)
+                        .font(.caption)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                }
+                HStack {
+                    Text("Key").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
+                    SecureField("sk-...", text: $viewModel.llmAPIKey)
+                        .font(.caption)
+                }
+                HStack {
+                    Text("模型").font(.caption).foregroundColor(.secondary).frame(width: 40, alignment: .leading)
+                    TextField("deepseek-chat", text: $viewModel.llmModelName)
+                        .font(.caption)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                }
             }
 
             // 诊断日志
@@ -102,7 +118,6 @@ struct SettingsView: View {
         .onAppear {
             viewModel.modelDownloadManager = modelDownloadManager
             viewModel.punctuationModelManager = punctuationModelManager
-            viewModel.llmModelManager = llmModelManager
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -176,14 +191,6 @@ struct SettingsView: View {
                     viewModel.importPunctuationModel(from: url, cleanup: cleanup)
                 } onError: { msg in
                     Log.asr("[SettingsView] 标点文件选择失败: \(msg)")
-                    filePickerErrorMessage = msg
-                }
-            case .llmModel:
-                ModelFilePicker(allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data]) { url, cleanup in
-                    Log.llm("[SettingsView] 用户选择了LLM模型文件: \(url.lastPathComponent)")
-                    viewModel.importLLMModel(from: url, cleanup: cleanup)
-                } onError: { msg in
-                    Log.llm("[SettingsView] LLM文件选择失败: \(msg)")
                     filePickerErrorMessage = msg
                 }
         }
@@ -649,220 +656,6 @@ struct SettingsView: View {
             .buttonStyle(.borderless)
             .font(.subheadline)
             .disabled(punctuationModelManager.isDownloading)
-        }
-    }
-
-    // MARK: - LLM 模型状态
-
-    @ViewBuilder
-    private var llmModelStatusSection: some View {
-        switch llmModelManager.downloadState {
-        case .idle:
-            if LLMModelManager.isModelDownloaded(viewModel.llmModelInfo) {
-                llmModelReadyRow
-            } else {
-                llmModelNotDownloadedRow
-            }
-
-        case .queued:
-            llmQueuedRow
-
-        case .downloading(let progress):
-            llmDownloadingRow(progress)
-
-        case .importing(let progress):
-            llmImportingRow(progress)
-
-        case .completed:
-            llmModelReadyRow
-            if !LLMModelManager.isModelDownloaded(viewModel.llmModelInfo) {
-                llmActionButtonsRow
-            }
-
-        case .failed(let error):
-            llmDownloadFailedRow(error)
-        }
-    }
-
-    private var llmQueuedRow: some View {
-        HStack {
-            Image(systemName: "clock").foregroundColor(.orange)
-            Text("排队中...").font(.caption).foregroundColor(.orange)
-            Spacer()
-        }
-    }
-
-    private var llmModelReadyRow: some View {
-        HStack {
-            Label("LLM 模型已就绪", systemImage: "checkmark.circle.fill")
-                .foregroundColor(.green)
-            Spacer()
-            let size = LLMModelManager.downloadedModelSize(viewModel.llmModelInfo)
-            Text("\(size / 1_048_576)MB")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Button {
-                Task { await viewModel.deleteLLMModel() }
-            } label: {
-                Image(systemName: "trash")
-                    .font(.body)
-                    .foregroundColor(.red)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-        }
-    }
-
-    private var llmModelNotDownloadedRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                Text("\(viewModel.llmModelInfo.displayName) 模型未下载")
-                    .font(.body)
-            }
-            llmDownloadAddressRow
-            Divider()
-            llmActionButtonsRow
-        }
-    }
-
-    private var llmDownloadAddressRow: some View {
-        let msURL = viewModel.llmModelInfo.modelscopeDownloadURL ?? ""
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("下载地址")
-                .font(.subheadline)
-                .foregroundColor(.primary)
-            HStack(spacing: 4) {
-                Text(msURL)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.blue)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .onTapGesture {
-                        UIPasteboard.general.string = msURL
-                    }
-                Button {
-                    UIPasteboard.general.string = msURL
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 10))
-                        .foregroundColor(.blue)
-                }
-            }
-        }
-    }
-
-    private func llmDownloadingRow(_ progress: Double) -> some View {
-        let isImport = llmModelManager.activeSource == .import_
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                ProgressView()
-                Text(isImport ? "导入中..." : "下载中...")
-                Spacer()
-                if !isImport {
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-                Button {
-                    viewModel.cancelLLMDownload()
-                } label: {
-                    Text("取消").foregroundColor(.red)
-                }
-                .buttonStyle(.borderless)
-            }
-            if !isImport {
-                ProgressView(value: progress)
-            }
-        }
-    }
-
-    private func llmImportingRow(_ progress: Double) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                ProgressView()
-                Text("导入中...")
-                Spacer()
-                if progress > 0 {
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-                Button {
-                    viewModel.cancelLLMDownload()
-                } label: {
-                    Text("取消").foregroundColor(.red)
-                }
-                .buttonStyle(.borderless)
-            }
-            if progress > 0 {
-                ProgressView(value: progress)
-            }
-        }
-    }
-
-    private func llmDownloadFailedRow(_ error: String) -> some View {
-        let isImport = llmModelManager.activeSource == .import_
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.red)
-                Text(isImport ? "导入失败" : "下载失败")
-                    .font(.subheadline)
-                    .foregroundColor(.red)
-            }
-            Text(error)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            llmDownloadAddressRow
-            Divider()
-            HStack(spacing: 12) {
-                Button {
-                    Log.llm("[LLM] 用户点击重试下载")
-                    viewModel.startLLMFromModelScope()
-                } label: {
-                    Label("重试", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .font(.subheadline)
-                .disabled(llmModelManager.isDownloading)
-                Spacer()
-                Button {
-                    Log.llm("[SettingsView] LLM上传按钮点击(失败行)")
-                    modelFilePickerTarget = .llmModel
-                } label: {
-                    Label("上传", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.borderless)
-                .font(.subheadline)
-            }
-        }
-    }
-
-    private var llmActionButtonsRow: some View {
-        HStack(spacing: 12) {
-            Button {
-                viewModel.startLLMFromModelScope()
-            } label: {
-                Label("下载", systemImage: "square.and.arrow.down")
-            }
-            .buttonStyle(.borderless)
-            .font(.subheadline)
-            .disabled(llmModelManager.isDownloading)
-
-            Spacer()
-
-            Button {
-                Log.llm("[SettingsView] LLM上传按钮点击(操作行)")
-                modelFilePickerTarget = .llmModel
-            } label: {
-                Label("上传", systemImage: "square.and.arrow.up")
-            }
-            .buttonStyle(.borderless)
-            .font(.subheadline)
-            .disabled(llmModelManager.isDownloading)
         }
     }
 
