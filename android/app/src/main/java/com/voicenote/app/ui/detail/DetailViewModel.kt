@@ -15,6 +15,8 @@ import com.voicenote.app.core.asr.OfflineASRClient
 import com.voicenote.app.core.audio.AudioFileManager
 import com.voicenote.app.core.audio.AudioImporter
 import com.voicenote.app.core.di.SettingsDataStore
+import com.voicenote.app.core.llm.LLMConfig
+import com.voicenote.app.core.llm.OnlineLLMClient
 import com.voicenote.app.domain.model.ProcessingStatus
 import com.voicenote.app.domain.model.VoiceRecord
 import com.voicenote.app.domain.repository.VoiceRecordRepository
@@ -52,7 +54,11 @@ data class DetailUiState(
     val showTranscriptPreview: Boolean = false,
     val transcriptPreviewText: String = "",
     val isRetryingTranscript: Boolean = false,
-    val retryProgress: String = ""
+    val retryProgress: String = "",
+    // AI 总结（在线 LLM）
+    val isGeneratingSummary: Boolean = false,
+    val summaryProgressMessage: String = "",
+    val summaryError: String? = null
 )
 
 @HiltViewModel
@@ -68,6 +74,10 @@ class DetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(DetailUiState())
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
+
+    // Online LLM client for summary
+    private val onlineLLMClient = OnlineLLMClient()
+    private var generateSummaryJob: Job? = null
 
     // AudioTrack playback state
     private var audioTrack: AudioTrack? = null
@@ -440,6 +450,8 @@ class DetailViewModel @Inject constructor(
             releasePlayer()
             retryTranscriptJob?.cancel()
             retryTranscriptJob = null
+            generateSummaryJob?.cancel()
+            generateSummaryJob = null
             audioImporter.cancelProcessing(record.id)
             audioFileManager.deleteAudioFile(record.audioFilePath, record.transcriptFilePath)
             recordRepository.deleteRecord(record.id)
@@ -596,6 +608,100 @@ class DetailViewModel @Inject constructor(
         } catch (e: Exception) {
             try { offlineASRClient.reset() } catch (_: Exception) {}
             Result.failure(e)
+        }
+    }
+
+    // --- AI Summary (在线 LLM，手动触发) ---
+
+    fun generateSummary() {
+        val record = _uiState.value.record ?: return
+        if (_uiState.value.isGeneratingSummary) return
+
+        // Read transcript text
+        val transcriptPath = record.transcriptFilePath
+        if (transcriptPath.isBlank()) {
+            _uiState.value = _uiState.value.copy(summaryError = "没有转写文本，无法生成总结")
+            return
+        }
+        val transcriptFile = File(transcriptPath)
+        if (!transcriptFile.exists()) {
+            _uiState.value = _uiState.value.copy(summaryError = "转写文件不存在")
+            return
+        }
+        val transcript: String
+        try {
+            transcript = transcriptFile.readText()
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(summaryError = "读取转写文本失败: ${e.message}")
+            return
+        }
+        if (transcript.isBlank()) {
+            _uiState.value = _uiState.value.copy(summaryError = "转写内容为空，无法生成总结")
+            return
+        }
+
+        generateSummaryJob = viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isGeneratingSummary = true,
+                summaryProgressMessage = "正在连接 LLM...",
+                summaryError = null
+            )
+
+            // Update status to PROCESSING
+            recordRepository.updateSummaryStatus(record.id, ProcessingStatus.PROCESSING)
+
+            try {
+                // Read LLM config
+                val settings = settingsDataStore.settingsFlow.first()
+                val config = LLMConfig(
+                    apiEndpoint = settings.llmApiEndpoint,
+                    apiKey = settings.llmApiKey,
+                    modelName = settings.llmModelName
+                )
+
+                if (!config.isValid) {
+                    recordRepository.updateSummaryStatus(record.id, ProcessingStatus.UNAVAILABLE)
+                    _uiState.value = _uiState.value.copy(
+                        isGeneratingSummary = false,
+                        summaryProgressMessage = "",
+                        summaryError = "请在设置中配置在线大语言模型的 API 地址和密钥"
+                    )
+                    refreshRecord(record.id)
+                    return@launch
+                }
+
+                _uiState.value = _uiState.value.copy(summaryProgressMessage = "正在请求 AI 总结...")
+
+                val result = onlineLLMClient.generateSummary(transcript, config)
+
+                result.onSuccess { summary ->
+                    recordRepository.updateSummary(record.id, summary)
+                    _uiState.value = _uiState.value.copy(
+                        isGeneratingSummary = false,
+                        summaryProgressMessage = "",
+                        summaryError = null
+                    )
+                    refreshRecord(record.id)
+                }.onFailure { e ->
+                    recordRepository.updateSummaryStatus(record.id, ProcessingStatus.UNAVAILABLE)
+                    _uiState.value = _uiState.value.copy(
+                        isGeneratingSummary = false,
+                        summaryProgressMessage = "",
+                        summaryError = e.message ?: "总结生成失败"
+                    )
+                    refreshRecord(record.id)
+                }
+            } catch (e: Exception) {
+                recordRepository.updateSummaryStatus(record.id, ProcessingStatus.UNAVAILABLE)
+                _uiState.value = _uiState.value.copy(
+                    isGeneratingSummary = false,
+                    summaryProgressMessage = "",
+                    summaryError = e.message ?: "总结生成失败"
+                )
+                refreshRecord(record.id)
+            } finally {
+                generateSummaryJob = null
+            }
         }
     }
 

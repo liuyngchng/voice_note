@@ -19,7 +19,11 @@ data class VoiceRecordEntity(
     val audioFilePath: String,
     val transcriptFilePath: String = "",
     val transcriptStatus: String = "PENDING",
-    val createdAt: Long
+    val createdAt: Long,
+    // AI 总结（在线 LLM）
+    val summaryJson: String = "",
+    val summaryStatus: String = "PENDING",
+    val summaryGeneratedAt: Long? = null
 ) {
     companion object {
         private val gson = Gson()
@@ -36,7 +40,10 @@ data class VoiceRecordEntity(
             audioFilePath = record.audioFilePath,
             transcriptFilePath = record.transcriptFilePath,
             transcriptStatus = record.transcriptStatus.name,
-            createdAt = record.createdAt.toEpochMilli()
+            createdAt = record.createdAt.toEpochMilli(),
+            summaryJson = record.summary?.let { gson.toJson(it) } ?: "",
+            summaryStatus = record.summaryStatus.name,
+            summaryGeneratedAt = record.summaryGeneratedAt?.toEpochMilli()
         )
     }
 
@@ -44,6 +51,11 @@ data class VoiceRecordEntity(
         val speakers: List<String> = try {
             gson.fromJson(speakersJson, object : TypeToken<List<String>>() {}.type)
         } catch (_: Exception) { emptyList() }
+
+        val summary: com.voicenote.app.domain.model.RecordSummary? = try {
+            if (summaryJson.isNotBlank()) gson.fromJson(summaryJson, com.voicenote.app.domain.model.RecordSummary::class.java)
+            else null
+        } catch (_: Exception) { null }
 
         return VoiceRecord(
             id = id,
@@ -57,7 +69,10 @@ data class VoiceRecordEntity(
             transcriptStatus = try { com.voicenote.app.domain.model.ProcessingStatus.valueOf(transcriptStatus) } catch (_: Exception) { com.voicenote.app.domain.model.ProcessingStatus.PENDING },
             audioFilePath = audioFilePath,
             transcriptFilePath = transcriptFilePath,
-            createdAt = java.time.Instant.ofEpochMilli(createdAt)
+            createdAt = java.time.Instant.ofEpochMilli(createdAt),
+            summaryStatus = try { com.voicenote.app.domain.model.ProcessingStatus.valueOf(summaryStatus) } catch (_: Exception) { com.voicenote.app.domain.model.ProcessingStatus.PENDING },
+            summary = summary,
+            summaryGeneratedAt = summaryGeneratedAt?.let { java.time.Instant.ofEpochMilli(it) }
         )
     }
 }

@@ -8,6 +8,8 @@ import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.asr.DownloadStatus
 import com.voicenote.app.core.di.AppSettings
 import com.voicenote.app.core.di.SettingsDataStore
+import com.voicenote.app.core.llm.LLMConfig
+import com.voicenote.app.core.llm.OnlineLLMClient
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +42,11 @@ data class SettingsUiState(
     val testResults: List<TestResult> = emptyList(),
     val showResults: Boolean = false,
     val saveCount: Int = 0,
-    val punctModel: ModelInfo = ModelInfo("标点恢复模型", "punct_ct_transformer.onnx", false, 0)
+    val punctModel: ModelInfo = ModelInfo("标点恢复模型", "punct_ct_transformer.onnx", false, 0),
+    // 在线 LLM 配置
+    val llmApiEndpoint: String = "https://api.deepseek.com",
+    val llmApiKey: String = "",
+    val llmModelName: String = "deepseek-chat"
 )
 
 @HiltViewModel
@@ -53,13 +59,17 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private var punctIsDownload = true // true = download, false = import
+    private val onlineLLMClient = OnlineLLMClient()
 
     init {
         viewModelScope.launch {
             settingsDataStore.settingsFlow.collect { settings ->
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    offlineModelQuality = settings.offlineModelQuality
+                    offlineModelQuality = settings.offlineModelQuality,
+                    llmApiEndpoint = settings.llmApiEndpoint,
+                    llmApiKey = settings.llmApiKey,
+                    llmModelName = settings.llmModelName
                 )
             }
         }
@@ -149,16 +159,34 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsDataStore.updateOfflineModelQuality(quality) }
     }
 
+    fun updateLLMApiEndpoint(endpoint: String) {
+        _uiState.value = _uiState.value.copy(llmApiEndpoint = endpoint)
+    }
+
+    fun updateLLMApiKey(apiKey: String) {
+        _uiState.value = _uiState.value.copy(llmApiKey = apiKey)
+    }
+
+    fun updateLLMModelName(modelName: String) {
+        _uiState.value = _uiState.value.copy(llmModelName = modelName)
+    }
+
     fun save() {
         viewModelScope.launch {
             settingsDataStore.updateOfflineModelQuality(_uiState.value.offlineModelQuality)
+            settingsDataStore.updateLLMConfig(
+                endpoint = _uiState.value.llmApiEndpoint,
+                apiKey = _uiState.value.llmApiKey,
+                modelName = _uiState.value.llmModelName
+            )
             _uiState.value = _uiState.value.copy(saveCount = _uiState.value.saveCount + 1)
         }
     }
 
     fun buildSaveSummary(): String {
         val s = _uiState.value
-        return "已保存 · 离线(${s.offlineModelQuality.uppercase()})"
+        val llmInfo = if (s.llmApiKey.isNotBlank()) " · 在线LLM(${s.llmModelName})" else ""
+        return "已保存 · 离线(${s.offlineModelQuality.uppercase()})$llmInfo"
     }
 
     fun testConnection() {
@@ -168,13 +196,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val results = mutableListOf<TestResult>()
 
+            // 1. Test offline ASR
             val modelFile = java.io.File(asrModelManager.modelFilePath(
                 com.voicenote.app.core.asr.ModelQuality.fromString(state.offlineModelQuality)
             ))
             val tokensFile = java.io.File(asrModelManager.tokensFilePath())
 
-            val success = modelFile.exists() && tokensFile.exists()
-            val message = when {
+            val asrSuccess = modelFile.exists() && tokensFile.exists()
+            val asrMessage = when {
                 !modelFile.exists() -> "离线模型未下载，请先下载"
                 !tokensFile.exists() -> "tokens.txt 缺失，请重新下载模型"
                 else -> "离线 ASR 准备就绪 (${state.offlineModelQuality.uppercase()})"
@@ -182,9 +211,38 @@ class SettingsViewModel @Inject constructor(
 
             results.add(TestResult(
                 name = "语音识别 (离线)",
-                success = success,
-                message = message
+                success = asrSuccess,
+                message = asrMessage
             ))
+
+            // 2. Test online LLM API
+            if (state.llmApiKey.isNotBlank() && state.llmApiEndpoint.isNotBlank()) {
+                val config = LLMConfig(
+                    apiEndpoint = state.llmApiEndpoint,
+                    apiKey = state.llmApiKey,
+                    modelName = state.llmModelName
+                )
+                val llmResult = onlineLLMClient.testConnection(config)
+                llmResult.onSuccess { msg ->
+                    results.add(TestResult(
+                        name = "在线大语言模型",
+                        success = true,
+                        message = msg
+                    ))
+                }.onFailure { e ->
+                    results.add(TestResult(
+                        name = "在线大语言模型",
+                        success = false,
+                        message = e.message ?: "连接失败"
+                    ))
+                }
+            } else {
+                results.add(TestResult(
+                    name = "在线大语言模型",
+                    success = false,
+                    message = "未配置 API 地址或密钥"
+                ))
+            }
 
             _uiState.value = _uiState.value.copy(
                 isTesting = false,

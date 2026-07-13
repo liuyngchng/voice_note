@@ -68,4 +68,20 @@ class VoiceRecordRepositoryImpl @Inject constructor(
 
     override suspend fun getAllTitles(): List<String> =
         voiceRecordDao.getAllTitles()
+
+    override suspend fun updateSummary(id: Long, summary: com.voicenote.app.domain.model.RecordSummary) {
+        val entity = voiceRecordDao.getById(id) ?: return
+        val gson = com.google.gson.Gson()
+        val summaryJson = gson.toJson(summary)
+        voiceRecordDao.updateSummary(
+            id = id,
+            summaryJson = summaryJson,
+            summaryStatus = com.voicenote.app.domain.model.ProcessingStatus.COMPLETED.name,
+            summaryGeneratedAt = java.time.Instant.now().toEpochMilli()
+        )
+    }
+
+    override suspend fun updateSummaryStatus(id: Long, status: com.voicenote.app.domain.model.ProcessingStatus) {
+        voiceRecordDao.updateSummaryStatus(id, status.name)
+    }
 }

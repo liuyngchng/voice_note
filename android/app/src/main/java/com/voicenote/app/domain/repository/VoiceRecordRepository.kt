@@ -17,4 +17,6 @@ interface VoiceRecordRepository {
     suspend fun updateAudioFilePath(id: Long, path: String, endTime: java.time.Instant)
     suspend fun deleteRecord(id: Long)
     suspend fun getAllTitles(): List<String>
+    suspend fun updateSummary(id: Long, summary: com.voicenote.app.domain.model.RecordSummary)
+    suspend fun updateSummaryStatus(id: Long, status: com.voicenote.app.domain.model.ProcessingStatus)
 }

@@ -67,6 +67,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -146,7 +148,7 @@ fun DetailScreen(
             else -> {
                 val record = uiState.record!!
                 Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-                    // Segmented tab selector — 2 tabs only
+                    // Segmented tab selector — 3 tabs
                     SingleChoiceSegmentedButtonRow(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -155,13 +157,18 @@ fun DetailScreen(
                         SegmentedButton(
                             selected = selectedTab == 0,
                             onClick = { selectedTab = 0 },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3)
                         ) { Text("音频") }
                         SegmentedButton(
                             selected = selectedTab == 1,
                             onClick = { selectedTab = 1 },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3)
                         ) { Text("转写") }
+                        SegmentedButton(
+                            selected = selectedTab == 2,
+                            onClick = { selectedTab = 2 },
+                            shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3)
+                        ) { Text("总结") }
                     }
 
                     when (selectedTab) {
@@ -185,6 +192,13 @@ fun DetailScreen(
                             onCancel = viewModel::cancelRetryTranscript,
                             onShareTranscript = viewModel::shareTranscript,
                             onPreview = viewModel::openTranscriptPreview
+                        )
+                        2 -> SummaryTab(
+                            record = record,
+                            isGenerating = uiState.isGeneratingSummary,
+                            progressMessage = uiState.summaryProgressMessage,
+                            errorMessage = uiState.summaryError,
+                            onGenerate = viewModel::generateSummary
                         )
                     }
                 }
@@ -524,6 +538,219 @@ private fun TranscriptTab(
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("导出")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Tab 2: Summary (在线 LLM，手动触发)
+
+@Composable
+private fun SummaryTab(
+    record: VoiceRecord,
+    isGenerating: Boolean,
+    progressMessage: String,
+    errorMessage: String?,
+    onGenerate: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        when {
+            // Generating
+            isGenerating -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator()
+                        Text(
+                            progressMessage.ifBlank { "正在生成总结..." },
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+            }
+            // Error
+            errorMessage != null && record.summary == null -> {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            errorMessage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+            // Summary exists
+            record.summary != null -> {
+                val summary = record.summary!!
+                val isEmpty = summary.topics.isEmpty()
+                    && summary.conclusions.isEmpty()
+                    && summary.todos.isEmpty()
+                    && summary.nextSteps.isEmpty()
+
+                if (isEmpty) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "未能提取到有效总结内容\n转写文本可能过短或信息不足",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    if (summary.topics.isNotEmpty()) {
+                        SummarySection("议题", summary.topics, MaterialTheme.colorScheme.primary)
+                    }
+                    if (summary.conclusions.isNotEmpty()) {
+                        SummarySection("结论", summary.conclusions, MaterialTheme.colorScheme.tertiary)
+                    }
+                    if (summary.todos.isNotEmpty()) {
+                        SummaryTodoSection(summary.todos)
+                    }
+                    if (summary.nextSteps.isNotEmpty()) {
+                        SummarySection("后续步骤", summary.nextSteps, MaterialTheme.colorScheme.secondary)
+                    }
+                }
+
+                // Generated timestamp
+                record.summaryGeneratedAt?.let { time ->
+                    val formatter = DateTimeFormatter.ofPattern("MM月dd日 HH:mm").withZone(ZoneId.systemDefault())
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "生成于 ${formatter.format(time)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                }
+            }
+            // No summary yet
+            else -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "暂无总结内容",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+
+        // Generate button — always shown when transcript is completed/unavailable
+        if (record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.COMPLETED
+            || record.transcriptStatus == com.voicenote.app.domain.model.ProcessingStatus.UNAVAILABLE
+        ) {
+            HorizontalDivider()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                TextButton(
+                    onClick = onGenerate,
+                    enabled = !isGenerating
+                ) {
+                    if (isGenerating) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("生成中...")
+                    } else {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("生成总结")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummarySection(title: String, items: List<String>, color: androidx.compose.ui.graphics.Color) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Canvas(modifier = Modifier.size(8.dp)) {
+                    drawCircle(color = color)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            items.forEach { item ->
+                Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                    Text("• ", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Text(item, style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryTodoSection(todos: List<com.voicenote.app.domain.model.TodoItem>) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Canvas(modifier = Modifier.size(8.dp)) {
+                    drawCircle(color = Color(0xFFFF9800)) // orange
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("待办", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            todos.forEach { todo ->
+                Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                    Text("• ", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Column {
+                        Text(todo.task, style = MaterialTheme.typography.bodyMedium)
+                        if (todo.owner.isNotBlank() || todo.deadline.isNotBlank()) {
+                            val meta = listOfNotNull(
+                                if (todo.owner.isNotBlank()) todo.owner else null,
+                                if (todo.deadline.isNotBlank()) todo.deadline else null
+                            ).joinToString(" · ")
+                            Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                        }
                     }
                 }
             }
