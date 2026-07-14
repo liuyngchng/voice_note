@@ -206,24 +206,30 @@ final class DetailViewModel: ObservableObject {
         guard !isGeneratingSummary else { return }
         guard let id = currentRecordId else { return }
 
+        let repository = container.recordRepository
+
         // 1. 获取转写文本
         let transcript = transcriptText ?? ""
         guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             summaryError = "没有转写文本，无法生成总结"
+            Task { try? await repository.updateSummaryStatus(id, status: .unavailable) }
+            refresh()
             return
         }
         guard transcript != "暂时无法获取转写内容" else {
             summaryError = "转写未成功，无法生成总结"
+            Task { try? await repository.updateSummaryStatus(id, status: .unavailable) }
+            refresh()
             return
         }
 
         // 2. 检查 LLM 配置
         guard !OnlineLLMClient.apiKey.isEmpty else {
             summaryError = "请在设置中配置在线大语言模型的 API Key"
+            Task { try? await repository.updateSummaryStatus(id, status: .unavailable) }
+            refresh()
             return
         }
-
-        let repository = container.recordRepository
 
         Log.llm("[总结] 用户触发在线总结生成: transcript=\(transcript.count) chars")
         isGeneratingSummary = true

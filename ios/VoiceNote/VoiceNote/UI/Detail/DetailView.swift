@@ -302,6 +302,18 @@ struct DetailView: View {
                     .frame(maxWidth: .infinity)
                 }
 
+                // 兜底：summaryError 有值但状态未更新时也显示错误
+                if let error = viewModel.summaryError,
+                   record.summaryStatus != .unavailable,
+                   record.summaryStatus != .processing {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                }
+
                 // 手动触发按钮：转写完成后可生成总结
                 if record.transcriptStatus == .completed
                     || record.transcriptStatus == .unavailable
