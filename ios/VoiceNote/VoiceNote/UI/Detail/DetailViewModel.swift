@@ -16,6 +16,8 @@ final class DetailViewModel: ObservableObject {
     @Published var summaryError: String?
     /// 总结导出文件 URL（设置后触发分享 sheet）
     @Published var summaryExportURL: URL?
+    /// 重新生成确认对话框
+    @Published var showRegenerateConfirm = false
 
     @Published var audioPlayer = AudioPlayer()
 
