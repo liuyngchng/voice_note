@@ -266,14 +266,6 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Button(
-                    onClick = viewModel::save,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("保存", style = MaterialTheme.typography.titleSmall)
-                }
-
-                Button(
                     onClick = viewModel::testConnection,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     enabled = !uiState.isTesting,
@@ -293,6 +285,14 @@ fun SettingsScreen(
                     } else {
                         Text("测试连接")
                     }
+                }
+
+                Button(
+                    onClick = viewModel::save,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("保存", style = MaterialTheme.typography.titleSmall)
                 }
             }
 
