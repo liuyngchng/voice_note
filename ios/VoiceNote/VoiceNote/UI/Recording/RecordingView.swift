@@ -287,6 +287,8 @@ private struct AudioWaveformView: View, Equatable {
         }
         .frame(height: maxHeight)
         .frame(maxWidth: .infinity, alignment: .center)
+        // 单个父级线性动画替代 42 个独立弹簧动画，大幅降低主线程压力
+        .animation(.linear(duration: 0.22), value: levels)
     }
 
     private func levelForBar(_ index: Int) -> Float {
@@ -311,7 +313,6 @@ private struct WaveformBar: View {
         Capsule()
             .fill(colorForLevel(level))
             .frame(width: 3, height: scaledHeight)
-            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: level)
     }
 
     private func colorForLevel(_ level: Float) -> Color {

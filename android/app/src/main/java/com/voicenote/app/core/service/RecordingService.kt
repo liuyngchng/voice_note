@@ -117,6 +117,9 @@ class RecordingService : Service() {
         private val _statusMessage = MutableStateFlow("")
         val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
+        private val _audioLevel = MutableStateFlow(0f)
+        val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
+
         private var durationJob: Job? = null
         private var currentRecordId: Long = 0
     }
@@ -326,6 +329,9 @@ class RecordingService : Service() {
                 audioCapture.startCapture().collect { audioData ->
                     audioFileManager.writeAudioChunk(audioData)
 
+                    // Compute and publish real-time audio level for waveform
+                    _audioLevel.value = computeAudioLevel(audioData)
+
                     if (asrReady) {
                         if (vadActive) {
                             // ── VAD path: feed audio to VAD, decode only speech segments ──
@@ -415,6 +421,22 @@ class RecordingService : Service() {
         }
     }
 
+
+    /** Compute RMS audio level from PCM data (16kHz/16bit/mono → [0, 1]) */
+    private fun computeAudioLevel(pcmData: ByteArray): Float {
+        if (pcmData.size < 2) return 0f
+        val sampleCount = pcmData.size / 2
+        var sumSquares = 0.0
+        for (i in 0 until sampleCount) {
+            val lo = pcmData[i * 2].toInt() and 0xFF
+            val hi = pcmData[i * 2 + 1].toInt()
+            val sample = ((hi shl 8) or lo).toShort()
+            val normalized = sample / 32768.0
+            sumSquares += normalized * normalized
+        }
+        val rms = kotlin.math.sqrt(sumSquares / sampleCount)
+        return minOf(1f, (rms * 12.0).toFloat())
+    }
 
     private fun concatenateChunks(chunks: List<ByteArray>): ByteArray {
         val totalSize = chunks.sumOf { it.size }

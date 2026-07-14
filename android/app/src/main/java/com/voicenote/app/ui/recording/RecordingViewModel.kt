@@ -36,7 +36,8 @@ data class RecordingUiState(
     val statusMessage: String = "",
     val error: String? = null,
     val showBatteryOptDialog: Boolean = false,
-    val batteryOptimizationDisabled: Boolean = false
+    val batteryOptimizationDisabled: Boolean = false,
+    val audioLevelHistory: List<Float> = emptyList()
 )
 
 @HiltViewModel
@@ -187,6 +188,19 @@ class RecordingViewModel @Inject constructor(
         viewModelScope.launch {
             RecordingService.statusMessage.collect { msg ->
                 _uiState.value = _uiState.value.copy(statusMessage = msg)
+            }
+        }
+        // Accumulate audio level history for waveform visualization
+        viewModelScope.launch {
+            RecordingService.audioLevel.collect { level ->
+                val current = _uiState.value
+                val history = current.audioLevelHistory.toMutableList()
+                history.add(level)
+                // Keep last 50 samples (~10 seconds at 5Hz)
+                if (history.size > 50) {
+                    history.removeAt(0)
+                }
+                _uiState.value = current.copy(audioLevelHistory = history)
             }
         }
     }

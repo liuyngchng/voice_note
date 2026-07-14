@@ -6,7 +6,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -54,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlin.math.sqrt
 
 private val RecordingRed = Color(0xFFD32F2F)
 
@@ -143,6 +146,14 @@ private fun RecordingContent(
     Column(modifier = modifier.fillMaxSize()) {
         // Recording indicator — pulsing red dot + duration
         RecordingIndicator(durationSeconds = uiState.durationSeconds)
+
+        // Audio waveform visualization (aligned with iOS AudioWaveformView)
+        WaveformView(
+            levels = uiState.audioLevelHistory,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
 
         // Title / memo metadata
         if (uiState.title.isNotBlank()) {
@@ -312,6 +323,67 @@ private fun RecordingIndicator(durationSeconds: Long) {
             )
         }
     }
+}
+
+// MARK: - Audio waveform visualization
+
+private const val BAR_COUNT = 42
+private const val MAX_BAR_HEIGHT_DP = 44f
+private const val MIN_BAR_HEIGHT_DP = 4f
+private const val BAR_WIDTH_DP = 3f
+
+@Composable
+private fun WaveformView(
+    levels: List<Float>,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.height(48.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        for (i in 0 until BAR_COUNT) {
+            val historyIndex = levels.size - BAR_COUNT + i
+            val rawLevel = if (historyIndex >= 0 && historyIndex < levels.size) {
+                maxOf(0.03f, levels[historyIndex])
+            } else {
+                0.03f // minimum height so waveform is always visible
+            }
+            WaveformBar(level = rawLevel)
+            if (i < BAR_COUNT - 1) {
+                Spacer(modifier = Modifier.width(2.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WaveformBar(level: Float) {
+    // Scale with sqrt curve to boost mid/low visual height (matching iOS)
+    val boosted = sqrt(maxOf(0f, level))
+    val targetHeight = maxOf(MIN_BAR_HEIGHT_DP, boosted * MAX_BAR_HEIGHT_DP)
+
+    // Smooth animation — single per-bar animation using animateFloatAsState
+    // is efficient because Compose skips bars whose target hasn't changed
+    val animatedHeight by animateFloatAsState(
+        targetValue = targetHeight,
+        animationSpec = tween(durationMillis = 220),
+        label = "barHeight"
+    )
+
+    val barColor = when {
+        level < 0.25f -> Color(0xFF4CAF50)  // green
+        level < 0.50f -> Color(0xFFFFEB3B)  // yellow
+        else           -> Color(0xFFF44336)  // red
+    }
+
+    Box(
+        modifier = Modifier
+            .width(BAR_WIDTH_DP.dp)
+            .height(animatedHeight.dp)
+            .clip(RoundedCornerShape(50))
+            .background(barColor)
+    )
 }
 
 private fun formatDuration(seconds: Long): String {

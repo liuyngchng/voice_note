@@ -235,7 +235,7 @@ private struct RootView: View {
 
     private var homeScreen: some View {
         HomeView(
-            viewModel: HomeViewModel(container: container),
+            container: container,
             modelStatus: appState.modelStatus,
             modelLoadingMessage: appState.modelLoadingMessage,
             onNewRecord: { showRecording = true },

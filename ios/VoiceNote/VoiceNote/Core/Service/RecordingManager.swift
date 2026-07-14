@@ -57,6 +57,9 @@ final class RecordingManager: ObservableObject {
     private var audioDataWritable: ((Data) -> Void)?
     private var batteryWarningShown = false
 
+    /// 串行队列专门用于音频文件写入，避免阻塞主线程导致波形卡顿
+    private let fileWriteQueue = DispatchQueue(label: "com.voicenote.filewrite", qos: .userInitiated)
+
     init(container: AppContainer) {
         self.container = container
     }
@@ -176,17 +179,21 @@ final class RecordingManager: ObservableObject {
                 var totalBytes = 0
                 var lastVadDecodeTime = Date()
 
-                // 读取一次 MainActor 状态
+                // 一次性读取 MainActor 状态，避免每次循环都 hop 到主线程
                 let vadActive = await MainActor.run { self.vadActive }
                 let chunkDuration = await MainActor.run { self.chunkDurationSeconds }
+                // 捕获写文件句柄 (FileHandle 线程安全，可在后台队列使用)
+                let writeFileHandle = await MainActor.run { self.currentFileHandle }
 
                 for try await audioData in stream {
                     // 协作式取消：点击结束按钮后可快速退出循环
                     try Task.checkCancellation()
 
-                    // 写文件（closure 通过 MainActor 获取）
-                    await MainActor.run { [audioData] in
-                        self.audioDataWritable?(audioData)
+                    // 写文件到后台队列，不阻塞主线程（之前 await MainActor.run 会串行化到主线程）
+                    if let fh = writeFileHandle {
+                        self.fileWriteQueue.async { [audioData] in
+                            try? fh.write(contentsOf: audioData)
+                        }
                     }
                     totalBytes += audioData.count
 
@@ -196,7 +203,7 @@ final class RecordingManager: ObservableObject {
                     let rms = sqrt(sumSquares / Float(floats.count))
                     let level = min(1.0, rms * 12.0)
 
-                    // 更新波形到 MainActor
+                    // 更新波形到 MainActor（必须：@Published 需要主线程）
                     await MainActor.run { [level] in
                         self.audioLevel = level
                     }
