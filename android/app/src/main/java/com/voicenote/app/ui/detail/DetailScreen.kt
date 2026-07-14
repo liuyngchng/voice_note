@@ -723,8 +723,6 @@ private fun SummaryTab(
                     enabled = !isGenerating
                 ) {
                     if (isGenerating) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text("生成中...")
                     } else {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
