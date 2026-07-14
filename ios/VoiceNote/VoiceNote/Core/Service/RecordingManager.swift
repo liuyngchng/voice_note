@@ -187,7 +187,7 @@ final class RecordingManager: ObservableObject {
             vadDecodeTask = Task.detached(priority: .utility) { [weak self] in
                 guard let self else { return }
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(3))
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
                     guard !Task.isCancelled else { break }
 
                     let segments = await offlineClientForVad.vadDecodeSpeechSegments()
