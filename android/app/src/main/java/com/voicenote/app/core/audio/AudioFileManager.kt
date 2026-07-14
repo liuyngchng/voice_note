@@ -29,6 +29,9 @@ class AudioFileManager @Inject constructor(
     /** Last time FileDescriptor.sync() was called. */
     private var lastSyncTimeMs: Long = 0
 
+    /** Set when a write to the output stream fails (e.g. disk full). */
+    private var writeError: String? = null
+
     // ── Recording lifecycle ──────────────────────────────────────────────────
 
     fun startNewRecording(recordId: Long, startTime: Instant) {
@@ -41,6 +44,7 @@ class AudioFileManager @Inject constructor(
         wavFile = wav
         dataBytesWritten = 0
         lastSyncTimeMs = System.currentTimeMillis()
+        writeError = null
 
         // Write initial WAV header with dataSize=0 — will be patched in finalizeRecording()
         outputStream = FileOutputStream(wav)
@@ -50,15 +54,23 @@ class AudioFileManager @Inject constructor(
     fun getCurrentFilePath(): String = wavFile?.absolutePath ?: ""
 
     fun writeAudioChunk(data: ByteArray) {
-        outputStream?.write(data)
-        dataBytesWritten += data.size
+        try {
+            outputStream?.write(data)
+            dataBytesWritten += data.size
 
-        // Periodic fsync: every ~30 seconds to bound data loss on crash
-        val now = System.currentTimeMillis()
-        if (now - lastSyncTimeMs >= SYNC_INTERVAL_MS) {
-            flushAndCheckpoint()
+            // Periodic fsync: every ~30 seconds to bound data loss on crash
+            val now = System.currentTimeMillis()
+            if (now - lastSyncTimeMs >= SYNC_INTERVAL_MS) {
+                flushAndCheckpoint()
+            }
+        } catch (e: java.io.IOException) {
+            writeError = "Disk write failed: ${e.message}"
+            Log.e(TAG, writeError!!, e)
         }
     }
+
+    /** Whether a write error has occurred (e.g. disk full). */
+    fun hasWriteError(): Boolean = writeError != null
 
     /**
      * Force-flush buffered data to disk and return the number of PCM data bytes
@@ -199,14 +211,31 @@ class AudioFileManager @Inject constructor(
     }
 
     private fun patchWavHeader(wav: File, dataSize: Long) {
-        RandomAccessFile(wav, "rw").use { raf ->
-            val safeDataSize = dataSize.coerceIn(0, 0xFFFFFFFFL)
-            // RIFF size at offset 4
-            raf.seek(4)
-            raf.write(intToLittleEndian((safeDataSize + 36).coerceIn(0, 0xFFFFFFFFL).toInt()))
-            // data chunk size at offset 40
-            raf.seek(40)
-            raf.write(intToLittleEndian(safeDataSize.toInt()))
+        val safeDataSize = dataSize.coerceIn(0, 0xFFFFFFFFL)
+        try {
+            RandomAccessFile(wav, "rw").use { raf ->
+                // RIFF size at offset 4
+                raf.seek(4)
+                raf.write(intToLittleEndian((safeDataSize + 36).coerceIn(0, 0xFFFFFFFFL).toInt()))
+                // data chunk size at offset 40
+                raf.seek(40)
+                raf.write(intToLittleEndian(safeDataSize.toInt()))
+            }
+        } catch (e: java.io.IOException) {
+            // Retry once after gc/trim
+            Log.w(TAG, "WAV header patch failed, retrying: ${e.message}")
+            try {
+                System.gc()
+                RandomAccessFile(wav, "rw").use { raf ->
+                    raf.seek(4)
+                    raf.write(intToLittleEndian((safeDataSize + 36).coerceIn(0, 0xFFFFFFFFL).toInt()))
+                    raf.seek(40)
+                    raf.write(intToLittleEndian(safeDataSize.toInt()))
+                }
+            } catch (e2: java.io.IOException) {
+                Log.e(TAG, "WAV header patch retry also failed: ${e2.message}. " +
+                    "File may have incorrect header but PCM data is preserved.")
+            }
         }
     }
 

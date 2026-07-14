@@ -1,5 +1,6 @@
 package com.voicenote.app.core.service
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -74,6 +75,9 @@ class RecordingService : Service() {
     private var wakeLockStartTime = 0L
     private var diskCheckJob: Job? = null
     private var checkpointJob: Job? = null
+    private var pendingOverlap = ByteArray(0)  // last 2s audio for non-VAD overlap
+    private var thermalWarningShown = false
+    private var asrWasAvailable = false  // track model release during recording
     private val gson = Gson()
 
     companion object {
@@ -93,6 +97,7 @@ class RecordingService : Service() {
         // - Transcript file appends incrementally; no full-file re-decode needed.
         private const val DECODE_INTERVAL_MS = 5_000L
         private const val RECENT_CHAR_WINDOW = 100      // scrolling subtitle window
+        private const val OVERLAP_BYTES = 32000         // 2s overlap at 16kHz/16bit/mono
 
         // Long-recording optimization
         private const val DISK_CHECK_INTERVAL_MS = 300_000L   // 5 minutes
@@ -162,6 +167,8 @@ class RecordingService : Service() {
             _transcriptState.value = ""
             _statusMessage.value = "正在初始化录音服务..."
 
+            thermalWarningShown = false
+
             // Acquire wake lock — held for entire recording to prevent CPU sleep
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
@@ -182,18 +189,23 @@ class RecordingService : Service() {
             }
 
             // Initialize audio file — detect and resume incomplete recording
-            val existingWavPath = audioFileManager.getCurrentFilePath()
+            val audioDir = File(filesDir, "audio/record_$recordId")
+            // 1) Check in-memory state (same-process restart)
+            // 2) On process restart, scan filesystem for existing WAV files
+            val existingWavPath = audioFileManager.getCurrentFilePath().ifBlank {
+                val wavFiles = audioDir.listFiles { f -> f.extension == "wav" && f.length() > 44 }
+                wavFiles?.firstOrNull()?.absolutePath ?: ""
+            }
             val resumed = if (existingWavPath.isNotBlank()) {
-                // Service was killed and restarted — attempt to resume
-                Log.i(TAG, "Attempting to resume: $existingWavPath")
+                Log.i(TAG, "Attempting to resume existing recording: $existingWavPath")
+                _statusMessage.value = "正在恢复上次录音..."
                 audioFileManager.resumeRecording(recordId, existingWavPath)
             } else {
                 // Check for orphaned checkpoint from a previous crash
                 val checkpointFile = File(filesDir, "checkpoints/record_${recordId}.json")
                 if (checkpointFile.exists()) {
                     val checkpoint = gson.fromJson(checkpointFile.readText(), RecordingCheckpoint::class.java)
-                    // Try to find the existing WAV file
-                    val audioDir = File(filesDir, "audio/record_$recordId")
+                    // Try to find the existing WAV file (may have been moved/renamed)
                     val wavFiles = audioDir.listFiles { f -> f.extension == "wav" }
                     if (wavFiles != null && wavFiles.isNotEmpty()) {
                         Log.i(TAG, "Recovering from orphaned checkpoint: ${wavFiles[0].absolutePath}")
@@ -257,6 +269,7 @@ class RecordingService : Service() {
                 try {
                     offlineASRClient.ensureRecognizer(currentOfflineModelQuality)
                     asrReady = true
+                    asrWasAvailable = true
                     Log.i(TAG, "Offline ASR recognizer ready")
                     // Init VAD — bundled in APK assets, copy to storage if needed
                     asrModelManager.ensureVadModelAvailable()
@@ -318,6 +331,7 @@ class RecordingService : Service() {
                 while (isActive) {
                     delay(CHECKPOINT_INTERVAL_MS)
                     saveCheckpoint()
+                    checkThermalStatus()
                 }
             }
 
@@ -345,6 +359,7 @@ class RecordingService : Service() {
                                     appendToTranscript(text)
                                     appendTranscriptChunk(text + "\n")
                                 }
+                                checkAsrAvailabilityLost()
                                 if (segments.isNotEmpty()) {
                                     val full = mutableTranscript.toString()
                                     _transcriptState.value = full.takeLast(RECENT_CHAR_WINDOW)
@@ -362,9 +377,22 @@ class RecordingService : Service() {
                                 lastDecodeTime = elapsed
                                 if (pendingChunks.isNotEmpty()) {
                                     val newAudio = concatenateChunks(pendingChunks)
+                                    // Save tail for next window's overlap (last 2s)
+                                    val tailForOverlap = if (newAudio.size > OVERLAP_BYTES)
+                                        newAudio.copyOfRange(newAudio.size - OVERLAP_BYTES, newAudio.size)
+                                    else newAudio
                                     pendingChunks.clear()
 
-                                    val result = offlineASRClient.processPCMChunk(newAudio)
+                                    // Prepend previous window's overlap for continuity
+                                    val audioWithOverlap = if (pendingOverlap.isNotEmpty()) {
+                                        ByteArray(pendingOverlap.size + newAudio.size).apply {
+                                            System.arraycopy(pendingOverlap, 0, this, 0, pendingOverlap.size)
+                                            System.arraycopy(newAudio, 0, this, pendingOverlap.size, newAudio.size)
+                                        }
+                                    } else newAudio
+                                    pendingOverlap = tailForOverlap
+
+                                    val result = offlineASRClient.processPCMChunk(audioWithOverlap)
                                     result.onSuccess { text ->
                                         if (text.isNotBlank()) {
                                             appendToTranscript(text)
@@ -375,6 +403,7 @@ class RecordingService : Service() {
                                         }
                                     }.onFailure { e ->
                                         Log.w(TAG, "Offline decode failed: ${e.message}")
+                                        checkAsrAvailabilityLost()
                                     }
                                 }
                             }
@@ -393,6 +422,7 @@ class RecordingService : Service() {
                             appendToTranscript(text)
                             appendTranscriptChunk(text + "\n")
                         }
+                        checkAsrAvailabilityLost()
                         if (segments.isNotEmpty()) {
                             val full = mutableTranscript.toString()
                             _transcriptState.value = full.takeLast(RECENT_CHAR_WINDOW)
@@ -401,7 +431,15 @@ class RecordingService : Service() {
                         try {
                             val finalAudio = concatenateChunks(pendingChunks)
                             pendingChunks.clear()
-                            val result = offlineASRClient.processPCMChunk(finalAudio)
+                            // Prepend overlap for final decode
+                            val audioWithOverlap = if (pendingOverlap.isNotEmpty()) {
+                                ByteArray(pendingOverlap.size + finalAudio.size).apply {
+                                    System.arraycopy(pendingOverlap, 0, this, 0, pendingOverlap.size)
+                                    System.arraycopy(finalAudio, 0, this, pendingOverlap.size, finalAudio.size)
+                                }
+                            } else finalAudio
+                            pendingOverlap = ByteArray(0)
+                            val result = offlineASRClient.processPCMChunk(audioWithOverlap)
                             result.onSuccess { text ->
                                 if (text.isNotBlank()) {
                                     appendToTranscript(text)
@@ -412,6 +450,7 @@ class RecordingService : Service() {
                             }
                         } catch (e: Exception) {
                             Log.w(TAG, "Final pending decode failed: ${e.message}")
+                            checkAsrAvailabilityLost()
                         }
                     }
                 }
@@ -624,7 +663,39 @@ class RecordingService : Service() {
             updateNotification("磁盘空间不足 (剩余 ${usableSpace / 1_048_576}MB)")
             return false
         }
+        if (audioFileManager.hasWriteError()) {
+            _statusMessage.value = "磁盘写入失败，请停止录音"
+            updateNotification("磁盘写入失败，录音已中断")
+            return false
+        }
         return true
+    }
+
+    // ── ASR model availability check (P1) ──────────────────────────────────
+
+    private fun checkAsrAvailabilityLost() {
+        if (asrWasAvailable && !offlineASRClient.isAvailable) {
+            asrWasAvailable = false
+            Log.w(TAG, "ASR model released during recording — transcription stopped")
+            _statusMessage.value = "⚠️ 内存不足，转写已停止（录音继续）"
+            updateNotification("⚠️ 内存不足，转写已停止（录音继续）")
+        }
+    }
+
+    // ── Thermal throttling check (P1) ──────────────────────────────────────
+
+    @SuppressLint("NewApi")
+    private fun checkThermalStatus() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (thermalWarningShown) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val status = pm.currentThermalStatus
+        if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
+            thermalWarningShown = true
+            Log.w(TAG, "设备过热 (thermal=$status)，建议结束录音")
+            _statusMessage.value = "⚠️ 设备过热，建议结束录音"
+            updateNotification("⚠️ 设备过热，建议结束录音")
+        }
     }
 
     // ── Punctuation chunking (P0) ──────────────────────────────────────────
