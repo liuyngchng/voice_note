@@ -51,6 +51,7 @@ data class DetailUiState(
     val showDeleteConfirm: Boolean = false,
     val isDeleting: Boolean = false,
     val isDeleted: Boolean = false,
+    val showRegenerateConfirm: Boolean = false,
     val showTranscriptPreview: Boolean = false,
     val transcriptPreviewText: String = "",
     val isRetryingTranscript: Boolean = false,
@@ -96,18 +97,18 @@ class DetailViewModel @Inject constructor(
 
     fun loadRecord(recordId: Long) {
         viewModelScope.launch {
-            _uiState.value = DetailUiState(isLoading = true)
+            _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 recordRepository.getRecordByIdFlow(recordId).collect { record ->
                     val duration = getFileDuration(record?.audioFilePath)
-                    _uiState.value = DetailUiState(
+                    _uiState.value = _uiState.value.copy(
                         record = record,
                         isLoading = false,
                         playbackDurationFormatted = duration
                     )
                 }
             } catch (e: Exception) {
-                _uiState.value = DetailUiState(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
             }
         }
     }
@@ -443,6 +444,14 @@ class DetailViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
     }
 
+    fun showRegenerateConfirm() {
+        _uiState.value = _uiState.value.copy(showRegenerateConfirm = true)
+    }
+
+    fun dismissRegenerateConfirm() {
+        _uiState.value = _uiState.value.copy(showRegenerateConfirm = false)
+    }
+
     fun deleteRecord() {
         val record = _uiState.value.record ?: return
         viewModelScope.launch {
@@ -474,8 +483,8 @@ class DetailViewModel @Inject constructor(
             return
         }
 
+        _uiState.value = _uiState.value.copy(isRetryingTranscript = true, retryProgress = "", error = null)
         retryTranscriptJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRetryingTranscript = true, retryProgress = "", error = null)
             recordRepository.updateTranscriptStatus(record.id, ProcessingStatus.PROCESSING)
 
             try {
@@ -640,12 +649,12 @@ class DetailViewModel @Inject constructor(
             return
         }
 
+        _uiState.value = _uiState.value.copy(
+            isGeneratingSummary = true,
+            summaryProgressMessage = "正在连接 LLM...",
+            summaryError = null
+        )
         generateSummaryJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(
-                isGeneratingSummary = true,
-                summaryProgressMessage = "正在连接 LLM...",
-                summaryError = null
-            )
 
             // Update status to PROCESSING
             recordRepository.updateSummaryStatus(record.id, ProcessingStatus.PROCESSING)

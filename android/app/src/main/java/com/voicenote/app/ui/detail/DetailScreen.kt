@@ -199,6 +199,7 @@ fun DetailScreen(
                             progressMessage = uiState.summaryProgressMessage,
                             errorMessage = uiState.summaryError,
                             onGenerate = viewModel::generateSummary,
+                            onRegenerateRequested = viewModel::showRegenerateConfirm,
                             onShareSummary = viewModel::shareSummary
                         )
                     }
@@ -227,6 +228,28 @@ fun DetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissDeleteConfirm) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // Regenerate confirmation dialog
+    if (uiState.showRegenerateConfirm) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissRegenerateConfirm,
+            title = { Text("重新生成总结") },
+            text = { Text("已有总结将被覆盖，是否继续？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.dismissRegenerateConfirm()
+                    viewModel.generateSummary()
+                }) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissRegenerateConfirm) {
                     Text("取消")
                 }
             }
@@ -555,6 +578,7 @@ private fun SummaryTab(
     progressMessage: String,
     errorMessage: String?,
     onGenerate: () -> Unit,
+    onRegenerateRequested: () -> Unit,
     onShareSummary: () -> Unit
 ) {
     Column(
@@ -564,6 +588,12 @@ private fun SummaryTab(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        val summary = record.summary
+        val summaryEmpty = summary == null || (summary.topics.isEmpty()
+            && summary.conclusions.isEmpty()
+            && summary.todos.isEmpty()
+            && summary.nextSteps.isEmpty())
+
         when {
             // Generating
             isGenerating -> {
@@ -584,7 +614,7 @@ private fun SummaryTab(
                 }
             }
             // Error
-            errorMessage != null && record.summary == null -> {
+            errorMessage != null && summary == null -> {
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth(),
@@ -612,39 +642,43 @@ private fun SummaryTab(
                     }
                 }
             }
-            // Summary exists
-            record.summary != null -> {
-                val summary = record.summary!!
-                val isEmpty = summary.topics.isEmpty()
-                    && summary.conclusions.isEmpty()
-                    && summary.todos.isEmpty()
-                    && summary.nextSteps.isEmpty()
-
-                if (isEmpty) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "未能提取到有效总结内容\n转写文本可能过短或信息不足",
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                } else {
-                    if (summary.topics.isNotEmpty()) {
-                        SummarySection("议题", summary.topics, MaterialTheme.colorScheme.primary)
-                    }
-                    if (summary.conclusions.isNotEmpty()) {
-                        SummarySection("结论", summary.conclusions, MaterialTheme.colorScheme.tertiary)
-                    }
-                    if (summary.todos.isNotEmpty()) {
-                        SummaryTodoSection(summary.todos)
-                    }
-                    if (summary.nextSteps.isNotEmpty()) {
-                        SummarySection("后续步骤", summary.nextSteps, MaterialTheme.colorScheme.secondary)
-                    }
+            // Summary exists but empty
+            summary != null && summaryEmpty -> {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "未能提取到有效总结内容\n转写文本可能过短或信息不足",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center
+                    )
+                }
+                // Generated timestamp
+                record.summaryGeneratedAt?.let { time ->
+                    val formatter = DateTimeFormatter.ofPattern("MM月dd日 HH:mm").withZone(ZoneId.systemDefault())
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "生成于 ${formatter.format(time)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+                    )
+                }
+            }
+            // Summary exists with content
+            summary != null -> {
+                if (summary.topics.isNotEmpty()) {
+                    SummarySection("议题", summary.topics, MaterialTheme.colorScheme.primary)
+                }
+                if (summary.conclusions.isNotEmpty()) {
+                    SummarySection("结论", summary.conclusions, MaterialTheme.colorScheme.tertiary)
+                }
+                if (summary.todos.isNotEmpty()) {
+                    SummaryTodoSection(summary.todos)
+                }
+                if (summary.nextSteps.isNotEmpty()) {
+                    SummarySection("后续步骤", summary.nextSteps, MaterialTheme.colorScheme.secondary)
                 }
 
                 // Generated timestamp
@@ -683,8 +717,9 @@ private fun SummaryTab(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val hasSummary = summary != null
                 TextButton(
-                    onClick = onGenerate,
+                    onClick = if (hasSummary) onRegenerateRequested else onGenerate,
                     enabled = !isGenerating
                 ) {
                     if (isGenerating) {
@@ -694,11 +729,11 @@ private fun SummaryTab(
                     } else {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("生成总结")
+                        Text(if (hasSummary) "重新生成" else "生成总结")
                     }
                 }
-                // 导出按钮：仅在总结已存在时显示
-                if (record.summary != null) {
+                // 导出按钮：仅在有有效总结内容时显示
+                if (summary != null && !summaryEmpty) {
                     TextButton(onClick = onShareSummary) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
