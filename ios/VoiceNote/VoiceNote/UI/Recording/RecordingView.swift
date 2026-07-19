@@ -82,6 +82,7 @@ struct RecordingView: View {
             } else {
                 // 音频波形可视化
                 AudioWaveformView(levels: viewModel.audioLevelHistory)
+                    .equatable()
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
 
@@ -108,9 +109,7 @@ struct RecordingView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onChange(of: viewModel.transcript) { _ in
-                        withAnimation {
-                            proxy.scrollTo("bottomAnchor", anchor: .bottom)
-                        }
+                        proxy.scrollTo("bottomAnchor", anchor: .bottom)
                     }
                 }
                 .padding(.top, 12)
@@ -270,10 +269,15 @@ private struct NavigationBarTinter: UIViewControllerRepresentable {
 
 // MARK: - 音频波形
 
-private struct AudioWaveformView: View {
+private struct AudioWaveformView: View, Equatable {
     let levels: [Float]
     private let barCount = 42
     private let maxHeight: CGFloat = 48
+
+    /// 仅当 levels 变化时才重绘，避免 transcript 更新触发无意义重建
+    static func == (lhs: AudioWaveformView, rhs: AudioWaveformView) -> Bool {
+        lhs.levels == rhs.levels
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -283,6 +287,8 @@ private struct AudioWaveformView: View {
         }
         .frame(height: maxHeight)
         .frame(maxWidth: .infinity, alignment: .center)
+        // 单个父级线性动画替代 42 个独立弹簧动画，大幅降低主线程压力
+        .animation(.linear(duration: 0.22), value: levels)
     }
 
     private func levelForBar(_ index: Int) -> Float {
@@ -307,7 +313,6 @@ private struct WaveformBar: View {
         Capsule()
             .fill(colorForLevel(level))
             .frame(width: 3, height: scaledHeight)
-            .animation(.spring(response: 0.25, dampingFraction: 0.5), value: level)
     }
 
     private func colorForLevel(_ level: Float) -> Color {

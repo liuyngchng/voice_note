@@ -125,6 +125,7 @@ class OfflineASRClient @Inject constructor(
     // ── Voice Activity Detection ─────────────────────────────────────────────
 
     /** Returns true if VAD was successfully initialized. */
+    @Synchronized
     fun ensureVad(): Boolean {
         if (vadReady) return true
         if (!isNativeAvailable) return false
@@ -212,6 +213,7 @@ class OfflineASRClient @Inject constructor(
     private var punctReady = false
 
     /** Returns true if punctuation model was successfully loaded. */
+    @Synchronized
     fun ensurePunctuation(): Boolean {
         if (punctReady) return true
         if (!isNativeAvailable) return false

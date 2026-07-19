@@ -97,16 +97,22 @@ fun HomeScreen(
                         )
                     }
                     // "+" button — primary action, matches iOS toolbar pattern
+                    // Disabled until the voice model is fully loaded
+                    val isModelReady = uiState.modelStatus == ModelStatus.READY
                     Surface(
-                        onClick = onStartRecording,
+                        onClick = { if (isModelReady) onStartRecording() },
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.15f),
+                        color = MaterialTheme.colorScheme.onPrimary.copy(
+                            alpha = if (isModelReady) 0.15f else 0.05f
+                        ),
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
                         Icon(
                             Icons.Default.Add,
                             contentDescription = "新建录音",
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            tint = MaterialTheme.colorScheme.onPrimary.copy(
+                                alpha = if (isModelReady) 1.0f else 0.3f
+                            ),
                             modifier = Modifier.size(44.dp).padding(10.dp)
                         )
                     }

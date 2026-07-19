@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct HomeView: View {
-    @ObservedObject var viewModel: HomeViewModel
+    @StateObject private var viewModel: HomeViewModel
     let modelStatus: ModelStatus
     let modelLoadingMessage: String?
     let onNewRecord: () -> Void
@@ -10,6 +10,22 @@ struct HomeView: View {
     let onRefreshModelStatus: () -> Void
 
     @State private var isRefreshing = false
+
+    init(container: AppContainer,
+         modelStatus: ModelStatus,
+         modelLoadingMessage: String?,
+         onNewRecord: @escaping () -> Void,
+         onRecordTap: @escaping (UUID) -> Void,
+         onSettingsTap: @escaping () -> Void,
+         onRefreshModelStatus: @escaping () -> Void) {
+        _viewModel = StateObject(wrappedValue: HomeViewModel(container: container))
+        self.modelStatus = modelStatus
+        self.modelLoadingMessage = modelLoadingMessage
+        self.onNewRecord = onNewRecord
+        self.onRecordTap = onRecordTap
+        self.onSettingsTap = onSettingsTap
+        self.onRefreshModelStatus = onRefreshModelStatus
+    }
 
     var body: some View {
         List {

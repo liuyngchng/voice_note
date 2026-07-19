@@ -11,13 +11,8 @@
 		6F3545960D434E4AA85D52D5 /* ASRModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22EA984B8E94E578EA8F067 /* ASRModelManager.swift */; };
 		70364673755A47B383ED9C88 /* PunctuationModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4D8DA3B955443EAA00AE4F /* PunctuationModelManager.swift */; };
 		7524A6CCFA8240DDB03D928A /* ASRTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E16C5B0D7A37408A98E8B747 /* ASRTypes.swift */; };
-		792C0D5B30038C6E0086B344 /* LLMModelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792C0D5630038C6E0086B344 /* LLMModelManager.swift */; };
 		792C0D5C30038C6E0086B344 /* LLMTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792C0D5830038C6E0086B344 /* LLMTypes.swift */; };
-		792C0D5D30038C6E0086B344 /* OfflineLLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792C0D5930038C6E0086B344 /* OfflineLLMClient.swift */; };
-		792C0D5E30038C6E0086B344 /* LlamaBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = 792C0D5A30038C6E0086B344 /* LlamaBridge.mm */; };
 		792C0D6030038CEB0086B344 /* RecordSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 792C0D5F30038CEA0086B344 /* RecordSummary.swift */; };
-		792C0D68300395C60086B344 /* llama.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 792C0D66300395C00086B344 /* llama.xcframework */; };
-		792C0D69300395C60086B344 /* llama.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 792C0D66300395C00086B344 /* llama.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		79336FD32FE40A2200752EE2 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79336FD22FE40A2200752EE2 /* Assets.xcassets */; };
 		79336FD62FE40A2200752EE2 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 79336FD52FE40A2200752EE2 /* Preview Assets.xcassets */; };
 		793370AF2FE40E1800752EE2 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370862FE40E1600752EE2 /* SettingsView.swift */; };
@@ -39,6 +34,7 @@
 		793370C42FE40E1800752EE2 /* RecordingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AB2FE40E1700752EE2 /* RecordingManager.swift */; };
 		793370C52FE40E1800752EE2 /* RecordRepositoryImpl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370AE2FE40E1700752EE2 /* RecordRepositoryImpl.swift */; };
 		793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793370D02FE40E9000752EE2 /* AudioPlayer.swift */; };
+		796B613D3004FF8900101444 /* OnlineLLMClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 796B613C3004FF8900101444 /* OnlineLLMClient.swift */; };
 		79815C502FE4BD21005AFCD5 /* VoiceNote.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */; };
 		79888F1E2FE7B6DE00B2EF86 /* onnxruntime.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C722FA2A71904AA69777663D /* onnxruntime.xcframework */; };
 		79DC9BE43003A7B400832F6B /* ModelOperationQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DC9BE33003A7B300832F6B /* ModelOperationQueue.swift */; };
@@ -71,7 +67,6 @@
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				792C0D69300395C60086B344 /* llama.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -81,13 +76,8 @@
 /* Begin PBXFileReference section */
 		0C4D8DA3B955443EAA00AE4F /* PunctuationModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PunctuationModelManager.swift; sourceTree = "<group>"; };
 		58186E45AB5B44DCAAB2D85A /* OfflinePunctuationClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflinePunctuationClient.swift; sourceTree = "<group>"; };
-		792C0D5630038C6E0086B344 /* LLMModelManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LLMModelManager.swift; sourceTree = "<group>"; };
-		792C0D5730038C6E0086B344 /* LlamaBridge.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = LlamaBridge.h; sourceTree = "<group>"; };
 		792C0D5830038C6E0086B344 /* LLMTypes.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LLMTypes.swift; sourceTree = "<group>"; };
-		792C0D5930038C6E0086B344 /* OfflineLLMClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OfflineLLMClient.swift; sourceTree = "<group>"; };
-		792C0D5A30038C6E0086B344 /* LlamaBridge.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = LlamaBridge.mm; sourceTree = "<group>"; };
 		792C0D5F30038CEA0086B344 /* RecordSummary.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordSummary.swift; sourceTree = "<group>"; };
-		792C0D66300395C00086B344 /* llama.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = llama.xcframework; path = Libraries/llama.xcframework; sourceTree = "<group>"; };
 		79336FCB2FE40A2000752EE2 /* VoiceNote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceNote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		79336FD22FE40A2200752EE2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		79336FD52FE40A2200752EE2 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
@@ -112,6 +102,7 @@
 		793370AB2FE40E1700752EE2 /* RecordingManager.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordingManager.swift; sourceTree = "<group>"; };
 		793370AE2FE40E1700752EE2 /* RecordRepositoryImpl.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RecordRepositoryImpl.swift; sourceTree = "<group>"; };
 		793370D02FE40E9000752EE2 /* AudioPlayer.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AudioPlayer.swift; sourceTree = "<group>"; };
+		796B613C3004FF8900101444 /* OnlineLLMClient.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = OnlineLLMClient.swift; sourceTree = "<group>"; };
 		79815C4F2FE4BD21005AFCD5 /* VoiceNote.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = VoiceNote.swift; sourceTree = "<group>"; };
 		79DC9BE33003A7B300832F6B /* ModelOperationQueue.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ModelOperationQueue.swift; sourceTree = "<group>"; };
 		79DC9BE73003C13F00832F6B /* silero_vad.onnx */ = {isa = PBXFileReference; lastKnownFileType = file; path = silero_vad.onnx; sourceTree = "<group>"; };
@@ -130,7 +121,6 @@
 			files = (
 				9730040B87D9451D99A16193 /* sherpa-onnx.xcframework in Frameworks */,
 				79888F1E2FE7B6DE00B2EF86 /* onnxruntime.xcframework in Frameworks */,
-				792C0D68300395C60086B344 /* llama.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,11 +144,8 @@
 		792C0D5530038C6E0086B344 /* LLM */ = {
 			isa = PBXGroup;
 			children = (
-				792C0D5630038C6E0086B344 /* LLMModelManager.swift */,
-				792C0D5730038C6E0086B344 /* LlamaBridge.h */,
+				796B613C3004FF8900101444 /* OnlineLLMClient.swift */,
 				792C0D5830038C6E0086B344 /* LLMTypes.swift */,
-				792C0D5930038C6E0086B344 /* OfflineLLMClient.swift */,
-				792C0D5A30038C6E0086B344 /* LlamaBridge.mm */,
 			);
 			path = LLM;
 			sourceTree = "<group>";
@@ -395,7 +382,6 @@
 		79888F232FE7E87000B2EF86 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				792C0D66300395C00086B344 /* llama.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -564,7 +550,6 @@
 				793370B72FE40E1800752EE2 /* AppTheme.swift in Sources */,
 				793370B52FE40E1800752EE2 /* DetailView.swift in Sources */,
 				79DC9BE43003A7B400832F6B /* ModelOperationQueue.swift in Sources */,
-				792C0D5D30038C6E0086B344 /* OfflineLLMClient.swift in Sources */,
 				793370B92FE40E1800752EE2 /* HistoryView.swift in Sources */,
 				793370B82FE40E1800752EE2 /* HistoryViewModel.swift in Sources */,
 				792C0D6030038CEB0086B344 /* RecordSummary.swift in Sources */,
@@ -576,12 +561,11 @@
 				793370B02FE40E1800752EE2 /* SettingsViewModel.swift in Sources */,
 				793370C02FE40E1800752EE2 /* AppContainer.swift in Sources */,
 				793370C42FE40E1800752EE2 /* RecordingManager.swift in Sources */,
+				796B613D3004FF8900101444 /* OnlineLLMClient.swift in Sources */,
 				793370C82FE40E9000752EE2 /* AudioPlayer.swift in Sources */,
 				793370B62FE40E1800752EE2 /* DetailViewModel.swift in Sources */,
-				792C0D5B30038C6E0086B344 /* LLMModelManager.swift in Sources */,
 				793370BA2FE40E1800752EE2 /* RecordRepository.swift in Sources */,
 				793370BE2FE40E1800752EE2 /* PersistenceController.swift in Sources */,
-				792C0D5E30038C6E0086B344 /* LlamaBridge.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

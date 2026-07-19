@@ -110,28 +110,6 @@ final class AppState: ObservableObject {
                 let punctElapsed = Int((CFAbsoluteTimeGetCurrent() - punctStart) * 1000)
                 appLog("app", "[App] ← 标点模型 \(container.offlinePunctuationClient.isAvailable ? "已加载" : "未安装，跳过") (\(punctElapsed)ms)")
 
-                // 4. 预加载 LLM 模型（可选，未下载则跳过）
-                let llmInfo: LLMModelInfo = .qwen2_5_1_5b_q4km
-                if LLMModelManager.isModelDownloaded(llmInfo) {
-                    let llmClient = container.offlineLLMClient
-                    if !llmClient.isAvailable {
-                        do {
-                            await self.updateLoadingMessage("LLM 大语言模型")
-                            let llmStart = CFAbsoluteTimeGetCurrent()
-                            appLog("app", "[App] → 开始加载 LLM 模型...")
-                            try llmClient.ensureModel(llmInfo)
-                            let llmElapsed = Int((CFAbsoluteTimeGetCurrent() - llmStart) * 1000)
-                            appLog("app", "[App] ← LLM 模型预加载完成 (\(llmElapsed)ms)")
-                        } catch {
-                            appLog("app", "[App] ← LLM 模型预加载失败（非致命）: \(error.localizedDescription)")
-                        }
-                    } else {
-                        appLog("app", "[App] LLM 模型已加载，跳过")
-                    }
-                } else {
-                    appLog("app", "[App] LLM 模型未下载，跳过预加载")
-                }
-
                 let totalElapsed = Int((CFAbsoluteTimeGetCurrent() - overallStart) * 1000)
                 await MainActor.run {
                     self.modelStatus = .ready
@@ -257,7 +235,7 @@ private struct RootView: View {
 
     private var homeScreen: some View {
         HomeView(
-            viewModel: HomeViewModel(container: container),
+            container: container,
             modelStatus: appState.modelStatus,
             modelLoadingMessage: appState.modelLoadingMessage,
             onNewRecord: { showRecording = true },

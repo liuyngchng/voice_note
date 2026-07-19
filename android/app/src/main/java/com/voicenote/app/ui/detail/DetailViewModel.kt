@@ -15,6 +15,8 @@ import com.voicenote.app.core.asr.OfflineASRClient
 import com.voicenote.app.core.audio.AudioFileManager
 import com.voicenote.app.core.audio.AudioImporter
 import com.voicenote.app.core.di.SettingsDataStore
+import com.voicenote.app.core.llm.LLMConfig
+import com.voicenote.app.core.llm.OnlineLLMClient
 import com.voicenote.app.domain.model.ProcessingStatus
 import com.voicenote.app.domain.model.VoiceRecord
 import com.voicenote.app.domain.repository.VoiceRecordRepository
@@ -49,10 +51,15 @@ data class DetailUiState(
     val showDeleteConfirm: Boolean = false,
     val isDeleting: Boolean = false,
     val isDeleted: Boolean = false,
+    val showRegenerateConfirm: Boolean = false,
     val showTranscriptPreview: Boolean = false,
     val transcriptPreviewText: String = "",
     val isRetryingTranscript: Boolean = false,
-    val retryProgress: String = ""
+    val retryProgress: String = "",
+    // AI 总结（在线 LLM）
+    val isGeneratingSummary: Boolean = false,
+    val summaryProgressMessage: String = "",
+    val summaryError: String? = null
 )
 
 @HiltViewModel
@@ -68,6 +75,10 @@ class DetailViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(DetailUiState())
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
+
+    // Online LLM client for summary
+    private val onlineLLMClient = OnlineLLMClient()
+    private var generateSummaryJob: Job? = null
 
     // AudioTrack playback state
     private var audioTrack: AudioTrack? = null
@@ -86,18 +97,18 @@ class DetailViewModel @Inject constructor(
 
     fun loadRecord(recordId: Long) {
         viewModelScope.launch {
-            _uiState.value = DetailUiState(isLoading = true)
+            _uiState.value = _uiState.value.copy(isLoading = true)
             try {
                 recordRepository.getRecordByIdFlow(recordId).collect { record ->
                     val duration = getFileDuration(record?.audioFilePath)
-                    _uiState.value = DetailUiState(
+                    _uiState.value = _uiState.value.copy(
                         record = record,
                         isLoading = false,
                         playbackDurationFormatted = duration
                     )
                 }
             } catch (e: Exception) {
-                _uiState.value = DetailUiState(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
             }
         }
     }
@@ -433,6 +444,14 @@ class DetailViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(showDeleteConfirm = false)
     }
 
+    fun showRegenerateConfirm() {
+        _uiState.value = _uiState.value.copy(showRegenerateConfirm = true)
+    }
+
+    fun dismissRegenerateConfirm() {
+        _uiState.value = _uiState.value.copy(showRegenerateConfirm = false)
+    }
+
     fun deleteRecord() {
         val record = _uiState.value.record ?: return
         viewModelScope.launch {
@@ -440,6 +459,8 @@ class DetailViewModel @Inject constructor(
             releasePlayer()
             retryTranscriptJob?.cancel()
             retryTranscriptJob = null
+            generateSummaryJob?.cancel()
+            generateSummaryJob = null
             audioImporter.cancelProcessing(record.id)
             audioFileManager.deleteAudioFile(record.audioFilePath, record.transcriptFilePath)
             recordRepository.deleteRecord(record.id)
@@ -462,8 +483,8 @@ class DetailViewModel @Inject constructor(
             return
         }
 
+        _uiState.value = _uiState.value.copy(isRetryingTranscript = true, retryProgress = "", error = null)
         retryTranscriptJob = viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isRetryingTranscript = true, retryProgress = "", error = null)
             recordRepository.updateTranscriptStatus(record.id, ProcessingStatus.PROCESSING)
 
             try {
@@ -599,6 +620,104 @@ class DetailViewModel @Inject constructor(
         }
     }
 
+    // --- AI Summary (在线 LLM，手动触发) ---
+
+    fun generateSummary() {
+        val record = _uiState.value.record ?: return
+        if (_uiState.value.isGeneratingSummary) return
+
+        // Read transcript text
+        val transcriptPath = record.transcriptFilePath
+        if (transcriptPath.isBlank()) {
+            _uiState.value = _uiState.value.copy(summaryError = "没有转写文本，无法生成总结")
+            return
+        }
+        val transcriptFile = File(transcriptPath)
+        if (!transcriptFile.exists()) {
+            _uiState.value = _uiState.value.copy(summaryError = "转写文件不存在")
+            return
+        }
+        val transcript: String
+        try {
+            transcript = transcriptFile.readText()
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(summaryError = "读取转写文本失败: ${e.message}")
+            return
+        }
+        if (transcript.isBlank()) {
+            _uiState.value = _uiState.value.copy(summaryError = "转写内容为空，无法生成总结")
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            isGeneratingSummary = true,
+            summaryProgressMessage = "正在连接 LLM...",
+            summaryError = null
+        )
+        generateSummaryJob = viewModelScope.launch {
+
+            // Update status to PROCESSING
+            recordRepository.updateSummaryStatus(record.id, ProcessingStatus.PROCESSING)
+
+            try {
+                // Read LLM config
+                val settings = settingsDataStore.settingsFlow.first()
+                val config = LLMConfig(
+                    apiEndpoint = settings.llmApiEndpoint,
+                    apiKey = settings.llmApiKey,
+                    modelName = settings.llmModelName
+                )
+
+                if (!config.isValid) {
+                    recordRepository.updateSummaryStatus(record.id, ProcessingStatus.UNAVAILABLE)
+                    _uiState.value = _uiState.value.copy(
+                        isGeneratingSummary = false,
+                        summaryProgressMessage = "",
+                        summaryError = "请在设置中配置在线大语言模型的 API 地址和密钥"
+                    )
+                    refreshRecord(record.id)
+                    return@launch
+                }
+
+                val result = onlineLLMClient.generateSummary(
+                    transcript = transcript,
+                    config = config,
+                    onProgress = { msg ->
+                        _uiState.value = _uiState.value.copy(summaryProgressMessage = msg)
+                    }
+                )
+
+                result.onSuccess { summary ->
+                    recordRepository.updateSummary(record.id, summary)
+                    _uiState.value = _uiState.value.copy(
+                        isGeneratingSummary = false,
+                        summaryProgressMessage = "",
+                        summaryError = null
+                    )
+                    refreshRecord(record.id)
+                }.onFailure { e ->
+                    recordRepository.updateSummaryStatus(record.id, ProcessingStatus.UNAVAILABLE)
+                    _uiState.value = _uiState.value.copy(
+                        isGeneratingSummary = false,
+                        summaryProgressMessage = "",
+                        summaryError = e.message ?: "总结生成失败"
+                    )
+                    refreshRecord(record.id)
+                }
+            } catch (e: Exception) {
+                recordRepository.updateSummaryStatus(record.id, ProcessingStatus.UNAVAILABLE)
+                _uiState.value = _uiState.value.copy(
+                    isGeneratingSummary = false,
+                    summaryProgressMessage = "",
+                    summaryError = e.message ?: "总结生成失败"
+                )
+                refreshRecord(record.id)
+            } finally {
+                generateSummaryJob = null
+            }
+        }
+    }
+
     fun cancelRetryTranscript() {
         retryTranscriptJob?.cancel()
         retryTranscriptJob = null
@@ -638,6 +757,66 @@ class DetailViewModel @Inject constructor(
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(error = "分享失败")
         }
+    }
+
+    fun shareSummary() {
+        val record = _uiState.value.record ?: return
+        val summary = record.summary ?: return
+        val text = formatSummaryAsText(summary)
+        if (text.isBlank()) return
+
+        val context = getApplication<Application>()
+        try {
+            val fileName = "总结_${record.title.replace("/", "_")}.txt"
+            val file = File(context.cacheDir, fileName)
+            file.writeText(text)
+
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(intent, "分享总结")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(chooser)
+        } catch (e: Exception) {
+            _uiState.value = _uiState.value.copy(error = "分享失败")
+        }
+    }
+
+    private fun formatSummaryAsText(summary: com.voicenote.app.domain.model.RecordSummary): String {
+        val sb = StringBuilder()
+        if (summary.topics.isNotEmpty()) {
+            sb.appendLine("【议题】")
+            summary.topics.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        if (summary.conclusions.isNotEmpty()) {
+            sb.appendLine("【结论】")
+            summary.conclusions.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        if (summary.todos.isNotEmpty()) {
+            sb.appendLine("【待办】")
+            summary.todos.forEach { todo ->
+                var line = "  • ${todo.task}"
+                if (todo.owner.isNotBlank()) line += "（${todo.owner}）"
+                if (todo.deadline.isNotBlank()) line += " 截止: ${todo.deadline}"
+                sb.appendLine(line)
+            }
+            sb.appendLine()
+        }
+        if (summary.nextSteps.isNotEmpty()) {
+            sb.appendLine("【后续步骤】")
+            summary.nextSteps.forEach { sb.appendLine("  • $it") }
+            sb.appendLine()
+        }
+        return sb.toString().trimEnd()
     }
 
     private suspend fun refreshRecord(recordId: Long) {

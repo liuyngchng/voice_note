@@ -14,6 +14,10 @@ final class DetailViewModel: ObservableObject {
     @Published var isGeneratingSummary = false
     @Published var summaryProgressMessage: String?
     @Published var summaryError: String?
+    /// 总结导出文件 URL（设置后触发分享 sheet）
+    @Published var summaryExportURL: URL?
+    /// 重新生成确认对话框
+    @Published var showRegenerateConfirm = false
 
     @Published var audioPlayer = AudioPlayer()
 
@@ -192,36 +196,44 @@ final class DetailViewModel: ObservableObject {
         }
     }
 
-    // MARK: - 文本总结（离线 LLM，手动触发）
+    // MARK: - 文本总结（在线 LLM，手动触发）
+    // 对齐 Android: DetailViewModel.generateSummary()
+
+    private let onlineLLMClient = OnlineLLMClient()
 
     func generateSummary() {
-        guard let id = currentRecordId, !isGeneratingSummary else { return }
+        // 防重复点击
+        guard !isGeneratingSummary else { return }
+        guard let id = currentRecordId else { return }
+
+        let repository = container.recordRepository
 
         // 1. 获取转写文本
         let transcript = transcriptText ?? ""
         guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             summaryError = "没有转写文本，无法生成总结"
+            Task { try? await repository.updateSummaryStatus(id, status: .unavailable) }
+            refresh()
             return
         }
         guard transcript != "暂时无法获取转写内容" else {
             summaryError = "转写未成功，无法生成总结"
+            Task { try? await repository.updateSummaryStatus(id, status: .unavailable) }
+            refresh()
             return
         }
 
-        // 2. 检查离线 LLM 模型
-        let modelInfo = LLMModelManager.savedModelInfo()
-        guard LLMModelManager.isModelDownloaded(modelInfo) else {
-            summaryError = "离线 LLM 模型未下载，请在设置中下载后重试"
+        // 2. 检查 LLM 配置
+        guard !OnlineLLMClient.apiKey.isEmpty else {
+            summaryError = "请在设置中配置在线大语言模型的 API Key"
+            Task { try? await repository.updateSummaryStatus(id, status: .unavailable) }
+            refresh()
             return
         }
 
-        let offlineClient = container.offlineLLMClient
-        let repository = container.recordRepository
-
-        Log.llm("[总结] 用户触发总结生成: transcript=\(transcript.count) chars")
-        LogFile.shared.syncAppend("crash", "generateSummary 开始: transcript=\(transcript.count)")
+        Log.llm("[总结] 用户触发在线总结生成: transcript=\(transcript.count) chars")
         isGeneratingSummary = true
-        summaryProgressMessage = nil
+        summaryProgressMessage = "正在连接 LLM..."
         summaryError = nil
 
         // 3. 先更新状态为 processing
@@ -229,12 +241,12 @@ final class DetailViewModel: ObservableObject {
             try? await repository.updateSummaryStatus(id, status: .processing)
         }
 
-        // 4. 执行离线推理（带进度回调）
+        // 4. 执行在线推理（带进度回调）
         Task { [weak self] in
             guard let self else { return }
-            let summaryResult = await offlineClient.generateSummary(
+
+            let summaryResult = await onlineLLMClient.generateSummary(
                 transcript: transcript,
-                modelInfo: modelInfo,
                 customPrompt: nil,
                 onProgress: { [weak self] message in
                     Task { @MainActor [weak self] in
@@ -255,10 +267,13 @@ final class DetailViewModel: ObservableObject {
                         }
                     }
                 } else {
-                    self.summaryError = "离线总结生成失败"
+                    let errorMessage: String
                     if case .failure(let error) = summaryResult {
-                        self.summaryError = error.localizedDescription
+                        errorMessage = error.localizedDescription
+                    } else {
+                        errorMessage = "在线总结生成失败"
                     }
+                    self.summaryError = errorMessage
                     self.isGeneratingSummary = false
                     self.summaryProgressMessage = nil
                     Task {
@@ -268,6 +283,51 @@ final class DetailViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - 导出总结
+
+    func exportSummary() {
+        guard let summary = record?.summary else { return }
+        let text = formatSummaryAsText(summary)
+        guard !text.isEmpty else { return }
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileName = "总结_\(record?.title ?? "untitled").txt"
+            .replacingOccurrences(of: "/", with: "_")
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        try? text.write(to: fileURL, atomically: true, encoding: .utf8)
+        summaryExportURL = fileURL
+    }
+
+    private func formatSummaryAsText(_ summary: RecordSummary) -> String {
+        var lines: [String] = []
+        if !summary.topics.isEmpty {
+            lines.append("【议题】")
+            lines.append(contentsOf: summary.topics.map { "  • \($0)" })
+            lines.append("")
+        }
+        if !summary.conclusions.isEmpty {
+            lines.append("【结论】")
+            lines.append(contentsOf: summary.conclusions.map { "  • \($0)" })
+            lines.append("")
+        }
+        if !summary.todos.isEmpty {
+            lines.append("【待办】")
+            for todo in summary.todos {
+                var parts = "  • \(todo.task)"
+                if !todo.owner.isEmpty { parts += "（\(todo.owner)）" }
+                if !todo.deadline.isEmpty { parts += " 截止: \(todo.deadline)" }
+                lines.append(parts)
+            }
+            lines.append("")
+        }
+        if !summary.nextSteps.isEmpty {
+            lines.append("【后续步骤】")
+            lines.append(contentsOf: summary.nextSteps.map { "  • \($0)" })
+            lines.append("")
+        }
+        return lines.joined(separator: "\n")
     }
 
     private static func readPCMFromWAV(at path: String) -> Data? {

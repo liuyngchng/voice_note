@@ -3,11 +3,11 @@
 ## 复制为 local.properties 后填入真实值。
 
 # Android SDK 路径（仅 Gradle 使用）
-sdk.dir=/path/to/Android/Sdk
+sdk.dir=/home/rd/Android/Sdk
 
 # === Release 签名配置 ===
 # 密钥库文件路径
-KEYSTORE_FILE=../voice_note-release.keystore
+KEYSTORE_FILE=voice_note-release.keystore
 # 密钥库密码
 KEYSTORE_PASSWORD=
 # 密钥别名

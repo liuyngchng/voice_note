@@ -37,7 +37,7 @@ Java_com_voicenote_app_core_asr_OfflineASRClient_nativeCreateRecognizer(
     config.model_config.sense_voice.use_itn = 1;
 
     config.model_config.tokens = c_tokens;
-    config.model_config.num_threads = 4;
+    config.model_config.num_threads = 2;  // balanced for long recordings (thermal/battery)
     config.model_config.provider = "cpu";
     config.model_config.debug = 0;
 

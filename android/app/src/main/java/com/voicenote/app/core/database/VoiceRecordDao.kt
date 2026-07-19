@@ -42,4 +42,11 @@ interface VoiceRecordDao {
 
     @Query("SELECT DISTINCT title FROM voice_records ORDER BY title")
     suspend fun getAllTitles(): List<String>
+
+    // AI 总结
+    @Query("UPDATE voice_records SET summaryJson = :summaryJson, summaryStatus = :summaryStatus, summaryGeneratedAt = :summaryGeneratedAt WHERE id = :id")
+    suspend fun updateSummary(id: Long, summaryJson: String, summaryStatus: String, summaryGeneratedAt: Long?)
+
+    @Query("UPDATE voice_records SET summaryStatus = :summaryStatus WHERE id = :id")
+    suspend fun updateSummaryStatus(id: Long, summaryStatus: String)
 }

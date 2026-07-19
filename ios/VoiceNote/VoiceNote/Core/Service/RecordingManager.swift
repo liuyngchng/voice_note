@@ -1,6 +1,7 @@
 import AVFoundation
 import Combine
 import Foundation
+import UIKit
 
 /// 录音状态管理器 — 统筹录音/离线ASR全流程
 @MainActor
@@ -37,6 +38,8 @@ final class RecordingManager: ObservableObject {
     private let chunkDurationSeconds: TimeInterval = 15
 
     /// 增量转写：累积拼接 buffer（避免 O(n²) 全量拼接）
+    /// 内存上限 ~64KB（约 3 万中文字符），超出的部分已写盘，只保留尾部用于 UI 展示
+    private let maxAccumulatedTranscriptChars = 30000
     private var accumulatedTranscript = ""
     /// 增量转写：最后已拼入的序号，防止乱序
     private var lastChunkIndex: Int = -1
@@ -51,11 +54,20 @@ final class RecordingManager: ObservableObject {
     private var audioStreamTask: Task<Void, Never>?
     private var durationTask: Task<Void, Never>?
     private var diskCheckTask: Task<Void, Never>?
+    private var vadDecodeTask: Task<Void, Never>?
+
+    /// 录音开始时间，用于防漂移的精确计时
+    private var recordingStartTime = Date()
+    /// 后台任务 ID，防止长时间录音被系统挂起
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     private var currentPcmURL: URL?
     private var currentFileHandle: FileHandle?
     private var audioDataWritable: ((Data) -> Void)?
     private var batteryWarningShown = false
+
+    /// 串行队列专门用于音频文件写入，避免阻塞主线程导致波形卡顿
+    private let fileWriteQueue = DispatchQueue(label: "com.voicenote.filewrite", qos: .userInitiated)
 
     init(container: AppContainer) {
         self.container = container
@@ -78,6 +90,17 @@ final class RecordingManager: ObservableObject {
         isRecording = true
         phase = .recording
 
+        // 后台任务：防止长时间录音被 iOS 系统挂起
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask { [weak self] in
+            Log.recording("⚠️ 后台任务即将过期，强制停止录音")
+            self?.stopRecording()
+        }
+        if backgroundTaskID == .invalid {
+            Log.recording("⚠️ beginBackgroundTask 返回 invalid，后台录音可能受限")
+        } else {
+            Log.recording("后台任务已注册: \(backgroundTaskID.rawValue)")
+        }
+
         // 创建增量转写文件 (crash 可恢复)
         let dir = audioDirectory.appendingPathComponent(recordId.uuidString, isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -86,15 +109,17 @@ final class RecordingManager: ObservableObject {
         fileManager.createFile(atPath: transcriptFileURL!.path, contents: nil)
         Log.recording("增量转写文件已创建: \(transcriptFileURL!.path)")
 
-        // 时长计时器
+        // 防漂移时长计时器：基于绝对时间，避免 Task.sleep 累积误差
+        recordingStartTime = Date()
         durationTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                durationSeconds += 1
+                let elapsed = Date().timeIntervalSince(recordingStartTime)
+                durationSeconds = elapsed
 
-                if durationSeconds >= 3600, !batteryWarningShown {
+                if elapsed >= 3600, !batteryWarningShown {
                     batteryWarningShown = true
                 }
+                try? await Task.sleep(nanoseconds: 200_000_000)  // 0.2s 刷新
             }
         }
 
@@ -156,6 +181,28 @@ final class RecordingManager: ObservableObject {
             }
         }
 
+        // 启动 VAD 周期性解码任务（独立于音频消费循环，防止 ASR 推理阻塞音频采集）
+        if vadActive {
+            let offlineClientForVad = container.offlineASRClient
+            vadDecodeTask = Task.detached(priority: .utility) { [weak self] in
+                guard let self else { return }
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard !Task.isCancelled else { break }
+
+                    let segments = await offlineClientForVad.vadDecodeSpeechSegments()
+                    if segments.isEmpty { continue }
+
+                    await MainActor.run {
+                        for text in segments {
+                            self.handleVadSegment(text: text)
+                        }
+                    }
+                }
+            }
+            Log.recording("VAD 解码 Task 已启动（3s 周期）")
+        }
+
         // 启动录音 pipeline
         performRecording()
     }
@@ -174,19 +221,24 @@ final class RecordingManager: ObservableObject {
                 Log.recording("音频流已启动，开始接收数据...")
                 Log.recording("▶ 转写开始")
                 var totalBytes = 0
-                var lastVadDecodeTime = Date()
+                var lastBackpressureCheckTime = Date()
+                var bytesSinceLastCheck = 0
 
-                // 读取一次 MainActor 状态
+                // 一次性读取 MainActor 状态，避免每次循环都 hop 到主线程
                 let vadActive = await MainActor.run { self.vadActive }
                 let chunkDuration = await MainActor.run { self.chunkDurationSeconds }
+                // 捕获写文件句柄 (FileHandle 线程安全，可在后台队列使用)
+                let writeFileHandle = await MainActor.run { self.currentFileHandle }
 
                 for try await audioData in stream {
                     // 协作式取消：点击结束按钮后可快速退出循环
                     try Task.checkCancellation()
 
-                    // 写文件（closure 通过 MainActor 获取）
-                    await MainActor.run { [audioData] in
-                        self.audioDataWritable?(audioData)
+                    // 写文件到后台队列，不阻塞主线程（之前 await MainActor.run 会串行化到主线程）
+                    if let fh = writeFileHandle {
+                        self.fileWriteQueue.async { [audioData] in
+                            try? fh.write(contentsOf: audioData)
+                        }
                     }
                     totalBytes += audioData.count
 
@@ -196,29 +248,17 @@ final class RecordingManager: ObservableObject {
                     let rms = sqrt(sumSquares / Float(floats.count))
                     let level = min(1.0, rms * 12.0)
 
-                    // 更新波形到 MainActor
+                    // 更新波形到 MainActor（必须：@Published 需要主线程）
                     await MainActor.run { [level] in
                         self.audioLevel = level
                     }
 
                     if vadActive {
-                        // VAD accept 异步化: 派发到 inferenceQueue，不阻塞后台线程
+                        // VAD accept 异步化: 派发到 vadQueue，不阻塞音频采集
+                        // VAD 解码由独立 vadDecodeTask 周期性驱动，不在此阻塞
                         await offlineClient.vadAcceptWaveformAsync(samples: floats)
 
-                        let elapsed = Date().timeIntervalSince(lastVadDecodeTime)
-                        if elapsed >= 3.0 {
-                            lastVadDecodeTime = Date()
-                            let segments = await offlineClient.vadDecodeSpeechSegments()
-                            if !segments.isEmpty {
-                                await MainActor.run {
-                                    for text in segments {
-                                        self.handleVadSegment(text: text)
-                                    }
-                                }
-                            }
-                        }
-
-                        // 每 10 秒打一次日志（含 VAD 状态）
+                        // 每 10 秒打一次日志（含 VAD 状态 + 积压监控）
                         if totalBytes % 320_000 < audioData.count {
                             let detected = offlineClient.vadIsDetected ? "语音" : "静音"
                             Log.recordingDebug("录音中: 已写入 \(totalBytes / 1000)KB [VAD: \(detected)]")
@@ -233,6 +273,19 @@ final class RecordingManager: ObservableObject {
                                 self.processCurrentChunk()
                             }
                         }
+                    }
+
+                    // 背压监控: 每 30 秒检测消费速率是否跟不上生产速率
+                    bytesSinceLastCheck += audioData.count
+                    let checkElapsed = Date().timeIntervalSince(lastBackpressureCheckTime)
+                    if checkElapsed >= 30 {
+                        let expectedBytes = Int(32000.0 * checkElapsed)  // 16kHz × 2 bytes/sample
+                        let consumedRate = Double(bytesSinceLastCheck) / checkElapsed
+                        if consumedRate < 28000 {  // 低于 87.5% 期望速率
+                            Log.recording("⚠️ 背压告警: 过去 \(Int(checkElapsed))s 仅消费 \(bytesSinceLastCheck/1000)KB, 期望 ≥\(expectedBytes/1000)KB, 速率=\(Int(consumedRate))B/s")
+                        }
+                        lastBackpressureCheckTime = Date()
+                        bytesSinceLastCheck = 0
                     }
                 }
                 Log.recording("音频流结束，总计写入 \(totalBytes / 1000)KB")
@@ -278,6 +331,10 @@ final class RecordingManager: ObservableObject {
             lastChunkIndex = nextIndex
             nextIndex += 1
         }
+        // 内存保护：截断超长文本（已写盘，仅保留尾部）
+        if accumulatedTranscript.count > maxAccumulatedTranscriptChars {
+            accumulatedTranscript = String(accumulatedTranscript.suffix(maxAccumulatedTranscriptChars))
+        }
         transcript = accumulatedTranscript
 
         // 增量写盘
@@ -320,6 +377,10 @@ final class RecordingManager: ObservableObject {
                         self.accumulatedTranscript += chunkText
                         self.lastChunkIndex = nextIndex
                         nextIndex += 1
+                    }
+                    // 内存保护：截断超长文本（已写盘，仅保留尾部）
+                    if self.accumulatedTranscript.count > self.maxAccumulatedTranscriptChars {
+                        self.accumulatedTranscript = String(self.accumulatedTranscript.suffix(self.maxAccumulatedTranscriptChars))
                     }
                     self.transcript = self.accumulatedTranscript
 
@@ -383,6 +444,7 @@ final class RecordingManager: ObservableObject {
         phase = .stopping
         durationTask?.cancel()
         diskCheckTask?.cancel()
+        vadDecodeTask?.cancel()
 
         // 1. 先取消音频处理 Task，让 for-try-await 循环通过 Task.checkCancellation() 退出
         audioStreamTask?.cancel()
@@ -395,8 +457,15 @@ final class RecordingManager: ObservableObject {
         phase = .idle
         audioLevel = 0.0
 
+        // 结束后台任务
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            Log.recording("后台任务已结束: \(backgroundTaskID.rawValue)")
+            backgroundTaskID = .invalid
+        }
+
         if vadActive {
-            // VAD 模式: 异步 flush + 解码尾部语音段（统一走 inferenceQueue，线程安全）
+            // VAD 模式: 异步 flush + 解码尾部语音段（vadQueue / asrQueue 已分离，线程安全）
             Task {
                 await container.offlineASRClient.vadFlushAsync()
                 let finalSegments = await container.offlineASRClient.vadDecodeSpeechSegments()
@@ -550,6 +619,11 @@ final class RecordingManager: ObservableObject {
     }
 
     func finalizeAudio(recordId: UUID, pcmURL: URL) -> String? {
+        // 等待所有排队的文件写入完成，再关闭 handle（防止尾部数据丢失）
+        fileWriteQueue.sync {
+            // barrier — 确保此前的 async 写入都已执行完毕
+        }
+
         // 关闭写入 handle
         if let handle = currentFileHandle {
             try? handle.synchronize()

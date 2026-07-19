@@ -23,6 +23,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -49,13 +52,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -190,19 +197,74 @@ fun SettingsScreen(
                 }
             }
 
+            // Online LLM Config Card
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "大语言模型",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "配置 OpenAI 兼容 API，用于生成会议总结",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // API Endpoint
+                    OutlinedTextField(
+                        value = uiState.llmApiEndpoint,
+                        onValueChange = viewModel::updateLLMApiEndpoint,
+                        label = { Text("API 地址") },
+                        placeholder = { Text("https://api.deepseek.com") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // API Key
+                    var apiKeyVisible by remember { mutableStateOf(false) }
+                    OutlinedTextField(
+                        value = uiState.llmApiKey,
+                        onValueChange = viewModel::updateLLMApiKey,
+                        label = { Text("API Key") },
+                        placeholder = { Text("sk-...") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                                Icon(
+                                    imageVector = if (apiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (apiKeyVisible) "隐藏密钥" else "显示密钥"
+                                )
+                            }
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Model Name
+                    OutlinedTextField(
+                        value = uiState.llmModelName,
+                        onValueChange = viewModel::updateLLMModelName,
+                        label = { Text("模型名称") },
+                        placeholder = { Text("deepseek-v4-flash") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
             // Actions
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Button(
-                    onClick = viewModel::save,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("保存", style = MaterialTheme.typography.titleSmall)
-                }
-
                 Button(
                     onClick = viewModel::testConnection,
                     modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -223,6 +285,14 @@ fun SettingsScreen(
                     } else {
                         Text("测试连接")
                     }
+                }
+
+                Button(
+                    onClick = viewModel::save,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("保存", style = MaterialTheme.typography.titleSmall)
                 }
             }
 

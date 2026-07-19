@@ -19,6 +19,7 @@ object DatabaseModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "voice_note.db")
+            .addMigrations(AppDatabase.MIGRATION_6_7)
             .fallbackToDestructiveMigration()
             .build()
 

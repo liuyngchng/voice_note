@@ -10,7 +10,10 @@ import os
 /// 这是 onnxruntime 的已知行为，不影响功能。
 /// 本客户端将 num_threads 设为 1，避免创建线程池，从而规避该警告。
 final class OfflineASRClient {
-    private let inferenceQueue = DispatchQueue(label: "com.voicenote.offline-asr", qos: .utility)
+    /// VAD 专用串行队列 — accept/extract/flush，操作轻量(< 1ms)，不应被 ASR 推理阻塞
+    private let vadQueue = DispatchQueue(label: "com.voicenote.vad", qos: .utility)
+    /// ASR 推理专用串行队列 — runInference 耗时较长(百ms~数s)，与 VAD 分离
+    private let asrQueue = DispatchQueue(label: "com.voicenote.asr-inference", qos: .utility)
     private var recognizer: OpaquePointer?
     private var currentQuality: ModelQuality?
     private var isInitialized = false
@@ -110,7 +113,7 @@ final class OfflineASRClient {
         }
 
         return await withCheckedContinuation { continuation in
-            inferenceQueue.async { [weak self] in
+            asrQueue.async { [weak self] in
                 guard let self else {
                     continuation.resume(returning: .failure(OfflineASRError.clientDeallocated))
                     return
@@ -221,12 +224,12 @@ final class OfflineASRClient {
         }
     }
 
-    /// 异步版: 将 VAD accept 派发到 inferenceQueue，避免阻塞调用线程（MainActor）
+    /// 异步版: 将 VAD accept 派发到 vadQueue，避免阻塞调用线程（MainActor）
     func vadAcceptWaveformAsync(samples: [Float]) async {
         guard vadReady, vad != nil else { return }
         let sampleCount = Int32(samples.count)
         await withCheckedContinuation { continuation in
-            inferenceQueue.async {
+            vadQueue.async {
                 guard let vad = self.vad else {
                     continuation.resume()
                     return
@@ -246,17 +249,18 @@ final class OfflineASRClient {
     }
 
     /// 消费所有已检测到的语音段，逐个通过 ASR 推理
-    /// 返回识别结果列表（在 inference queue 上执行，线程安全）
+    /// 分两阶段：VAD 提取在 vadQueue（快），ASR 推理在 asrQueue（慢），互不阻塞
     func vadDecodeSpeechSegments() async -> [String] {
         guard vadReady, let vad, isInitialized, let rec = recognizer else { return [] }
 
-        return await withCheckedContinuation { continuation in
-            inferenceQueue.async { [weak self] in
+        // 阶段 1: 从 VAD 提取语音段样本 (vadQueue，快速)
+        let segments: [(samples: [Float], sampleCount: Int)] = await withCheckedContinuation { continuation in
+            vadQueue.async { [weak self] in
                 guard let self else {
                     continuation.resume(returning: [])
                     return
                 }
-                var results: [String] = []
+                var results: [(samples: [Float], sampleCount: Int)] = []
                 while SherpaOnnxVoiceActivityDetectorEmpty(vad) == 0 {
                     guard let segment = SherpaOnnxVoiceActivityDetectorFront(vad) else { break }
                     defer {
@@ -265,28 +269,48 @@ final class OfflineASRClient {
                     }
 
                     let sampleCount = Int(segment.pointee.n)
-                    guard sampleCount > 0 else { continue }
-                    let samples = Array(UnsafeBufferPointer(start: segment.pointee.samples, count: sampleCount))
-
-                    // 过短语音段跳过（< 0.5s = 8000 samples @16kHz）
                     guard sampleCount >= 8000 else {
                         Log.asrDebug("VAD 跳过过短语音段: \(sampleCount) samples")
                         continue
                     }
-
-                    do {
-                        let text = try self.runInference(recognizer: rec, samples: samples)
-                        if !text.isEmpty {
-                            results.append(text)
-                            Log.asr("VAD 语音段识别完成: \"\(text.prefix(40))...\"")
-                        }
-                    } catch {
-                        Log.asr("VAD 语音段识别失败: \(error.localizedDescription)")
-                    }
+                    let samples = Array(UnsafeBufferPointer(start: segment.pointee.samples, count: sampleCount))
+                    results.append((samples, sampleCount))
                 }
                 continuation.resume(returning: results)
             }
         }
+
+        guard !segments.isEmpty else { return [] }
+
+        // 阶段 2: 对每个语音段跑 ASR 推理 (asrQueue，允许耗时)
+        var texts: [String] = []
+        for seg in segments {
+            // 协作式取消检查
+            if Task.isCancelled { break }
+
+            let text: String? = await withCheckedContinuation { continuation in
+                asrQueue.async { [weak self] in
+                    guard let self else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    do {
+                        let text = try self.runInference(recognizer: rec, samples: seg.samples)
+                        continuation.resume(returning: text)
+                    } catch {
+                        Log.asr("VAD 语音段识别失败: \(error.localizedDescription)")
+                        continuation.resume(returning: nil)
+                    }
+                }
+            }
+
+            if let text, !text.isEmpty {
+                texts.append(text)
+                Log.asr("VAD 语音段识别完成: \"\(text.prefix(40))...\"")
+            }
+        }
+
+        return texts
     }
 
     /// VAD 是否正在检测到语音
@@ -302,11 +326,11 @@ final class OfflineASRClient {
         Log.asr("VAD flush 完成")
     }
 
-    /// 异步版: 派发到 inferenceQueue，与 vadDecodeSpeechSegments 串行化
+    /// 异步版: 派发到 vadQueue
     func vadFlushAsync() async {
         guard vadReady, vad != nil else { return }
         await withCheckedContinuation { continuation in
-            inferenceQueue.async {
+            vadQueue.async {
                 guard let vad = self.vad else {
                     continuation.resume()
                     return
@@ -322,7 +346,8 @@ final class OfflineASRClient {
 
     /// 仅在 app 退出时调用（deinit），不在录音之间释放
     func reset() {
-        inferenceQueue.sync {
+        // 先等两个队列都排空后再销毁
+        asrQueue.sync {
             if let rec = recognizer {
                 SherpaOnnxDestroyOfflineRecognizer(rec)
                 recognizer = nil
@@ -331,13 +356,14 @@ final class OfflineASRClient {
             currentQuality = nil
         }
 
-        // 销毁 VAD
-        if let vad {
-            SherpaOnnxDestroyVoiceActivityDetector(vad)
-            self.vad = nil
-            vadReady = false
-            Log.asr("VAD 已销毁")
+        // 销毁 VAD（在 vadQueue 上，确保之前的 accept/flush 已完成）
+        vadQueue.sync {
+            if let vad {
+                SherpaOnnxDestroyVoiceActivityDetector(vad)
+                self.vad = nil
+            }
         }
+        vadReady = false
 
         Log.asr("离线 ASR 模型已释放（app 退出）")
     }

@@ -1,47 +1,6 @@
 import Foundation
 import os
 
-/// LLM 模式：在线（OpenAI 兼容 API）或离线（本地 llama.cpp 推理）
-/// 对齐 ASRMode 模式
-enum LLMMode: String, CaseIterable, Codable {
-    case online = "online"
-    case offline = "offline"
-
-    var displayName: String {
-        switch self {
-        case .online: return "在线 (API)"
-        case .offline: return "离线 (本地模型)"
-        }
-    }
-}
-
-/// 离线 LLM 模型信息
-/// 对齐 ModelQuality 模式
-enum LLMModelInfo: String, CaseIterable, Codable {
-    case qwen2_5_1_5b_q4km = "qwen2_5_1_5b_q4km"
-
-    /// 预估模型文件大小，单位 MB
-    var estimatedSizeMB: Int { 986 }
-
-    var displayName: String { "Qwen2.5-1.5B (~\(estimatedSizeMB)MB)" }
-
-    /// GGUF 模型文件名
-    var modelFilename: String { "qwen2.5-1.5b-instruct-q4_k_m.gguf" }
-
-    /// ModelScope 直链下载 URL
-    var modelscopeDownloadURL: String? {
-        "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf"
-    }
-
-    /// ModelScope 页面 URL（供手动下载参考）
-    var modelscopePageURL: String? {
-        "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF"
-    }
-
-    /// GitHub Releases 兜底下载 URL（可选，后续补充）
-    var githubDownloadURL: String? { nil }
-}
-
 // MARK: - 日志
 
 extension Log {

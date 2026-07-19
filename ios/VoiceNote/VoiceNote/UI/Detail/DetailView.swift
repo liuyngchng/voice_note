@@ -42,6 +42,12 @@ struct DetailView: View {
         }
         .onAppear { viewModel.loadRecord(id: recordId) }
         .onDisappear { viewModel.audioPlayer.stop() }
+        .onChange(of: viewModel.summaryExportURL) { url in
+            if let url {
+                activeSheet = nil
+                DispatchQueue.main.async { activeSheet = .share(url) }
+            }
+        }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
             case .transcript:
@@ -202,15 +208,16 @@ struct DetailView: View {
     // MARK: - 总结（离线 LLM，手动触发）
 
     private func summaryTab(_ record: VoiceRecord) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if let summary = record.summary {
-                    let isEmpty = summary.topics.isEmpty
-                        && summary.conclusions.isEmpty
-                        && summary.todos.isEmpty
-                        && summary.nextSteps.isEmpty
+        let summary = record.summary
+        let summaryEmpty = summary.map {
+            $0.topics.isEmpty && $0.conclusions.isEmpty && $0.todos.isEmpty && $0.nextSteps.isEmpty
+        } ?? true
+        let hasSummary = summary != nil
 
-                    if isEmpty {
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                if let summary {
+                    if summaryEmpty {
                         Text("未能提取到有效总结内容\n转写文本可能过短或信息不足")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -249,6 +256,19 @@ struct DetailView: View {
                         .padding()
                         .background(Color(.systemBackground))
                         .cornerRadius(10)
+
+                        // 导出总结按钮（仅在有有效内容时显示）
+                        Divider().padding(.horizontal)
+                        Button {
+                            viewModel.exportSummary()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("导出总结")
+                                    .font(.subheadline)
+                            }
+                        }
+                        .padding(.bottom, 8)
                     }
 
                     if let generatedAt = record.summaryGeneratedAt {
@@ -282,13 +302,29 @@ struct DetailView: View {
                     .frame(maxWidth: .infinity)
                 }
 
+                // 兜底：summaryError 有值但状态未更新时也显示错误
+                if let error = viewModel.summaryError,
+                   record.summaryStatus != .unavailable,
+                   record.summaryStatus != .processing {
+                    Text(error)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .padding()
+                        .frame(maxWidth: .infinity)
+                }
+
                 // 手动触发按钮：转写完成后可生成总结
                 if record.transcriptStatus == .completed
                     || record.transcriptStatus == .unavailable
                 {
                     Divider().padding(.horizontal)
                     Button {
-                        viewModel.generateSummary()
+                        if hasSummary {
+                            viewModel.showRegenerateConfirm = true
+                        } else {
+                            viewModel.generateSummary()
+                        }
                     } label: {
                         HStack(spacing: 4) {
                             if viewModel.isGeneratingSummary {
@@ -298,7 +334,7 @@ struct DetailView: View {
                             }
                             Text(viewModel.isGeneratingSummary
                                  ? (viewModel.summaryProgressMessage ?? "生成中...")
-                                 : "生成总结")
+                                 : (hasSummary ? "重新生成" : "生成总结"))
                                 .font(.subheadline)
                                 .lineLimit(1)
                         }
@@ -308,6 +344,14 @@ struct DetailView: View {
                 }
             }
             .padding()
+        }
+        .alert(isPresented: $viewModel.showRegenerateConfirm) {
+            Alert(
+                title: Text("重新生成总结"),
+                message: Text("已有总结将被覆盖。"),
+                primaryButton: .destructive(Text("重新生成"), action: { viewModel.generateSummary() }),
+                secondaryButton: .cancel(Text("取消"))
+            )
         }
     }
 

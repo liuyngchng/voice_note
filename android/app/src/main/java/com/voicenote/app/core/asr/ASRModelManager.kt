@@ -200,7 +200,7 @@ class ASRModelManager @Inject constructor(
                 TarArchiveInputStream(rawInput)
             }
             tarInput.use { tarIn ->
-                var entry = tarIn.nextEntry as? TarArchiveEntry
+                var entry = tarIn.nextEntry
                 while (entry != null) {
                     val shortName = entry.name.substringAfterLast("/").ifBlank { entry.name }
                     if (shortName.endsWith(".onnx")) {
@@ -209,7 +209,7 @@ class ASRModelManager @Inject constructor(
                         Log.i(TAG, "标点模型提取完成: $shortName (${outFile.length()} bytes)")
                         break
                     }
-                    entry = tarIn.nextEntry as? TarArchiveEntry
+                    entry = tarIn.nextEntry
                 }
             }
 
@@ -319,10 +319,10 @@ class ASRModelManager @Inject constructor(
 
         decompressedInput.use { input ->
             TarArchiveInputStream(input).use { tarIn ->
-                var entry = tarIn.nextEntry as? TarArchiveEntry
+                var entry = tarIn.nextEntry
                 while (entry != null) {
                     val shortName = entry.name.substringAfterLast("/").ifBlank { entry.name }
-                    android.util.Log.e("REC_CRASH", "EXTRACT: tar entry: $shortName (size=${entry.realSize})")
+                    android.util.Log.e("REC_CRASH", "EXTRACT: tar entry: $shortName (size=${entry.size})")
 
                     when {
                         shortName == targetModelFile -> {
@@ -347,7 +347,7 @@ class ASRModelManager @Inject constructor(
                     }
 
                     if (foundModel && foundTokens) break
-                    entry = tarIn.nextEntry as? TarArchiveEntry
+                    entry = tarIn.nextEntry
                 }
             }
         }
@@ -514,7 +514,7 @@ class ASRModelManager @Inject constructor(
 
             BZip2CompressorInputStream(BufferedInputStream(FileInputStream(archiveFile))).use { bzIn ->
                 TarArchiveInputStream(bzIn).use { tarIn ->
-                    var entry = tarIn.nextEntry as? TarArchiveEntry
+                    var entry = tarIn.nextEntry
                     while (entry != null) {
                         val shortName = entry.name.substringAfterLast("/").ifBlank { entry.name }
                         if (shortName == "tokens.txt") {
@@ -522,7 +522,7 @@ class ASRModelManager @Inject constructor(
                             Log.i(TAG, "tokens.txt 提取成功")
                             break
                         }
-                        entry = tarIn.nextEntry as? TarArchiveEntry
+                        entry = tarIn.nextEntry
                     }
                 }
             }
@@ -619,7 +619,7 @@ class ASRModelManager @Inject constructor(
                 val decompressedInput = if (isCompressed) BZip2CompressorInputStream(rawInput) else rawInput
                 decompressedInput.use { input ->
                     TarArchiveInputStream(input).use { tarIn ->
-                        var entry = tarIn.nextEntry as? TarArchiveEntry
+                        var entry = tarIn.nextEntry
                         while (entry != null) {
                             val shortName = entry.name.substringAfterLast("/").ifBlank { entry.name }
                             if (shortName.endsWith(".onnx")) {
@@ -628,7 +628,7 @@ class ASRModelManager @Inject constructor(
                                 Log.i(TAG, "Punctuation model extracted: $shortName (${outFile.length()} bytes)")
                                 break
                             }
-                            entry = tarIn.nextEntry as? TarArchiveEntry
+                            entry = tarIn.nextEntry
                         }
                     }
                 }
