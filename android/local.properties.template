@@ -7,7 +7,7 @@ sdk.dir=/home/rd/Android/Sdk
 
 # === Release 签名配置 ===
 # 密钥库文件路径
-KEYSTORE_FILE=voice_note-release.keystore
+KEYSTORE_FILE=../voice_note-release.keystore
 # 密钥库密码
 KEYSTORE_PASSWORD=
 # 密钥别名
