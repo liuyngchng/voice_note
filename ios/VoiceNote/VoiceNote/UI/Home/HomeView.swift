@@ -4,6 +4,7 @@ struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel
     let modelStatus: ModelStatus
     let modelLoadingMessage: String?
+    let modelLoadError: String?
     let onNewRecord: () -> Void
     let onRecordTap: (UUID) -> Void
     let onSettingsTap: () -> Void
@@ -14,6 +15,7 @@ struct HomeView: View {
     init(container: AppContainer,
          modelStatus: ModelStatus,
          modelLoadingMessage: String?,
+         modelLoadError: String?,
          onNewRecord: @escaping () -> Void,
          onRecordTap: @escaping (UUID) -> Void,
          onSettingsTap: @escaping () -> Void,
@@ -21,6 +23,7 @@ struct HomeView: View {
         _viewModel = StateObject(wrappedValue: HomeViewModel(container: container))
         self.modelStatus = modelStatus
         self.modelLoadingMessage = modelLoadingMessage
+        self.modelLoadError = modelLoadError
         self.onNewRecord = onNewRecord
         self.onRecordTap = onRecordTap
         self.onSettingsTap = onSettingsTap
@@ -131,9 +134,16 @@ struct HomeView: View {
                     Text("模型加载失败")
                         .font(.subheadline)
                         .bold()
-                    Text("请前往设置重新下载模型")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    if let error = modelLoadError, !error.isEmpty {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(3)
+                    } else {
+                        Text("请前往设置重新下载模型")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 Spacer()
                 Button("前往设置") { onSettingsTap() }

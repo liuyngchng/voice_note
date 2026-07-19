@@ -14,7 +14,7 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class ModelStatus { UNKNOWN, MISSING, LOADING, READY, ERROR }
+enum class ModelStatus { UNKNOWN, MISSING, LOADING, READY, ERROR, NATIVE_MISSING }
 
 @Singleton
 class OfflineASRClient @Inject constructor(
@@ -295,6 +295,13 @@ class OfflineASRClient @Inject constructor(
             return
         }
 
+        // Native framework missing → report immediately, don't mislead user
+        if (!isNativeAvailable) {
+            _modelStatus.value = ModelStatus.NATIVE_MISSING
+            Log.w(TAG, "sherpa-onnx native libraries not available — offline ASR disabled")
+            return
+        }
+
         val modelFile = File(asrModelManager.modelFilePath(quality))
         val tokensFile = File(asrModelManager.tokensFilePath())
 
@@ -315,7 +322,8 @@ class OfflineASRClient @Inject constructor(
                 Log.i(TAG, "Preload complete: ${quality.name}")
             } catch (e: Exception) {
                 Log.e(TAG, "Preload failed: ${e.message}", e)
-                _modelStatus.value = ModelStatus.ERROR
+                // Re-check: if native libs disappeared (e.g. memory pressure), reflect that
+                _modelStatus.value = if (isNativeAvailable) ModelStatus.ERROR else ModelStatus.NATIVE_MISSING
             }
         }
     }
@@ -323,6 +331,10 @@ class OfflineASRClient @Inject constructor(
     fun refreshModelStatus(quality: ModelQuality) {
         if (isInitialized && currentQuality == quality) {
             _modelStatus.value = ModelStatus.READY
+            return
+        }
+        if (!isNativeAvailable) {
+            _modelStatus.value = ModelStatus.NATIVE_MISSING
             return
         }
         val modelFile = File(asrModelManager.modelFilePath(quality))
@@ -352,7 +364,9 @@ class OfflineASRClient @Inject constructor(
 
     companion object {
         private const val TAG = "OfflineASRClient"
-        private var isNativeAvailable = false
+        @JvmStatic
+        var isNativeAvailable = false
+            private set
 
         init {
             try {

@@ -238,6 +238,7 @@ private struct RootView: View {
             container: container,
             modelStatus: appState.modelStatus,
             modelLoadingMessage: appState.modelLoadingMessage,
+            modelLoadError: appState.modelLoadError,
             onNewRecord: { showRecording = true },
             onRecordTap: { id in
                 detailId = id

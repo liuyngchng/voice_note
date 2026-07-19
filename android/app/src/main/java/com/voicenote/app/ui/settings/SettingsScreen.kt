@@ -163,6 +163,7 @@ fun SettingsScreen(
                         modelQuality = uiState.offlineModelQuality,
                         onModelQualityChange = viewModel::updateOfflineModelQuality,
                         asrModelManager = asrModelManager,
+                        isNativeAvailable = OfflineASRClient.isNativeAvailable,
                         onModelReady = { quality ->
                             offlineASRClient.preloadIfAvailable(quality)
                         },

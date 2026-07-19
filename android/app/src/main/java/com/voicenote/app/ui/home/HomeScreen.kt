@@ -159,6 +159,9 @@ fun HomeScreen(
                         ModelStatus.MISSING -> {
                             ModelMissingBanner(onGoToSettings = onSettingsClick)
                         }
+                        ModelStatus.NATIVE_MISSING -> {
+                            NativeMissingBanner()
+                        }
                         ModelStatus.ERROR -> {
                             ModelErrorBanner(onGoToSettings = onSettingsClick)
                         }
@@ -307,6 +310,43 @@ private fun ModelErrorBanner(onGoToSettings: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("前往设置")
+            }
+        }
+    }
+}
+
+@Composable
+private fun NativeMissingBanner() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "原生语音框架缺失",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    "sherpa-onnx 原生库未安装，离线语音识别不可用。请确保已运行下载脚本获取原生库。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.8f)
+                )
             }
         }
     }

@@ -82,6 +82,13 @@ for abi in "${ABIS[@]}"; do
         for so_file in "${so_dir}"/*.so; do
             if [ -f "${so_file}" ]; then
                 basename=$(basename "${so_file}")
+                # Skip k2-fsa's own JNI bridge (we build our own via CMake)
+                # and the C++ API (we only use the C API)
+                if [ "${basename}" = "libsherpa-onnx-jni.so" ] || \
+                   [ "${basename}" = "libsherpa-onnx-cxx-api.so" ]; then
+                    echo "  [跳过] ${basename} (不需要)"
+                    continue
+                fi
                 cp -v "${so_file}" "${DEST_DIR}/${basename}"
                 echo "  → ${JNILIBS_DIR}/${abi}/${basename}"
             fi

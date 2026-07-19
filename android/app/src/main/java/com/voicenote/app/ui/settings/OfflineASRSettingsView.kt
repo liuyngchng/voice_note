@@ -54,7 +54,8 @@ fun OfflineASRSettingsView(
     onModelQualityChange: (String) -> Unit,
     asrModelManager: ASRModelManager,
     onModelReady: (com.voicenote.app.core.asr.ModelQuality) -> Unit = {},
-    onModelDeleted: () -> Unit = {}
+    onModelDeleted: () -> Unit = {},
+    isNativeAvailable: Boolean = true
 ) {
     val downloadState by asrModelManager.downloadState.collectAsState()
     val context = LocalContext.current
@@ -97,6 +98,30 @@ fun OfflineASRSettingsView(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Native framework missing warning — model files alone are not enough
+        if (!isNativeAvailable) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Error,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "原生语音框架 (sherpa-onnx) 缺失，离线语音识别不可用。请运行下载脚本获取原生库。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         // Model quality segmented chips
         Text(

@@ -267,6 +267,12 @@ class RecordingService : Service() {
                     _statusMessage.value = "正在加载离线模型..."
                 }
                 try {
+                    // Check native framework availability first to give clear feedback
+                    if (!OfflineASRClient.isNativeAvailable) {
+                        Log.e(TAG, "sherpa-onnx native libraries missing — offline ASR unavailable")
+                        _statusMessage.value = "原生语音框架缺失，离线转写不可用"
+                        return@launch
+                    }
                     offlineASRClient.ensureRecognizer(currentOfflineModelQuality)
                     asrReady = true
                     asrWasAvailable = true
