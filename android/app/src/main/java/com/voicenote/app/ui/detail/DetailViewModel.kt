@@ -579,13 +579,13 @@ class DetailViewModel @Inject constructor(
             }
 
             if (!isActive) {
-                offlineASRClient.reset()
+                offlineASRClient.requestReset()
                 return@withContext Result.failure(Exception("已取消"))
             }
 
             val text = results.toString().trim()
             if (text.isBlank()) {
-                offlineASRClient.reset()
+                offlineASRClient.requestReset()
                 return@withContext Result.failure(Exception("转写结果为空"))
             }
 
@@ -612,10 +612,10 @@ class DetailViewModel @Inject constructor(
                 text
             }
 
-            offlineASRClient.reset()
+            offlineASRClient.requestReset()
             Result.success(punctuated)
         } catch (e: Exception) {
-            try { offlineASRClient.reset() } catch (_: Exception) {}
+            try { offlineASRClient.requestReset() } catch (_: Exception) {}
             Result.failure(e)
         }
     }
@@ -722,7 +722,7 @@ class DetailViewModel @Inject constructor(
         retryTranscriptJob?.cancel()
         retryTranscriptJob = null
         _uiState.value = _uiState.value.copy(isRetryingTranscript = false, retryProgress = "")
-        try { offlineASRClient.reset() } catch (_: Exception) {}
+        offlineASRClient.requestReset()
         viewModelScope.launch {
             recordRepository.updateTranscriptStatus(
                 _uiState.value.record?.id ?: return@launch,

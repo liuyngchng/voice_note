@@ -272,6 +272,23 @@ class OfflineASRClient @Inject constructor(
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
+    /**
+     * 安全释放：如果正在推理中，标记为"推理完成后释放"；否则立即释放。
+     * 从 UI 线程（如取消按钮）调用此方法代替直接调用 [reset]，避免原生层 SIGSEGV 崩溃。
+     */
+    fun requestReset() {
+        scope.launch {
+            stateLock.withLock {
+                if (isInferring) {
+                    shouldReleaseAfterInference = true
+                    Log.i(TAG, "推理进行中，将在完成后释放模型")
+                } else {
+                    reset()
+                }
+            }
+        }
+    }
+
     @Synchronized
     fun reset() {
         if (recognizerPtr != 0L) {
