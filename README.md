@@ -42,10 +42,67 @@
 
 ### Android
 
-1. 用 Android Studio 打开项目根目录
-2. 等待 Gradle Sync 完成
-3. 连接 Android 设备或启动模拟器（API ≥ 26，需 arm64-v8a）
-4. 运行 App
+#### 1. 下载原生库
+
+首次构建前，必须先下载 sherpa-onnx Android 预编译原生库：
+
+```bash
+cd scripts
+./download_sherpa_onnx_android.sh
+```
+
+脚本会将 `libonnxruntime.so` 和 `libsherpa-onnx-c-api.so` 安装到 `android/app/src/main/jniLibs/<abi>/` 目录。
+
+#### 2. 检查预编译库是否就位
+
+```bash
+ls android/app/src/main/jniLibs/arm64-v8a/
+# 应包含: libonnxruntime.so  libsherpa-onnx-c-api.so
+```
+
+#### 3. 构建
+
+用 Android Studio 打开项目根目录，等待 Gradle Sync 完成后运行 App。
+
+或命令行构建：
+
+```bash
+cd android
+./gradlew assembleRelease
+```
+
+> **注意**: `android/app/src/main/cpp/CMakeLists.txt` 会在 CMake 配置阶段检查 `jniLibs/` 中的预编译库是否存在，不存在则跳过 JNI 桥接库的编译。如果下载脚本在 CMake 配置之后执行，CMake 缓存了 "库不存在" 的结果，需要清除缓存后重建。
+
+#### 4. 故障排除：清除 CMake 缓存
+
+如果 app 安装后提示 **"sherpa-onnx 原生库未安装"**，说明 CMake 构建时没有找到预编译库（通常是因为下载脚本在首次构建之后才执行）。
+
+**验证已打包的 native 库**（构建后检查 APK 是否包含所有必需的 .so）：
+
+```bash
+ls android/app/build/intermediates/merged_native_libs/release/mergeReleaseNativeLibs/out/lib/arm64-v8a/
+# 必须包含: libonnxruntime.so  libsherpa-onnx-c-api.so  libsherpa_onnx_jni.so
+```
+
+如果缺少 `libsherpa_onnx_jni.so`，执行以下步骤：
+
+```bash
+# 1. 确认预编译库已在 jniLibs 中
+ls android/app/src/main/jniLibs/arm64-v8a/
+
+# 2. 清除 CMake 缓存
+rm -rf android/app/.cxx
+
+# 3. 重新构建
+cd android && ./gradlew assembleRelease
+```
+
+#### 5. 安装
+
+```bash
+cd android
+./gradlew installRelease
+```
 
 ### iOS
 
