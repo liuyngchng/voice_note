@@ -49,4 +49,8 @@ interface VoiceRecordDao {
 
     @Query("UPDATE voice_records SET summaryStatus = :summaryStatus WHERE id = :id")
     suspend fun updateSummaryStatus(id: Long, summaryStatus: String)
+
+    // 服务器上传记录 ID
+    @Query("UPDATE voice_records SET serverRecordId = :serverRecordId WHERE id = :id")
+    suspend fun updateServerRecordId(id: Long, serverRecordId: String)
 }

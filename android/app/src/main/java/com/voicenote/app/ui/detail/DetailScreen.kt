@@ -31,6 +31,8 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -69,6 +71,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -182,7 +186,13 @@ fun DetailScreen(
                             onSeek = viewModel::seekTo,
                             onSkipBack = viewModel::skipBack,
                             onSkipForward = viewModel::skipForward,
-                            onShare = viewModel::shareAudio
+                            onShare = viewModel::shareAudio,
+                            isUploading = uiState.isUploadingToServer,
+                            uploadProgressMessage = uiState.uploadProgressMessage,
+                            uploadError = uiState.uploadError,
+                            isUploaded = record.serverRecordId.isNotBlank(),
+                            onUpload = viewModel::onUploadClick,
+                            onDismissUploadError = viewModel::dismissUploadError
                         )
                         1 -> TranscriptTab(
                             record = record,
@@ -250,6 +260,25 @@ fun DetailScreen(
             },
             dismissButton = {
                 TextButton(onClick = viewModel::dismissRegenerateConfirm) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+
+    // Re-upload confirmation dialog
+    if (uiState.showUploadConfirm) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissUploadConfirm,
+            title = { Text("重新上传") },
+            text = { Text("该录音已上传到服务器，重新上传将在服务器创建一条新记录。是否继续？") },
+            confirmButton = {
+                TextButton(onClick = viewModel::confirmReUpload) {
+                    Text("确定上传", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissUploadConfirm) {
                     Text("取消")
                 }
             }
@@ -324,7 +353,13 @@ private fun AudioTab(
     onSeek: (Float) -> Unit,
     onSkipBack: () -> Unit,
     onSkipForward: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    isUploading: Boolean = false,
+    uploadProgressMessage: String = "",
+    uploadError: String? = null,
+    isUploaded: Boolean = false,
+    onUpload: () -> Unit = {},
+    onDismissUploadError: () -> Unit = {}
 ) {
     val timeFormatter = DateTimeFormatter.ofPattern("yyyy/MM/dd HH:mm:ss").withZone(ZoneId.systemDefault())
 
@@ -419,6 +454,110 @@ private fun AudioTab(
                     ) {
                         IconButton(onClick = onShare) {
                             Icon(Icons.Default.Share, contentDescription = "分享录音")
+                        }
+                    }
+                }
+            }
+
+            // Upload to server section
+            Spacer(modifier = Modifier.height(12.dp))
+            Text("上传到服务器", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Card(shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    if (uploadError != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                uploadError,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.weight(1f)
+                            )
+                            IconButton(
+                                onClick = onDismissUploadError,
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "关闭",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
+                    if (isUploading) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                uploadProgressMessage.ifBlank { "上传中..." },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            )
+                        }
+                    } else if (isUploaded) {
+                        // 已上传状态
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "已上传到服务器",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onUpload) {
+                                Icon(
+                                    Icons.Default.CloudUpload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("重新上传")
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = onUpload,
+                            modifier = Modifier.fillMaxWidth().height(44.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.CloudUpload,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("上传到服务器")
                         }
                     }
                 }

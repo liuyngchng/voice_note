@@ -19,4 +19,5 @@ interface VoiceRecordRepository {
     suspend fun getAllTitles(): List<String>
     suspend fun updateSummary(id: Long, summary: com.voicenote.app.domain.model.RecordSummary)
     suspend fun updateSummaryStatus(id: Long, status: com.voicenote.app.domain.model.ProcessingStatus)
+    suspend fun updateServerRecordId(id: Long, serverRecordId: String)
 }

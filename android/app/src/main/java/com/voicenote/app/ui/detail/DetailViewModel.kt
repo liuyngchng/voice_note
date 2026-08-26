@@ -17,6 +17,8 @@ import com.voicenote.app.core.audio.AudioImporter
 import com.voicenote.app.core.di.SettingsDataStore
 import com.voicenote.app.core.llm.LLMConfig
 import com.voicenote.app.core.llm.OnlineLLMClient
+import com.voicenote.app.core.network.ServerClient
+import com.voicenote.app.core.network.UploadResult
 import com.voicenote.app.domain.model.ProcessingStatus
 import com.voicenote.app.domain.model.VoiceRecord
 import com.voicenote.app.domain.repository.VoiceRecordRepository
@@ -59,7 +61,12 @@ data class DetailUiState(
     // AI 总结（在线 LLM）
     val isGeneratingSummary: Boolean = false,
     val summaryProgressMessage: String = "",
-    val summaryError: String? = null
+    val summaryError: String? = null,
+    // 上传到服务器
+    val isUploadingToServer: Boolean = false,
+    val uploadProgressMessage: String = "",
+    val uploadError: String? = null,
+    val showUploadConfirm: Boolean = false
 )
 
 @HiltViewModel
@@ -70,7 +77,8 @@ class DetailViewModel @Inject constructor(
     private val audioImporter: AudioImporter,
     private val offlineASRClient: OfflineASRClient,
     private val asrModelManager: ASRModelManager,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val serverClient: ServerClient
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(DetailUiState())
@@ -787,6 +795,95 @@ class DetailViewModel @Inject constructor(
         } catch (e: Exception) {
             _uiState.value = _uiState.value.copy(error = "分享失败")
         }
+    }
+
+    // --- Upload to Server (服务器转写) ---
+
+    fun onUploadClick() {
+        val record = _uiState.value.record ?: return
+        if (_uiState.value.isUploadingToServer) return
+
+        // 已上传过 → 弹确认框
+        if (record.serverRecordId.isNotBlank()) {
+            _uiState.value = _uiState.value.copy(showUploadConfirm = true)
+            return
+        }
+
+        uploadToServer()
+    }
+
+    fun dismissUploadConfirm() {
+        _uiState.value = _uiState.value.copy(showUploadConfirm = false)
+    }
+
+    fun confirmReUpload() {
+        _uiState.value = _uiState.value.copy(showUploadConfirm = false)
+        uploadToServer()
+    }
+
+    fun uploadToServer() {
+        val record = _uiState.value.record ?: return
+        if (_uiState.value.isUploadingToServer) return
+
+        val audioPath = record.audioFilePath
+        if (audioPath.isBlank()) {
+            _uiState.value = _uiState.value.copy(uploadError = "没有关联的音频文件，无法上传")
+            return
+        }
+        val audioFile = File(audioPath)
+        if (!audioFile.exists()) {
+            _uiState.value = _uiState.value.copy(uploadError = "音频文件不存在或已被删除")
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            isUploadingToServer = true,
+            uploadProgressMessage = "准备上传...",
+            uploadError = null
+        )
+
+        viewModelScope.launch {
+            try {
+                val settings = settingsDataStore.settingsFlow.first()
+                val result = serverClient.uploadAudio(
+                    audioFile = audioFile,
+                    record = record,
+                    serverUri = settings.serverUri,
+                    onProgress = { msg ->
+                        _uiState.value = _uiState.value.copy(uploadProgressMessage = msg)
+                    }
+                )
+
+                result.onSuccess { uploadResult ->
+                    // 记录服务端返回的记录 ID
+                    if (uploadResult.serverRecordId.isNotBlank()) {
+                        recordRepository.updateServerRecordId(record.id, uploadResult.serverRecordId)
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        isUploadingToServer = false,
+                        uploadProgressMessage = "",
+                        uploadError = null
+                    )
+                    refreshRecord(record.id)
+                }.onFailure { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isUploadingToServer = false,
+                        uploadProgressMessage = "",
+                        uploadError = e.message ?: "上传失败"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isUploadingToServer = false,
+                    uploadProgressMessage = "",
+                    uploadError = e.message ?: "上传失败"
+                )
+            }
+        }
+    }
+
+    fun dismissUploadError() {
+        _uiState.value = _uiState.value.copy(uploadError = null)
     }
 
     private fun formatSummaryAsText(summary: com.voicenote.app.domain.model.RecordSummary): String {

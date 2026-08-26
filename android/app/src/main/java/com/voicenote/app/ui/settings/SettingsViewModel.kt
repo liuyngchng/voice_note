@@ -46,7 +46,12 @@ data class SettingsUiState(
     // 在线 LLM 配置
     val llmApiEndpoint: String = "https://api.deepseek.com",
     val llmApiKey: String = "",
-    val llmModelName: String = "deepseek-v4-flash"
+    val llmModelName: String = "deepseek-v4-flash",
+    // 服务器配置
+    val serverUri: String = "http://192.168.1.110:8080",
+    // 登录状态
+    val username: String = "",
+    val isLoggedIn: Boolean = false
 )
 
 @HiltViewModel
@@ -69,7 +74,10 @@ class SettingsViewModel @Inject constructor(
                     offlineModelQuality = settings.offlineModelQuality,
                     llmApiEndpoint = settings.llmApiEndpoint,
                     llmApiKey = settings.llmApiKey,
-                    llmModelName = settings.llmModelName
+                    llmModelName = settings.llmModelName,
+                    serverUri = settings.serverUri,
+                    username = settings.username,
+                    isLoggedIn = settings.authToken.isNotBlank()
                 )
             }
         }
@@ -171,6 +179,17 @@ class SettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(llmModelName = modelName)
     }
 
+    fun updateServerUri(uri: String) {
+        _uiState.value = _uiState.value.copy(serverUri = uri)
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            settingsDataStore.clearAuth()
+            _uiState.value = _uiState.value.copy(username = "", isLoggedIn = false)
+        }
+    }
+
     fun save() {
         viewModelScope.launch {
             settingsDataStore.updateOfflineModelQuality(_uiState.value.offlineModelQuality)
@@ -179,6 +198,7 @@ class SettingsViewModel @Inject constructor(
                 apiKey = _uiState.value.llmApiKey,
                 modelName = _uiState.value.llmModelName
             )
+            settingsDataStore.updateServerUri(_uiState.value.serverUri)
             _uiState.value = _uiState.value.copy(saveCount = _uiState.value.saveCount + 1)
         }
     }

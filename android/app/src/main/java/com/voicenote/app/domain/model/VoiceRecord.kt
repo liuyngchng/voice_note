@@ -25,5 +25,7 @@ data class VoiceRecord(
     // AI 总结（在线 LLM）
     val summaryStatus: ProcessingStatus = ProcessingStatus.PENDING,
     val summary: RecordSummary? = null,
-    val summaryGeneratedAt: Instant? = null
+    val summaryGeneratedAt: Instant? = null,
+    // 服务器上传记录 ID（非空表示已上传到服务器）
+    val serverRecordId: String = ""
 )

@@ -9,10 +9,12 @@ import androidx.navigation.navArgument
 import com.voicenote.app.ui.detail.DetailScreen
 import com.voicenote.app.ui.history.HistoryScreen
 import com.voicenote.app.ui.home.HomeScreen
+import com.voicenote.app.ui.login.LoginScreen
 import com.voicenote.app.ui.recording.RecordingScreen
 import com.voicenote.app.ui.settings.SettingsScreen
 
 object Routes {
+    const val LOGIN = "login"
     const val HOME = "home"
     const val RECORDING = "recording?reconnectRecordId={reconnectRecordId}"
     const val DETAIL = "detail/{recordId}"
@@ -31,10 +33,25 @@ fun NavGraph(
     val startDestination = if (initialRecordId > 0) {
         Routes.recording(initialRecordId)
     } else {
-        Routes.HOME
+        Routes.LOGIN
     }
 
     NavHost(navController = navController, startDestination = startDestination) {
+        composable(Routes.LOGIN) {
+            LoginScreen(
+                onLoginSuccess = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                },
+                onSkip = {
+                    navController.navigate(Routes.HOME) {
+                        popUpTo(Routes.LOGIN) { inclusive = true }
+                    }
+                }
+            )
+        }
+
         composable(Routes.HOME) {
             HomeScreen(
                 onStartRecording = { navController.navigate(Routes.recording()) },

@@ -23,7 +23,9 @@ data class VoiceRecordEntity(
     // AI 总结（在线 LLM）
     val summaryJson: String = "",
     val summaryStatus: String = "PENDING",
-    val summaryGeneratedAt: Long? = null
+    val summaryGeneratedAt: Long? = null,
+    // 服务器上传记录 ID（非空表示已上传到服务器）
+    val serverRecordId: String = ""
 ) {
     companion object {
         private val gson = Gson()
@@ -43,7 +45,8 @@ data class VoiceRecordEntity(
             createdAt = record.createdAt.toEpochMilli(),
             summaryJson = record.summary?.let { gson.toJson(it) } ?: "",
             summaryStatus = record.summaryStatus.name,
-            summaryGeneratedAt = record.summaryGeneratedAt?.toEpochMilli()
+            summaryGeneratedAt = record.summaryGeneratedAt?.toEpochMilli(),
+            serverRecordId = record.serverRecordId
         )
     }
 
@@ -72,7 +75,8 @@ data class VoiceRecordEntity(
             createdAt = java.time.Instant.ofEpochMilli(createdAt),
             summaryStatus = try { com.voicenote.app.domain.model.ProcessingStatus.valueOf(summaryStatus) } catch (_: Exception) { com.voicenote.app.domain.model.ProcessingStatus.PENDING },
             summary = summary,
-            summaryGeneratedAt = summaryGeneratedAt?.let { java.time.Instant.ofEpochMilli(it) }
+            summaryGeneratedAt = summaryGeneratedAt?.let { java.time.Instant.ofEpochMilli(it) },
+            serverRecordId = serverRecordId
         )
     }
 }

@@ -7,7 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [VoiceRecordEntity::class],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,6 +19,12 @@ abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE voice_records ADD COLUMN summaryJson TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE voice_records ADD COLUMN summaryStatus TEXT NOT NULL DEFAULT 'PENDING'")
                 db.execSQL("ALTER TABLE voice_records ADD COLUMN summaryGeneratedAt INTEGER DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE voice_records ADD COLUMN serverRecordId TEXT NOT NULL DEFAULT ''")
             }
         }
     }

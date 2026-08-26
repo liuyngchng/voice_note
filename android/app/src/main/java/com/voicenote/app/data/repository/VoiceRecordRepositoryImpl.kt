@@ -84,4 +84,8 @@ class VoiceRecordRepositoryImpl @Inject constructor(
     override suspend fun updateSummaryStatus(id: Long, status: com.voicenote.app.domain.model.ProcessingStatus) {
         voiceRecordDao.updateSummaryStatus(id, status.name)
     }
+
+    override suspend fun updateServerRecordId(id: Long, serverRecordId: String) {
+        voiceRecordDao.updateServerRecordId(id, serverRecordId)
+    }
 }
