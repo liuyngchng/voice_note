@@ -38,6 +38,14 @@ final class RecordingViewModel: ObservableObject {
 
     /// 点击 + 按钮直接开始录音（无需表单）
     func startRecording() {
+        // Guard: prevent duplicate recording if the RecordingManager is already recording.
+        // This protects against app background/foreground transitions where a new
+        // RecordingViewModel is created and onAppear calls startRecording() again.
+        guard !recordingManager.isRecording else {
+            Log.recording("⚠️ Ignoring duplicate startRecording — already recording")
+            return
+        }
+
         // 检查麦克风权限
         let micPermission = AVAudioSession.sharedInstance().recordPermission
         switch micPermission {
@@ -150,14 +158,6 @@ final class RecordingViewModel: ObservableObject {
         recordingManager.stopRecording()
         // isRecording 现在由 $isRecording sink 自动同步
         isStopping = false
-    }
-
-    private static func localDateString() -> String {
-        let fmt = DateFormatter()
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-        fmt.timeZone = TimeZone.current
-        fmt.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
-        return fmt.string(from: Date())
     }
 
     private static func defaultTitle() -> String {

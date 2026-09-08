@@ -76,6 +76,14 @@ final class RecordingManager: ObservableObject {
     // MARK: - 开始录音
 
     func startRecording(recordId: UUID) {
+        // Guard: prevent duplicate recording if already recording.
+        // This also protects against app background/foreground transitions
+        // where a new RecordingViewModel might be created and call startRecording() again.
+        guard !isRecording else {
+            Log.recording("⚠️ Ignoring duplicate startRecording request — already recording")
+            return
+        }
+
         currentRecordId = recordId
 
         pcmBuffer = Data()
@@ -105,7 +113,7 @@ final class RecordingManager: ObservableObject {
         let dir = audioDirectory.appendingPathComponent(recordId.uuidString, isDirectory: true)
         try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
         let dateStr = Self.localDateString()
-        transcriptFileURL = dir.appendingPathComponent("\(dateStr).txt")
+        transcriptFileURL = dir.appendingPathComponent("\(dateStr)_voice_note.txt")
         fileManager.createFile(atPath: transcriptFileURL!.path, contents: nil)
         Log.recording("增量转写文件已创建: \(transcriptFileURL!.path)")
 
@@ -552,7 +560,7 @@ final class RecordingManager: ObservableObject {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.timeZone = TimeZone.current
-        fmt.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        fmt.dateFormat = "yyyyMMdd_HHmmss"
         return fmt.string(from: Date())
     }
 

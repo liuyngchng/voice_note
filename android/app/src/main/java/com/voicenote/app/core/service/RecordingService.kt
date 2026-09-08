@@ -234,10 +234,10 @@ class RecordingService : Service() {
                 }
                 Log.i(TAG, "Resumed transcript: ${mutableTranscript.length} chars")
             } else {
-                val dateStr = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
+                val dateStr = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
                     .withZone(java.time.ZoneId.systemDefault())
                     .format(java.time.Instant.now())
-                transcriptFilePath = File(transcriptDir, "$dateStr.txt").absolutePath
+                transcriptFilePath = File(transcriptDir, "${dateStr}_voice_note.txt").absolutePath
             }
 
             startOfflineASR()

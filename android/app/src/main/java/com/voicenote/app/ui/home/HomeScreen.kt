@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.voicenote.app.core.asr.ModelStatus
+import com.voicenote.app.core.service.RecordingService
 import com.voicenote.app.domain.model.VoiceRecord
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -64,6 +65,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isRecording by RecordingService.isRecording.collectAsState()
 
     // Refresh model status each time the screen enters composition,
     // picking up changes made on other screens (e.g. model upload in Settings).
@@ -97,13 +99,14 @@ fun HomeScreen(
                         )
                     }
                     // "+" button — primary action, matches iOS toolbar pattern
-                    // Disabled until the voice model is fully loaded
+                    // Disabled while model is not ready or already recording
                     val isModelReady = uiState.modelStatus == ModelStatus.READY
+                    val canStartRecording = isModelReady && !isRecording
                     Surface(
-                        onClick = { if (isModelReady) onStartRecording() },
+                        onClick = { if (canStartRecording) onStartRecording() },
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.onPrimary.copy(
-                            alpha = if (isModelReady) 0.15f else 0.05f
+                            alpha = if (canStartRecording) 0.15f else 0.05f
                         ),
                         modifier = Modifier.padding(end = 8.dp)
                     ) {
@@ -111,7 +114,7 @@ fun HomeScreen(
                             Icons.Default.Add,
                             contentDescription = "新建录音",
                             tint = MaterialTheme.colorScheme.onPrimary.copy(
-                                alpha = if (isModelReady) 1.0f else 0.3f
+                                alpha = if (canStartRecording) 1.0f else 0.3f
                             ),
                             modifier = Modifier.size(44.dp).padding(10.dp)
                         )

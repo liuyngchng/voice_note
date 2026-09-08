@@ -268,7 +268,7 @@ class AudioFileManager @Inject constructor(
     companion object {
         private const val TAG = "AudioFileManager"
         private const val SYNC_INTERVAL_MS = 30_000L  // fsync every 30 seconds
-        private val dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
+        private val dateFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
             .withZone(ZoneId.systemDefault())
     }
 }

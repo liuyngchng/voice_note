@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
     @StateObject private var viewModel: HomeViewModel
+    @ObservedObject private var recordingManager: RecordingManager
     let modelStatus: ModelStatus
     let modelLoadingMessage: String?
     let modelLoadError: String?
@@ -21,6 +22,7 @@ struct HomeView: View {
          onSettingsTap: @escaping () -> Void,
          onRefreshModelStatus: @escaping () -> Void) {
         _viewModel = StateObject(wrappedValue: HomeViewModel(container: container))
+        _recordingManager = ObservedObject(wrappedValue: container.recordingManager)
         self.modelStatus = modelStatus
         self.modelLoadingMessage = modelLoadingMessage
         self.modelLoadError = modelLoadError
@@ -69,7 +71,7 @@ struct HomeView: View {
                 Button(action: onNewRecord) {
                     Image(systemName: "plus")
                 }
-                .disabled(modelStatus != .ready)
+                .disabled(modelStatus != .ready || recordingManager.isRecording)
             }
         }
         .onAppear {

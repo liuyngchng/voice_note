@@ -57,6 +57,14 @@ class RecordingViewModel @Inject constructor(
 
     fun startRecording() {
         val state = _uiState.value
+
+        // Guard: prevent duplicate recording if the service is already recording.
+        // RecordingService.isRecording is the global source of truth and survives
+        // ViewModel recreation (e.g. app backgrounded/foregrounded).
+        if (state.isRecording || RecordingService.isRecording.value) {
+            return
+        }
+
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isStarting = true, error = null)
 
