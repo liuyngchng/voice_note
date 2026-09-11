@@ -24,7 +24,8 @@ data class AppSettings(
     val serverUri: String = "http://192.168.1.110:8080",
     // 登录状态
     val authToken: String = "",
-    val username: String = ""
+    val username: String = "",
+    val password: String = ""
 )
 
 @Singleton
@@ -39,6 +40,7 @@ class SettingsDataStore @Inject constructor(
         val SERVER_URI = stringPreferencesKey("server_uri")
         val AUTH_TOKEN = stringPreferencesKey("auth_token")
         val USERNAME = stringPreferencesKey("username")
+        val PASSWORD = stringPreferencesKey("password")
     }
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
@@ -49,7 +51,8 @@ class SettingsDataStore @Inject constructor(
             llmModelName = prefs[Keys.LLM_MODEL_NAME] ?: "deepseek-v4-flash",
             serverUri = prefs[Keys.SERVER_URI] ?: "http://192.168.1.110:8080",
             authToken = prefs[Keys.AUTH_TOKEN] ?: "",
-            username = prefs[Keys.USERNAME] ?: ""
+            username = prefs[Keys.USERNAME] ?: "",
+            password = prefs[Keys.PASSWORD] ?: ""
         )
     }
 
@@ -69,10 +72,11 @@ class SettingsDataStore @Inject constructor(
         context.dataStore.edit { it[Keys.SERVER_URI] = uri }
     }
 
-    suspend fun updateAuth(token: String, username: String) {
+    suspend fun updateAuth(token: String, username: String, password: String = "") {
         context.dataStore.edit {
             it[Keys.AUTH_TOKEN] = token
             it[Keys.USERNAME] = username
+            it[Keys.PASSWORD] = password
         }
     }
 
@@ -80,6 +84,7 @@ class SettingsDataStore @Inject constructor(
         context.dataStore.edit {
             it.remove(Keys.AUTH_TOKEN)
             it.remove(Keys.USERNAME)
+            it.remove(Keys.PASSWORD)
         }
     }
 }

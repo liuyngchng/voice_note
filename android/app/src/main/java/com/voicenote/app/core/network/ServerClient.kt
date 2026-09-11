@@ -3,8 +3,10 @@ package com.voicenote.app.core.network
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.JsonParser
+import com.voicenote.app.core.di.SettingsDataStore
 import com.voicenote.app.domain.model.VoiceRecord
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -38,7 +40,9 @@ data class UploadResult(
  * 客户端仅上传即可。
  */
 @Singleton
-class ServerClient @Inject constructor() {
+class ServerClient @Inject constructor(
+    private val settingsDataStore: SettingsDataStore
+) {
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -104,18 +108,27 @@ class ServerClient @Inject constructor() {
     // ---- 登录 ----
 
     /**
-     * 自动登录服务端，使用默认管理员账号。
+     * 自动登录服务端，使用 App 登录页保存的用户凭证（LoginScreen → DataStore）。
+     * 未来真登录时，LoginViewModel 生成的假 token 会替换为服务端返回的真实 token。
      */
     private suspend fun ensureLoggedIn(serverUri: String): String? {
         if (cachedToken != null) {
             return cachedToken
         }
 
+        val settings = settingsDataStore.settingsFlow.first()
+        val username = settings.username
+        val password = settings.password
+        if (username.isBlank() || password.isBlank()) {
+            Log.w(TAG, "未登录或凭证为空，无法上传到服务器")
+            return null
+        }
+
         return try {
             val loginUrl = normalizeUrl(serverUri) + API_LOGIN
             val body = mapOf(
-                "username" to "admin",
-                "password" to "admin123"
+                "username" to username,
+                "password" to password
             )
             val jsonBody = gson.toJson(body)
 

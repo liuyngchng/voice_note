@@ -69,7 +69,7 @@ class LoginViewModel @Inject constructor(
             try {
                 // 模拟登录：生成一个假 token
                 val fakeToken = UUID.randomUUID().toString()
-                settingsDataStore.updateAuth(fakeToken, username)
+                settingsDataStore.updateAuth(fakeToken, username, password)
                 _uiState.value = _uiState.value.copy(isLoggingIn = false, loginSuccess = true)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(

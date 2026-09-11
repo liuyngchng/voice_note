@@ -127,12 +127,13 @@ class AudioFileManager @Inject constructor(
         }
 
         return try {
-            val parsedDataSize = parseWavDataSize(existingFile)
+            val info = WavParser.parse(existingFile)
+            val parsedDataSize = info.dataSize
             // The actual data may be shorter than header claims if the header was
             // already patched, or longer if a previous resume patched it.
             // Use the file system ground truth (what's actually on disk).
             val fileLength = existingFile.length()
-            val headerSize = findDataOffset(existingFile)
+            val headerSize = info.dataOffset
             dataBytesWritten = (fileLength - headerSize).coerceAtLeast(0)
 
             recordAudioDir = existingFile.parentFile
@@ -149,43 +150,6 @@ class AudioFileManager @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Failed to resume recording: ${e.message}", e)
             false
-        }
-    }
-
-    /** Read the data chunk size from a WAV header (what the RIFF claims). */
-    private fun parseWavDataSize(file: File): Long {
-        RandomAccessFile(file, "r").use { raf ->
-            if (raf.length() < 44) return 0
-            val header = ByteArray(4)
-            raf.read(header)
-            if (String(header) != "RIFF") return 0
-            raf.skipBytes(8) // skip RIFF size + "WAVE"
-            val chunkHeader = ByteArray(8)
-            while (raf.filePointer + 8 <= raf.length()) {
-                raf.readFully(chunkHeader)
-                val chunkId = String(chunkHeader, 0, 4)
-                val chunkSize = readUint32LE(chunkHeader, 4)
-                if (chunkId == "data") return chunkSize
-                raf.seek(raf.filePointer + chunkSize)
-            }
-            return 0
-        }
-    }
-
-    /** Find the byte offset where PCM data starts in a WAV file. */
-    private fun findDataOffset(file: File): Long {
-        RandomAccessFile(file, "r").use { raf ->
-            if (raf.length() < 44) return 44
-            raf.skipBytes(12) // RIFF header
-            val chunkHeader = ByteArray(8)
-            while (raf.filePointer + 8 <= raf.length()) {
-                raf.readFully(chunkHeader)
-                val chunkId = String(chunkHeader, 0, 4)
-                val chunkSize = readUint32LE(chunkHeader, 4)
-                if (chunkId == "data") return raf.filePointer
-                raf.seek(raf.filePointer + chunkSize)
-            }
-            return 44 // fallback: assume standard 44-byte header
         }
     }
 
@@ -256,13 +220,6 @@ class AudioFileManager @Inject constructor(
 
     private fun intToLittleEndian(value: Int): ByteArray {
         return ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(value).array()
-    }
-
-    private fun readUint32LE(bytes: ByteArray, offset: Int): Long {
-        return ((bytes[offset].toInt() and 0xFF).toLong() or
-                ((bytes[offset + 1].toInt() and 0xFF).toLong() shl 8) or
-                ((bytes[offset + 2].toInt() and 0xFF).toLong() shl 16) or
-                ((bytes[offset + 3].toInt() and 0xFF).toLong() shl 24))
     }
 
     companion object {

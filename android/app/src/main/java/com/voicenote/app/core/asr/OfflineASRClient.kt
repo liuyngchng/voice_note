@@ -1,6 +1,7 @@
 package com.voicenote.app.core.asr
 
 import android.util.Log
+import com.voicenote.app.core.audio.PcmUtil
 import com.voicenote.app.core.common.MemoryWarningBus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ class OfflineASRClient @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
     private val stateLock = Mutex()
+    private val initLock = Mutex()
     private var isInitialized = false
     private var currentQuality: ModelQuality? = null
     private var isInferring = false
@@ -46,27 +48,28 @@ class OfflineASRClient @Inject constructor(
 
     // ── Recognizer ───────────────────────────────────────────────────────────
 
-    @Synchronized
-    fun ensureRecognizer(quality: ModelQuality) {
-        if (isInitialized && currentQuality == quality) return
-        if (isInitialized) reset()
+    suspend fun ensureRecognizer(quality: ModelQuality) {
+        initLock.withLock {
+            if (isInitialized && currentQuality == quality) return
+            if (isInitialized) reset()
 
-        check(isNativeAvailable) { "sherpa-onnx 原生库未加载，无法使用离线 ASR" }
+            check(isNativeAvailable) { "sherpa-onnx 原生库未加载，无法使用离线 ASR" }
 
-        val modelFile = File(asrModelManager.modelFilePath(quality))
-        val tokensFile = File(asrModelManager.tokensFilePath())
+            val modelFile = File(asrModelManager.modelFilePath(quality))
+            val tokensFile = File(asrModelManager.tokensFilePath())
 
-        Log.i(TAG, "ensureRecognizer: quality=${quality.name}, model=${modelFile.absolutePath} exists=${modelFile.exists()} size=${modelFile.length()}, tokens=${tokensFile.absolutePath} exists=${tokensFile.exists()}")
+            Log.i(TAG, "ensureRecognizer: quality=${quality.name}, model=${modelFile.absolutePath} exists=${modelFile.exists()} size=${modelFile.length()}, tokens=${tokensFile.absolutePath} exists=${tokensFile.exists()}")
 
-        check(modelFile.exists() && modelFile.length() > 1_000_000) {
-            "离线模型未下载 (${quality.name})，请先在设置中下载"
+            check(modelFile.exists() && modelFile.length() > 1_000_000) {
+                "离线模型未下载 (${quality.name})，请先在设置中下载"
+            }
+            check(tokensFile.exists()) { "tokens.txt 未找到，请重新下载模型" }
+
+            initRecognizer(quality)
+            isInitialized = true
+            currentQuality = quality
+            Log.i(TAG, "离线 ASR 初始化完成: ${quality.name} (${modelFile.length() / 1_048_576}MB)")
         }
-        check(tokensFile.exists()) { "tokens.txt 未找到，请重新下载模型" }
-
-        initRecognizer(quality)
-        isInitialized = true
-        currentQuality = quality
-        Log.i(TAG, "离线 ASR 初始化完成: ${quality.name} (${modelFile.length() / 1_048_576}MB)")
     }
 
     private fun initRecognizer(quality: ModelQuality) {
@@ -109,46 +112,36 @@ class OfflineASRClient @Inject constructor(
         }
     }
 
-    private fun convertPCMToFloats(pcmData: ByteArray): FloatArray {
-        val sampleCount = pcmData.size / 2
-        val floats = FloatArray(sampleCount)
-        var offset = 0
-        for (i in 0 until sampleCount) {
-            val sample = ((pcmData[offset + 1].toInt() shl 8) or
-                          (pcmData[offset].toInt() and 0xFF)).toShort()
-            floats[i] = sample.toFloat() / 32768.0f
-            offset += 2
-        }
-        return floats
-    }
+    private fun convertPCMToFloats(pcmData: ByteArray): FloatArray = PcmUtil.convertPCMToFloats(pcmData)
 
     // ── Voice Activity Detection ─────────────────────────────────────────────
 
     /** Returns true if VAD was successfully initialized. */
-    @Synchronized
-    fun ensureVad(): Boolean {
-        if (vadReady) return true
-        if (!isNativeAvailable) return false
+    suspend fun ensureVad(): Boolean {
+        initLock.withLock {
+            if (vadReady) return true
+            if (!isNativeAvailable) return false
 
-        val vadModelPath = asrModelManager.vadModelFilePath()
-        val vadModelFile = File(vadModelPath)
+            val vadModelPath = asrModelManager.vadModelFilePath()
+            val vadModelFile = File(vadModelPath)
 
-        if (!vadModelFile.exists()) {
-            Log.w(TAG, "VAD 模型未下载，跳过语音活动检测")
-            return false
+            if (!vadModelFile.exists()) {
+                Log.w(TAG, "VAD 模型未下载，跳过语音活动检测")
+                return false
+            }
+
+            try {
+                vadPtr = nativeCreateVad(vadModelPath)
+                if (vadPtr == 0L) return false
+            } catch (e: Exception) {
+                Log.e(TAG, "创建 VAD 检测器失败: ${e.message}")
+                return false
+            }
+
+            vadReady = true
+            Log.i(TAG, "VAD 初始化完成")
+            return true
         }
-
-        try {
-            vadPtr = nativeCreateVad(vadModelPath)
-            if (vadPtr == 0L) return false
-        } catch (e: Exception) {
-            Log.e(TAG, "创建 VAD 检测器失败: ${e.message}")
-            return false
-        }
-
-        vadReady = true
-        Log.i(TAG, "VAD 初始化完成")
-        return true
     }
 
     /** Feed raw PCM-16 audio to the VAD for speech detection. */
@@ -213,30 +206,31 @@ class OfflineASRClient @Inject constructor(
     private var punctReady = false
 
     /** Returns true if punctuation model was successfully loaded. */
-    @Synchronized
-    fun ensurePunctuation(): Boolean {
-        if (punctReady) return true
-        if (!isNativeAvailable) return false
+    suspend fun ensurePunctuation(): Boolean {
+        initLock.withLock {
+            if (punctReady) return true
+            if (!isNativeAvailable) return false
 
-        val punctModelPath = asrModelManager.punctuationModelFilePath()
-        val punctModelFile = File(punctModelPath)
+            val punctModelPath = asrModelManager.punctuationModelFilePath()
+            val punctModelFile = File(punctModelPath)
 
-        if (!punctModelFile.exists()) {
-            Log.w(TAG, "标点模型未下载，跳过标点恢复")
-            return false
+            if (!punctModelFile.exists()) {
+                Log.w(TAG, "标点模型未下载，跳过标点恢复")
+                return false
+            }
+
+            try {
+                punctPtr = nativeCreatePunctuation(punctModelPath)
+                if (punctPtr == 0L) return false
+            } catch (e: Exception) {
+                Log.e(TAG, "创建标点处理器失败: ${e.message}")
+                return false
+            }
+
+            punctReady = true
+            Log.i(TAG, "标点处理器初始化完成")
+            return true
         }
-
-        try {
-            punctPtr = nativeCreatePunctuation(punctModelPath)
-            if (punctPtr == 0L) return false
-        } catch (e: Exception) {
-            Log.e(TAG, "创建标点处理器失败: ${e.message}")
-            return false
-        }
-
-        punctReady = true
-        Log.i(TAG, "标点处理器初始化完成")
-        return true
     }
 
     /** Add punctuation to a complete text. Returns punctuated text. */
@@ -289,7 +283,6 @@ class OfflineASRClient @Inject constructor(
         }
     }
 
-    @Synchronized
     fun reset() {
         if (recognizerPtr != 0L) {
             nativeDestroyRecognizer(recognizerPtr)

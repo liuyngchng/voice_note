@@ -69,8 +69,18 @@ final class RecordingManager: ObservableObject {
     /// 串行队列专门用于音频文件写入，避免阻塞主线程导致波形卡顿
     private let fileWriteQueue = DispatchQueue(label: "com.voicenote.filewrite", qos: .userInitiated)
 
+    /// 增量转写写文件句柄（保持打开直到录音结束，避免每次 open/close 的性能开销）
+    private var transcriptFileHandle: FileHandle?
+    /// 定期 checkpoint 任务
+    private var checkpointTask: Task<Void, Never>?
+
     init(container: AppContainer) {
         self.container = container
+    }
+
+    deinit {
+        // 兜底关闭文件句柄，防止泄漏
+        closeTranscriptFileHandle()
     }
 
     // MARK: - 开始录音
@@ -115,6 +125,7 @@ final class RecordingManager: ObservableObject {
         let dateStr = Self.localDateString()
         transcriptFileURL = dir.appendingPathComponent("\(dateStr)_voice_note.txt")
         fileManager.createFile(atPath: transcriptFileURL!.path, contents: nil)
+        transcriptFileHandle = try? FileHandle(forWritingTo: transcriptFileURL!)
         Log.recording("增量转写文件已创建: \(transcriptFileURL!.path)")
 
         // 防漂移时长计时器：基于绝对时间，避免 Task.sleep 累积误差
@@ -237,12 +248,14 @@ final class RecordingManager: ObservableObject {
                 let chunkDuration = await MainActor.run { self.chunkDurationSeconds }
                 // 捕获写文件句柄 (FileHandle 线程安全，可在后台队列使用)
                 let writeFileHandle = await MainActor.run { self.currentFileHandle }
+                // 音频波形节流：每 ~100ms 更新一次 MainActor
+                var lastLevelEmitTime = Date.distantPast
 
                 for try await audioData in stream {
                     // 协作式取消：点击结束按钮后可快速退出循环
                     try Task.checkCancellation()
 
-                    // 写文件到后台队列，不阻塞主线程（之前 await MainActor.run 会串行化到主线程）
+                    // 写文件到后台队列，不阻塞主线程
                     if let fh = writeFileHandle {
                         self.fileWriteQueue.async { [audioData] in
                             try? fh.write(contentsOf: audioData)
@@ -256,9 +269,13 @@ final class RecordingManager: ObservableObject {
                     let rms = sqrt(sumSquares / Float(floats.count))
                     let level = min(1.0, rms * 12.0)
 
-                    // 更新波形到 MainActor（必须：@Published 需要主线程）
-                    await MainActor.run { [level] in
-                        self.audioLevel = level
+                    // 节流：每 ~100ms 才更新一次 MainActor 波形，减少主线程竞争
+                    let now = Date()
+                    if now.timeIntervalSince(lastLevelEmitTime) >= 0.1 {
+                        lastLevelEmitTime = now
+                        await MainActor.run { [level] in
+                            self.audioLevel = level
+                        }
                     }
 
                     if vadActive {
@@ -430,14 +447,24 @@ final class RecordingManager: ObservableObject {
     }
 
     /// 增量追加转写文本到磁盘文件（含 sync，崩溃安全）
+    /// FileHandle 保持打开直到录音结束，避免每次 open/close 的性能开销
     private func appendTranscriptChunk(_ text: String) {
-        guard let url = transcriptFileURL,
-              let handle = try? FileHandle(forWritingTo: url) else { return }
+        guard let handle = transcriptFileHandle else { return }
         let line = text + "\n"
+        guard let data = line.data(using: .utf8) else { return }
         try? handle.seekToEnd()
-        try? handle.write(contentsOf: line.data(using: .utf8)!)
+        try? handle.write(contentsOf: data)
         try? handle.synchronize()
-        try? handle.close()
+    }
+
+    /// 关闭转写文件句柄，所有退出路径必须调用。
+    /// nonisolated: FileHandle 操作线程安全，且 deinit（非隔离）也需要调用
+    nonisolated private func closeTranscriptFileHandle() {
+        if let handle = transcriptFileHandle {
+            try? handle.synchronize()
+            try? handle.close()
+            transcriptFileHandle = nil
+        }
     }
 
     /// 提供给外部的原始音频回调（用于写本地文件）
@@ -453,6 +480,10 @@ final class RecordingManager: ObservableObject {
         durationTask?.cancel()
         diskCheckTask?.cancel()
         vadDecodeTask?.cancel()
+        checkpointTask?.cancel()
+
+        // 关闭转写文件句柄（音频句柄由 finalizeAudio 关闭）
+        closeTranscriptFileHandle()
 
         // 1. 先取消音频处理 Task，让 for-try-await 循环通过 Task.checkCancellation() 退出
         audioStreamTask?.cancel()

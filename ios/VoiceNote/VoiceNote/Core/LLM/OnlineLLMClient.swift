@@ -181,7 +181,7 @@ final class OnlineLLMClient {
         Log.llm("[在线] 单次推理: transcript=\(transcript.count) chars")
 
         do {
-            let data = try await callAPI(url: url, apiKey: apiKey, body: requestBody)
+            let data = try await callAPIWithRetry(url: url, apiKey: apiKey, body: requestBody)
             let content = try extractTextContent(from: data)
             let summary = try parseJsonContent(content)
             return .success(summary)
@@ -223,7 +223,7 @@ final class OnlineLLMClient {
             ]
 
             do {
-                let data = try await callAPI(url: url, apiKey: apiKey, body: requestBody)
+                let data = try await callAPIWithRetry(url: url, apiKey: apiKey, body: requestBody)
                 let text = try extractTextContent(from: data)
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmed.isEmpty {
@@ -267,7 +267,7 @@ final class OnlineLLMClient {
             ]
 
             do {
-                let data = try await callAPI(url: url, apiKey: apiKey, body: requestBody)
+                let data = try await callAPIWithRetry(url: url, apiKey: apiKey, body: requestBody)
                 mergedText = try extractTextContent(from: data)
             } catch {
                 return .failure(error)
@@ -283,6 +283,29 @@ final class OnlineLLMClient {
     }
 
     // MARK: - API 调用
+
+    /// 带指数退避重试的 API 调用，对齐 Android 端 callAPIWithRetry
+    private func callAPIWithRetry(
+        url: URL,
+        apiKey: String,
+        body: [String: Any],
+        maxRetries: Int = 3
+    ) async throws -> Data {
+        var lastError: Error? = nil
+        for attempt in 0..<maxRetries {
+            do {
+                return try await callAPI(url: url, apiKey: apiKey, body: body)
+            } catch {
+                lastError = error
+                if attempt < maxRetries - 1 {
+                    let waitNs = UInt64(pow(2.0, Double(attempt)) * 1_000_000_000)
+                    Log.llm("[在线] API 调用失败，\(Int(waitNs/1_000_000))ms 后重试 (\(attempt + 1)/\(maxRetries)): \(error.localizedDescription)")
+                    try? await Task.sleep(nanoseconds: waitNs)
+                }
+            }
+        }
+        throw lastError ?? OnlineLLMError.networkError(NSError(domain: "", code: -1))
+    }
 
     private func callAPI(url: URL, apiKey: String, body: [String: Any]) async throws -> Data {
         var request = URLRequest(url: url)

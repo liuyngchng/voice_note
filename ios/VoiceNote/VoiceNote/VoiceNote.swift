@@ -1,18 +1,19 @@
 import SwiftUI
-import AVFoundation
 import os
 
-/// App 入口
+// MARK: - App 入口
+
+/// App 入口 — 只负责组装根视图与依赖注入，启动流程交给 [AppCoordinator]
 @main
 struct SmartBadgeApp: App {
     @StateObject private var container = AppContainer()
-    @StateObject private var appState = AppState()
+    @StateObject private var coordinator = AppCoordinator()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(container)
-                .environmentObject(appState)
+                .environmentObject(coordinator)
         }
     }
 }
@@ -28,8 +29,9 @@ enum ModelStatus {
     case error
 }
 
+/// App 启动协调器 — 负责启动流程（模型加载、权限、导航状态），从 App 入口解耦
 @MainActor
-final class AppState: ObservableObject {
+final class AppCoordinator: ObservableObject {
     /// 模型加载状态
     @Published var modelStatus: ModelStatus = .unknown
     /// 当前正在加载的模型名称（如 "LLM 模型"）
@@ -164,7 +166,7 @@ private struct PermissionModifier: ViewModifier {
 
 private struct RootView: View {
     @EnvironmentObject var container: AppContainer
-    @EnvironmentObject var appState: AppState
+    @EnvironmentObject var coordinator: AppCoordinator
 
     @State private var showRecording = false
     @State private var showHistory = false
@@ -183,13 +185,13 @@ private struct RootView: View {
         .navigationViewStyle(.stack)
         .modifier(PermissionModifier())
         .onAppear {
-            appState.loadModelOnStartup(container: container)
-            appState.refreshModelStatus(container: container)
+            coordinator.loadModelOnStartup(container: container)
+            coordinator.refreshModelStatus(container: container)
         }
         .onChange(of: showSettings) { isShowing in
             if !isShowing {
                 // 从设置页返回时刷新模型状态（用户可能刚下载了模型）
-                appState.refreshModelStatus(container: container)
+                coordinator.refreshModelStatus(container: container)
             }
         }
     }
@@ -236,16 +238,16 @@ private struct RootView: View {
     private var homeScreen: some View {
         HomeView(
             container: container,
-            modelStatus: appState.modelStatus,
-            modelLoadingMessage: appState.modelLoadingMessage,
-            modelLoadError: appState.modelLoadError,
+            modelStatus: coordinator.modelStatus,
+            modelLoadingMessage: coordinator.modelLoadingMessage,
+            modelLoadError: coordinator.modelLoadError,
             onNewRecord: { showRecording = true },
             onRecordTap: { id in
                 detailId = id
                 showDetail = true
             },
             onSettingsTap: { showSettings = true },
-            onRefreshModelStatus: { appState.refreshModelStatus(container: container) }
+            onRefreshModelStatus: { coordinator.refreshModelStatus(container: container) }
         )
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

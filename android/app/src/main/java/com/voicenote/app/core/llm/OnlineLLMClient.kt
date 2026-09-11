@@ -5,7 +5,9 @@ import com.google.gson.JsonParser
 import com.voicenote.app.domain.model.RecordSummary
 import com.voicenote.app.domain.model.TodoItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlin.math.pow
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -109,7 +111,7 @@ class OnlineLLMClient(
                 "max_tokens" to 20
             )
 
-            val response = callAPI(config, requestBody)
+            val response = callAPIWithRetry(config, requestBody)
 
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: ""
@@ -153,7 +155,7 @@ class OnlineLLMClient(
 
         Log.i(TAG, "singlePassSummary: transcriptLength=${transcript.length}")
 
-        val response = callAPI(config, requestBody)
+        val response = callAPIWithRetry(config, requestBody)
         return parseSummaryResponse(response)
     }
 
@@ -187,7 +189,7 @@ class OnlineLLMClient(
             )
 
             try {
-                val response = callAPI(config, requestBody)
+                val response = callAPIWithRetry(config, requestBody)
                 val text = extractTextContent(response)
                 val trimmed = text.trim()
                 if (trimmed.isNotBlank()) {
@@ -230,7 +232,7 @@ class OnlineLLMClient(
                 "max_tokens" to 2048
             )
 
-            val response = callAPI(config, requestBody)
+            val response = callAPIWithRetry(config, requestBody)
             mergedText = extractTextContent(response)
         }
 
@@ -239,6 +241,30 @@ class OnlineLLMClient(
     }
 
     // ---- API 调用 ----
+
+    /**
+     * 带指数退避重试的 API 调用，网络波动/限流时自动重试，避免丢失分段内容。
+     */
+    private suspend fun callAPIWithRetry(
+        config: LLMConfig,
+        requestBody: Map<String, Any?>,
+        maxRetries: Int = 3
+    ): okhttp3.Response {
+        var lastError: Exception? = null
+        repeat(maxRetries) { attempt ->
+            try {
+                return callAPI(config, requestBody)
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < maxRetries - 1) {
+                    val waitMs = (2.0.pow(attempt) * 1000).toLong()
+                    Log.w(TAG, "API 调用失败，${waitMs}ms 后重试 (${attempt + 1}/$maxRetries): ${e.message}")
+                    delay(waitMs)
+                }
+            }
+        }
+        throw lastError ?: Exception("API 调用失败")
+    }
 
     private fun callAPI(config: LLMConfig, requestBody: Map<String, Any?>): okhttp3.Response {
         val jsonBody = gson.toJson(requestBody)

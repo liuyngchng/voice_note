@@ -1,6 +1,5 @@
 package com.voicenote.app.core.service
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -23,6 +22,8 @@ import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.asr.OfflineASRClient
 import com.voicenote.app.core.audio.AudioCapture
 import com.voicenote.app.core.audio.AudioFileManager
+import com.voicenote.app.core.audio.PcmUtil
+import com.voicenote.app.core.common.TimeUtil
 import com.voicenote.app.data.repository.VoiceRecordRepositoryImpl
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -36,22 +37,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import android.util.Log
-import com.google.gson.Gson
 import java.io.File
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class RecordingService : Service() {
-
-    private data class RecordingCheckpoint(
-        val recordId: Long,
-        val startTime: Long,
-        val lastTranscriptLength: Int,
-        val pcmBytesWritten: Long,
-        val sampleRate: Int = 16000,
-        val channels: Int = 1,
-        val bitsPerSample: Int = 16
-    )
 
     @Inject lateinit var audioCapture: AudioCapture
     @Inject lateinit var offlineASRClient: OfflineASRClient
@@ -68,6 +58,11 @@ class RecordingService : Service() {
     private var actualStopTime: java.time.Instant? = null
     private var audioFocusRequest: AudioFocusRequest? = null
 
+    // Delegated monitors
+    private lateinit var diskMonitor: DiskMonitor
+    private lateinit var thermalMonitor: ThermalMonitor
+    private lateinit var checkpointManager: CheckpointManager
+
     private val mutableTranscript = StringBuilder()
     private var currentOfflineModelQuality: ModelQuality = ModelQuality.INT8
     private var transcriptFilePath: String = ""
@@ -75,10 +70,12 @@ class RecordingService : Service() {
     private var wakeLockStartTime = 0L
     private var diskCheckJob: Job? = null
     private var checkpointJob: Job? = null
-    private var pendingOverlap = ByteArray(0)  // last 2s audio for non-VAD overlap
-    private var thermalWarningShown = false
+    /** Overlap audio from previous decode window (last 2s for continuity) */
+    private var pendingOverlap = ByteArray(0)
+    /** Ring buffer for non-VAD decode path (avoids repeated ByteArray allocations) */
+    private var decodeRingBuffer = ByteArray(DECODE_RING_BUFFER_SIZE)
+    private var decodeRingBufferEnd = 0
     private var asrWasAvailable = false  // track model release during recording
-    private val gson = Gson()
 
     companion object {
         private const val TAG = "RecordingService"
@@ -98,10 +95,10 @@ class RecordingService : Service() {
         private const val DECODE_INTERVAL_MS = 5_000L
         private const val RECENT_CHAR_WINDOW = 100      // scrolling subtitle window
         private const val OVERLAP_BYTES = 32000         // 2s overlap at 16kHz/16bit/mono
+        private const val DECODE_RING_BUFFER_SIZE = 640_000  // 20s at 16kHz/16bit/mono
 
         // Long-recording optimization
         private const val DISK_CHECK_INTERVAL_MS = 300_000L   // 5 minutes
-        private const val MIN_FREE_SPACE_BYTES = 500L * 1024 * 1024  // 500 MB
         private const val MAX_TRANSCRIPT_CHARS = 1_000_000   // 1M char cap
         private const val PUNCTUATION_CHUNK_SIZE = 5000      // chars per punctuation batch
         private const val CHECKPOINT_INTERVAL_MS = 120_000L  // 2 minutes
@@ -132,6 +129,9 @@ class RecordingService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        diskMonitor = DiskMonitor(filesDir, audioFileManager)
+        thermalMonitor = ThermalMonitor(this)
+        checkpointManager = CheckpointManager(filesDir)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -167,7 +167,9 @@ class RecordingService : Service() {
             _transcriptState.value = ""
             _statusMessage.value = "正在初始化录音服务..."
 
-            thermalWarningShown = false
+            // Initialize delegated monitors
+            diskMonitor = DiskMonitor(filesDir, audioFileManager)
+            thermalMonitor = ThermalMonitor(this)
 
             // Acquire wake lock — held for entire recording to prevent CPU sleep
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -202,9 +204,8 @@ class RecordingService : Service() {
                 audioFileManager.resumeRecording(recordId, existingWavPath)
             } else {
                 // Check for orphaned checkpoint from a previous crash
-                val checkpointFile = File(filesDir, "checkpoints/record_${recordId}.json")
-                if (checkpointFile.exists()) {
-                    val checkpoint = gson.fromJson(checkpointFile.readText(), RecordingCheckpoint::class.java)
+                val checkpoint = checkpointManager.load(recordId)
+                if (checkpoint != null) {
                     // Try to find the existing WAV file (may have been moved/renamed)
                     val wavFiles = audioDir.listFiles { f -> f.extension == "wav" }
                     if (wavFiles != null && wavFiles.isNotEmpty()) {
@@ -324,7 +325,11 @@ class RecordingService : Service() {
             diskCheckJob = launch {
                 while (isActive) {
                     delay(DISK_CHECK_INTERVAL_MS)
-                    if (!checkDiskSpace()) {
+                    if (!diskMonitor.check()) {
+                        val msg = diskMonitor.statusMessage()
+                        val notifyMsg = diskMonitor.notificationMessage()
+                        if (msg != null) _statusMessage.value = msg
+                        if (notifyMsg != null) updateNotification(notifyMsg)
                         Log.w(TAG, "磁盘空间不足，自动停止录音")
                         stopRecording()
                         break
@@ -336,13 +341,18 @@ class RecordingService : Service() {
             checkpointJob = launch {
                 while (isActive) {
                     delay(CHECKPOINT_INTERVAL_MS)
-                    saveCheckpoint()
-                    checkThermalStatus()
+                    checkpointManager.save(
+                        currentRecordId, wakeLockStartTime,
+                        mutableTranscript.length, audioFileManager
+                    )
+                    thermalMonitor.check(
+                        statusCallback = { msg -> if (msg != null) _statusMessage.value = msg },
+                        notificationCallback = { msg -> if (msg != null) updateNotification(msg) }
+                    )
                 }
             }
 
             try {
-                val pendingChunks = mutableListOf<ByteArray>()
                 var lastDecodeTime = 0L
 
                 startDurationCounter()
@@ -369,34 +379,34 @@ class RecordingService : Service() {
                                 if (segments.isNotEmpty()) {
                                     val full = mutableTranscript.toString()
                                     _transcriptState.value = full.takeLast(RECENT_CHAR_WINDOW)
-                                    _statusMessage.value = "正在转写... ${formatDuration(_durationSeconds.value)}"
+                                    _statusMessage.value = "正在转写... ${TimeUtil.formatDuration(_durationSeconds.value)}"
                                 } else {
-                                    _statusMessage.value = "静音中... ${formatDuration(_durationSeconds.value)}"
+                                    _statusMessage.value = "静音中... ${TimeUtil.formatDuration(_durationSeconds.value)}"
                                 }
                             }
                         } else {
-                            // ── Fallback: no VAD, decode raw chunks incrementally ──
-                            pendingChunks.add(audioData)
+                            // ── Fallback: no VAD, ring-buffer decode incremental chunks ──
+                            appendToRingBuffer(audioData)
 
                             val elapsed = _durationSeconds.value * 1000
                             if (elapsed - lastDecodeTime >= DECODE_INTERVAL_MS) {
                                 lastDecodeTime = elapsed
-                                if (pendingChunks.isNotEmpty()) {
-                                    val newAudio = concatenateChunks(pendingChunks)
-                                    // Save tail for next window's overlap (last 2s)
-                                    val tailForOverlap = if (newAudio.size > OVERLAP_BYTES)
-                                        newAudio.copyOfRange(newAudio.size - OVERLAP_BYTES, newAudio.size)
-                                    else newAudio
-                                    pendingChunks.clear()
+                                if (decodeRingBufferEnd > 0) {
+                                    val decodeChunk = ByteArray(decodeRingBufferEnd)
+                                    System.arraycopy(decodeRingBuffer, 0, decodeChunk, 0, decodeRingBufferEnd)
+                                    decodeRingBufferEnd = 0
 
                                     // Prepend previous window's overlap for continuity
                                     val audioWithOverlap = if (pendingOverlap.isNotEmpty()) {
-                                        ByteArray(pendingOverlap.size + newAudio.size).apply {
+                                        ByteArray(pendingOverlap.size + decodeChunk.size).apply {
                                             System.arraycopy(pendingOverlap, 0, this, 0, pendingOverlap.size)
-                                            System.arraycopy(newAudio, 0, this, pendingOverlap.size, newAudio.size)
+                                            System.arraycopy(decodeChunk, 0, this, pendingOverlap.size, decodeChunk.size)
                                         }
-                                    } else newAudio
-                                    pendingOverlap = tailForOverlap
+                                    } else decodeChunk
+                                    // Save tail for next window's overlap (last 2s)
+                                    pendingOverlap = if (decodeChunk.size > OVERLAP_BYTES)
+                                        decodeChunk.copyOfRange(decodeChunk.size - OVERLAP_BYTES, decodeChunk.size)
+                                    else decodeChunk
 
                                     val result = offlineASRClient.processPCMChunk(audioWithOverlap)
                                     result.onSuccess { text ->
@@ -405,7 +415,7 @@ class RecordingService : Service() {
                                             appendTranscriptChunk(text + "\n")
                                             val full = mutableTranscript.toString()
                                             _transcriptState.value = full.takeLast(RECENT_CHAR_WINDOW)
-                                            _statusMessage.value = "正在转写... ${formatDuration(_durationSeconds.value)}"
+                                            _statusMessage.value = "正在转写... ${TimeUtil.formatDuration(_durationSeconds.value)}"
                                         }
                                     }.onFailure { e ->
                                         Log.w(TAG, "Offline decode failed: ${e.message}")
@@ -433,10 +443,11 @@ class RecordingService : Service() {
                             val full = mutableTranscript.toString()
                             _transcriptState.value = full.takeLast(RECENT_CHAR_WINDOW)
                         }
-                    } else if (pendingChunks.isNotEmpty()) {
+                    } else if (decodeRingBufferEnd > 0) {
                         try {
-                            val finalAudio = concatenateChunks(pendingChunks)
-                            pendingChunks.clear()
+                            val finalAudio = ByteArray(decodeRingBufferEnd)
+                            System.arraycopy(decodeRingBuffer, 0, finalAudio, 0, decodeRingBufferEnd)
+                            decodeRingBufferEnd = 0
                             // Prepend overlap for final decode
                             val audioWithOverlap = if (pendingOverlap.isNotEmpty()) {
                                 ByteArray(pendingOverlap.size + finalAudio.size).apply {
@@ -470,28 +481,25 @@ class RecordingService : Service() {
     /** Compute RMS audio level from PCM data (16kHz/16bit/mono → [0, 1]) */
     private fun computeAudioLevel(pcmData: ByteArray): Float {
         if (pcmData.size < 2) return 0f
-        val sampleCount = pcmData.size / 2
+        val floats = PcmUtil.convertPCMToFloats(pcmData)
         var sumSquares = 0.0
-        for (i in 0 until sampleCount) {
-            val lo = pcmData[i * 2].toInt() and 0xFF
-            val hi = pcmData[i * 2 + 1].toInt()
-            val sample = ((hi shl 8) or lo).toShort()
-            val normalized = sample / 32768.0
-            sumSquares += normalized * normalized
+        for (sample in floats) {
+            sumSquares += sample.toDouble() * sample.toDouble()
         }
-        val rms = kotlin.math.sqrt(sumSquares / sampleCount)
+        val rms = kotlin.math.sqrt(sumSquares / floats.size)
         return minOf(1f, (rms * 12.0).toFloat())
     }
 
-    private fun concatenateChunks(chunks: List<ByteArray>): ByteArray {
-        val totalSize = chunks.sumOf { it.size }
-        val result = ByteArray(totalSize)
-        var offset = 0
-        for (chunk in chunks) {
-            System.arraycopy(chunk, 0, result, offset, chunk.size)
-            offset += chunk.size
+    private fun appendToRingBuffer(chunk: ByteArray) {
+        val remaining = DECODE_RING_BUFFER_SIZE - decodeRingBufferEnd
+        if (chunk.size > remaining) {
+            // Discard oldest data to make room
+            val shift = chunk.size - remaining
+            System.arraycopy(decodeRingBuffer, shift, decodeRingBuffer, 0, decodeRingBufferEnd - shift)
+            decodeRingBufferEnd -= shift
         }
-        return result
+        System.arraycopy(chunk, 0, decodeRingBuffer, decodeRingBufferEnd, chunk.size)
+        decodeRingBufferEnd += chunk.size
     }
 
     private fun startFinalization() {
@@ -660,23 +668,6 @@ class RecordingService : Service() {
         mutableTranscript.append(text)
     }
 
-    // ── Disk space check (P1) ─────────────────────────────────────────────
-
-    private fun checkDiskSpace(): Boolean {
-        val usableSpace = filesDir.usableSpace
-        if (usableSpace < MIN_FREE_SPACE_BYTES) {
-            _statusMessage.value = "磁盘空间不足，请停止录音"
-            updateNotification("磁盘空间不足 (剩余 ${usableSpace / 1_048_576}MB)")
-            return false
-        }
-        if (audioFileManager.hasWriteError()) {
-            _statusMessage.value = "磁盘写入失败，请停止录音"
-            updateNotification("磁盘写入失败，录音已中断")
-            return false
-        }
-        return true
-    }
-
     // ── ASR model availability check (P1) ──────────────────────────────────
 
     private fun checkAsrAvailabilityLost() {
@@ -685,22 +676,6 @@ class RecordingService : Service() {
             Log.w(TAG, "ASR model released during recording — transcription stopped")
             _statusMessage.value = "⚠️ 内存不足，转写已停止（录音继续）"
             updateNotification("⚠️ 内存不足，转写已停止（录音继续）")
-        }
-    }
-
-    // ── Thermal throttling check (P1) ──────────────────────────────────────
-
-    @SuppressLint("NewApi")
-    private fun checkThermalStatus() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
-        if (thermalWarningShown) return
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val status = pm.currentThermalStatus
-        if (status >= PowerManager.THERMAL_STATUS_SEVERE) {
-            thermalWarningShown = true
-            Log.w(TAG, "设备过热 (thermal=$status)，建议结束录音")
-            _statusMessage.value = "⚠️ 设备过热，建议结束录音"
-            updateNotification("⚠️ 设备过热，建议结束录音")
         }
     }
 
@@ -746,41 +721,10 @@ class RecordingService : Service() {
         try {
             val marker = File(filesDir, ACTIVE_RECORDING_FILE)
             if (marker.exists()) marker.delete()
-            val checkpointDir = File(filesDir, CHECKPOINTS_DIR)
-            if (checkpointDir.isDirectory) {
-                checkpointDir.listFiles()?.forEach { it.delete() }
-            }
+            checkpointManager.deleteAll()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to delete active recording marker: ${e.message}")
         }
-    }
-
-    // ── Checkpoint (P2) ───────────────────────────────────────────────────
-
-    private suspend fun saveCheckpoint() {
-        try {
-            // Force-flush audio data to disk and get persisted byte count
-            val pcmBytes = audioFileManager.flushAndCheckpoint()
-            val checkpoint = RecordingCheckpoint(
-                recordId = currentRecordId,
-                startTime = wakeLockStartTime,
-                lastTranscriptLength = mutableTranscript.length,
-                pcmBytesWritten = pcmBytes
-            )
-            val json = gson.toJson(checkpoint)
-            val checkpointDir = File(filesDir, "checkpoints")
-            checkpointDir.mkdirs()
-            File(checkpointDir, "record_${currentRecordId}.json").writeText(json)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save checkpoint: ${e.message}")
-        }
-    }
-
-    private fun formatDuration(seconds: Long): String {
-        val h = seconds / 3600
-        val m = (seconds % 3600) / 60
-        val s = seconds % 60
-        return if (h > 0) "%02d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
     }
 
     private fun buildNotification(text: String): Notification {
