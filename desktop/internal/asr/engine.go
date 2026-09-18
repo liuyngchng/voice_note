@@ -60,15 +60,13 @@ type Engine struct {
 	modelDir string
 }
 
-// New creates a new offline ASR engine, loading models from dataDir/models/.
-func New(dataDir string) (*Engine, error) {
+// New creates a new offline ASR engine, loading models from modelDir/.
+func New(modelDir string) (*Engine, error) {
 	e := &Engine{
 		sampleRate: 16000,
 		statusCh:   make(chan ModelStatus, 16),
+		modelDir:   modelDir,
 	}
-
-	modelDir := filepath.Join(dataDir, "models")
-	e.modelDir = modelDir
 
 	modelPath := filepath.Join(modelDir, "model.onnx")
 	tokensPath := filepath.Join(modelDir, "tokens.txt")

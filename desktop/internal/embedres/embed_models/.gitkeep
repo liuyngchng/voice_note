@@ -1,7 +1,0 @@
-# This directory is populated at build time by build.bat.
-#
-# The following files are placed here (sourced from C:\workspace\models\):
-#   model.onnx          - fp32 SenseVoiceSmall model
-#   tokens.txt          - SenseVoiceSmall token list
-#   punct_ct_transformer.onnx  - Chinese/English punctuation model
-#   silero_vad.onnx     - Silero VAD model

@@ -1,18 +1,58 @@
 // Package main is the entry point for the Voice Note desktop application.
+//
+// Model loading strategy (portable-first):
+//   1. ./models/  next to the executable (ZIP portable distribution)
+//   2. %APPDATA%/VoiceNote/models/ (installed mode)
+//
+// User data (database, settings, audio) always goes to %APPDATA%/VoiceNote/
+// on Windows and ~/.voicenote/ on Linux.
 package main
 
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
 	"github.com/liuyngchng/voice-note-desktop/internal/database"
-	"github.com/liuyngchng/voice-note-desktop/internal/embedres"
 	"github.com/liuyngchng/voice-note-desktop/internal/settings"
 	"github.com/liuyngchng/voice-note-desktop/ui"
 )
+
+// findModelDir returns the path to the models directory. It tries:
+// 1. ./models/ adjacent to the current working directory, then
+// 2. %APPDATA%/VoiceNote/models/ (Windows) or ~/.voicenote/models/ (Unix).
+//
+// The function checks for model.onnx as a sentinel file.
+func findModelDir(dataDir string) string {
+	// Portable: check ./models/ relative to the current working directory.
+	cwd, err := os.Getwd()
+	if err == nil {
+		portable := filepath.Join(cwd, "models")
+		if _, err := os.Stat(filepath.Join(portable, "model.onnx")); err == nil {
+			slog.Info("using portable model directory", "path", portable)
+			return portable
+		}
+	}
+
+	// Also check ./models/ relative to the executable.
+	exePath, err := os.Executable()
+	if err == nil {
+		exeDir := filepath.Dir(exePath)
+		portable := filepath.Join(exeDir, "models")
+		if _, err := os.Stat(filepath.Join(portable, "model.onnx")); err == nil {
+			slog.Info("using portable model directory", "path", portable)
+			return portable
+		}
+	}
+
+	// Fallback: installed mode.
+	fallback := filepath.Join(dataDir, "models")
+	slog.Info("using installed model directory", "path", fallback)
+	return fallback
+}
 
 func main() {
 	// Setup structured logging.
@@ -20,20 +60,11 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
-	// Determine data directory.
+	// Determine data directory (user data: DB, settings, audio).
 	dataDir := database.DefaultDataDir()
 
-	// If models are embedded in the binary (build tag: embed), extract them
-	// to a subdirectory of dataDir. Otherwise, models are expected on disk
-	// at dataDir/models/.
-	if embedres.Available() {
-		modelDir, err := embedres.EnsureModels(dataDir)
-		if err != nil {
-			slog.Error("Failed to extract embedded models", "error", err)
-			os.Exit(1)
-		}
-		slog.Info("Models extracted from binary", "dir", modelDir)
-	}
+	// Determine model directory (portable-first).
+	modelDir := findModelDir(dataDir)
 
 	// Load settings.
 	store, err := settings.LoadStore(dataDir)
@@ -55,7 +86,7 @@ func main() {
 	w := a.NewWindow("语音笔记")
 
 	// Build and run the UI.
-	nav := ui.NewApp(w, dataDir, db.RecordDAO, store)
+	nav := ui.NewApp(w, dataDir, modelDir, db.RecordDAO, store)
 	nav.Show()
 
 	w.Resize(fyne.NewSize(420, 720))

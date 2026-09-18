@@ -15,9 +15,10 @@ import (
 
 // App is the application shell, managing window and navigation between screens.
 type App struct {
-	win     fyne.Window
-	dataDir string
-	theme   voiceNoteTheme
+	win      fyne.Window
+	dataDir  string
+	modelDir string
+	theme    voiceNoteTheme
 
 	repo      *data.Repository
 	store     *settings.Store
@@ -25,18 +26,19 @@ type App struct {
 }
 
 // NewApp constructs the application shell with all backend dependencies.
-func NewApp(win fyne.Window, dataDir string, dao *database.RecordDAO, store *settings.Store) *App {
+func NewApp(win fyne.Window, dataDir, modelDir string, dao *database.RecordDAO, store *settings.Store) *App {
 	a := &App{
-		win:     win,
-		dataDir: dataDir,
-		repo:    data.NewRepository(dao),
-		store:   store,
+		win:      win,
+		dataDir:  dataDir,
+		modelDir: modelDir,
+		repo:     data.NewRepository(dao),
+		store:    store,
 	}
 
 	// Initialize the offline ASR engine in the background. UI proceeds even if
 	// the model fails to load; the home screen will show the appropriate banner.
 	go func() {
-		engine, err := asr.New(dataDir)
+		engine, err := asr.New(modelDir)
 		if err != nil {
 			a.asrEngine = nil
 			return

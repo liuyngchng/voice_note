@@ -38,10 +38,9 @@ func newSettingsScreen(win fyne.Window, app *App) fyne.CanvasObject {
 	vm.dataDir.Wrapping = fyne.TextWrapWord
 
 	// Model status.
-	modelDir := filepath.Join(app.dataDir, "models")
-	vm.modelStatus = widget.NewLabel(checkModelStatus(modelDir, "model.onnx"))
-	vm.vadStatus = widget.NewLabel(checkModelStatus(modelDir, "silero_vad.onnx"))
-	vm.punctStatus = widget.NewLabel(checkModelStatus(modelDir, "punct_ct_transformer.onnx"))
+	vm.modelStatus = widget.NewLabel(checkModelStatus(app.modelDir, "model.onnx"))
+	vm.vadStatus = widget.NewLabel(checkModelStatus(app.modelDir, "silero_vad.onnx"))
+	vm.punctStatus = widget.NewLabel(checkModelStatus(app.modelDir, "punct_ct_transformer.onnx"))
 
 	// Login status.
 	vm.loginStatus = widget.NewLabel("")
