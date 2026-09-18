@@ -9,6 +9,7 @@ import (
 	"fyne.io/fyne/v2/app"
 
 	"github.com/liuyngchng/voice-note-desktop/internal/database"
+	"github.com/liuyngchng/voice-note-desktop/internal/embedres"
 	"github.com/liuyngchng/voice-note-desktop/internal/settings"
 	"github.com/liuyngchng/voice-note-desktop/ui"
 )
@@ -21,6 +22,18 @@ func main() {
 
 	// Determine data directory.
 	dataDir := database.DefaultDataDir()
+
+	// If models are embedded in the binary (build tag: embed), extract them
+	// to a subdirectory of dataDir. Otherwise, models are expected on disk
+	// at dataDir/models/.
+	if embedres.Available() {
+		modelDir, err := embedres.EnsureModels(dataDir)
+		if err != nil {
+			slog.Error("Failed to extract embedded models", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("Models extracted from binary", "dir", modelDir)
+	}
 
 	// Load settings.
 	store, err := settings.LoadStore(dataDir)
