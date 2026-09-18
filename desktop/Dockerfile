@@ -19,6 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libwayland-dev wayland-protocols libxkbcommon-dev \
     # Audio capture (ALSA)
     libasound2-dev \
+    # ELF editor (fix RPATH after build)
+    patchelf \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Go 1.24 from the host-cached tarball (see build/deps/).

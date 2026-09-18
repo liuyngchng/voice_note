@@ -1,6 +1,0 @@
-# Go toolchain cache (downloaded by build.sh, ~70MB)
-build/deps/
-
-# Build artifacts
-voice-note-desktop
-.gocache/

@@ -13,6 +13,11 @@ GO_TAR="go${GO_VERSION}.linux-amd64.tar.gz"
 GO_URL="https://golang.google.cn/dl/${GO_TAR}"
 DEPS_DIR="$SCRIPT_DIR/build/deps"
 
+# ── Model sources (edit to point to your model files) ───────────
+# Linux: point to the directory containing model.onnx, tokens.txt, etc.
+# Default: ~/.voicenote/models (the app's own data dir)
+MODEL_SRC="${MODEL_SRC:-$HOME/.voicenote/models}"
+
 cd "$SCRIPT_DIR"
 
 # ── 1. Check prerequisites ──────────────────────────────────────
@@ -55,16 +60,91 @@ docker run --rm \
   -e GOFLAGS="-buildvcs=false" \
   -e GOCACHE=/tmp/gocache \
   -e GOPROXY="https://goproxy.cn,direct" \
+  -e HOST_UID="$(id -u)" \
+  -e HOST_GID="$(id -g)" \
   "$IMAGE" \
-  go build -o "$BINARY" .
+  bash -c "
+    go build -o '$BINARY' . && \
+    patchelf --set-rpath '\$ORIGIN' '$BINARY' && \
+    chown \$HOST_UID:\$HOST_GID '$BINARY' && \
+    echo 'RPATH fixed to \$ORIGIN'
+  "
 
-# ── 5. Verify ───────────────────────────────────────────────────
-if [[ -f "$BINARY" ]]; then
-  echo "$BINARY built ($(du -h "$BINARY" | cut -f1))"
-  echo "Note: binary is owned by root. Run: sudo chown \$USER:\$USER $BINARY"
+# ── 5. Package into tar.gz ─────────────────────────────────────────
+echo "Packaging..."
+
+# Check model files exist
+MODEL_FILES=("model.onnx" "tokens.txt" "silero_vad.onnx" "punct_ct_transformer.onnx")
+for mf in "${MODEL_FILES[@]}"; do
+  if [[ ! -f "$MODEL_SRC/$mf" ]]; then
+    echo "ERROR: model file not found: $MODEL_SRC/$mf"
+    echo "  Set MODEL_SRC env var to the directory containing model files, or"
+    echo "  download them to ~/.voicenote/models/ first."
+    exit 1
+  fi
+done
+echo "Model source: $MODEL_SRC"
+
+# Copy .so files alongside binary for local run
+SHERPA_LIB_DIR="$HOME/go/pkg/mod/github.com/k2-fsa/sherpa-onnx-go-linux@v1.13.6/lib/x86_64-unknown-linux-gnu"
+if [[ -d "$SHERPA_LIB_DIR" ]]; then
+  rm -f "$SCRIPT_DIR"/*.so
+  cp "$SHERPA_LIB_DIR"/*.so "$SCRIPT_DIR/"
 else
-  echo "Build failed: $BINARY not found"
-  exit 1
+  echo "WARNING: sherpa-onnx .so dir not found at $SHERPA_LIB_DIR"
 fi
 
-echo "Done: $BINARY"
+# Create distributable tarball.
+# Uses symlinks to avoid copying 1.2GB of model files into a temp directory.
+TMP_DIR=$(mktemp -d)
+trap "rm -rf '$TMP_DIR'" EXIT
+
+PKG_NAME="voice-note-desktop-$(date +%Y%m%d)"
+PKG_DIR="$TMP_DIR/$PKG_NAME"
+mkdir -p "$PKG_DIR/models"
+
+# Binary and .so — small, copy is fine
+cp "$BINARY" "$PKG_DIR/"
+cp "$SCRIPT_DIR"/*.so "$PKG_DIR/"
+
+# Models — symlink to avoid duplicating 1.2GB on disk
+for mf in "${MODEL_FILES[@]}"; do
+  ln -s "$(readlink -f "$MODEL_SRC/$mf")" "$PKG_DIR/models/$mf"
+done
+
+# install script
+cat > "$PKG_DIR/install.sh" << 'INSTEOF'
+#!/usr/bin/env bash
+set -euo pipefail
+DEST="${1:-$HOME/.local/bin}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+mkdir -p "$DEST"
+cp "$SCRIPT_DIR"/voice-note-desktop "$DEST/"
+cp "$SCRIPT_DIR"/*.so "$DEST/"
+
+# Install models to ~/.voicenote/models/ if not already present
+MODEL_DIR="$HOME/.voicenote/models"
+mkdir -p "$MODEL_DIR"
+for f in model.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx; do
+  if [[ ! -f "$MODEL_DIR/$f" ]]; then
+    cp "$SCRIPT_DIR/models/$f" "$MODEL_DIR/"
+    echo "Model installed: $f"
+  else
+    echo "Model already exists: $f"
+  fi
+done
+
+echo "Voice Note installed to $DEST/voice-note-desktop"
+echo "Models at $MODEL_DIR/"
+echo ""
+echo "Launch the app, then go to Settings → 桌面集成 to create a desktop shortcut."
+INSTEOF
+chmod +x "$PKG_DIR/install.sh"
+
+ARCHIVE="$SCRIPT_DIR/build/$PKG_NAME.tar"
+mkdir -p "$SCRIPT_DIR/build"
+tar -cf "$ARCHIVE" -C "$TMP_DIR" --dereference "$PKG_NAME"
+
+echo "Package: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
+echo "Binary + .so also available in $SCRIPT_DIR/ for local run."
