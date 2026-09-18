@@ -9,11 +9,12 @@ FROM ubuntu:24.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Go + CGo essentials
-    ca-certificates gcc pkg-config \
+    ca-certificates gcc libc6-dev pkg-config \
     # Fyne: OpenGL rendering
     libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev \
     # Fyne: X11 window system
     libx11-dev libxrandr-dev libxcursor-dev libxinerama-dev libxi-dev \
+    libxxf86vm-dev \
     # Fyne: Wayland
     libwayland-dev wayland-protocols libxkbcommon-dev \
     # Audio capture (ALSA)
