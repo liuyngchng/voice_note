@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 setlocal enabledelayedexpansion
 title Building Voice Note Desktop
 
@@ -21,8 +22,8 @@ echo.
 echo [1/7] Checking environment...
 
 where go >nul 2>&1 || (echo ERROR: go not found in PATH & exit /b 1)
-where gcc >nul 2>&1 || (echo ERROR: gcc (MinGW-w64) not found in PATH & exit /b 1)
-where tar >nul 2>&1 || (echo ERROR: tar not found in PATH (Windows 10 1803+ required^) & exit /b 1)
+where gcc >nul 2>&1 || (echo ERROR: gcc - MinGW-w64 - not found in PATH & exit /b 1)
+where tar >nul 2>&1 || (echo ERROR: tar not found in PATH - Windows 10 1803 or newer required & exit /b 1)
 
 for /f "tokens=3" %%v in ('go version') do echo          Go %%v
 for /f "tokens=*" %%v in ('gcc --version 2^>^&1 ^| findstr /c:"gcc"') do echo          %%v
@@ -232,4 +233,4 @@ echo.
 echo   Double-click %LAUNCHER_EXE% to run.
 echo   First launch extracts ~25 MB of DLLs to %%LOCALAPPDATA%%\VoiceNote\bin\
 echo   and ~1.2 GB of models to %%APPDATA%%\VoiceNote\models\.
-echo ============================================================
+echo ============================================================
