@@ -80,10 +80,10 @@ func ReadWavInfo(path string) (WavInfo, error) {
 
 // WavWriter writes 16kHz mono 16-bit WAV files incrementally.
 type WavWriter struct {
-	file        *os.File
-	dataBytes   int64
-	lastSync    time.Time
-	writeErr    error
+	file      *os.File
+	dataBytes int64
+	lastSync  time.Time
+	writeErr  error
 }
 
 // NewWavWriter creates a WAV file and writes the initial header (dataSize=0).

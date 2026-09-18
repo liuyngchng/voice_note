@@ -19,9 +19,9 @@ type App struct {
 	dataDir string
 	theme   voiceNoteTheme
 
-	repo       *data.Repository
-	store      *settings.Store
-	asrEngine  *asr.Engine
+	repo      *data.Repository
+	store     *settings.Store
+	asrEngine *asr.Engine
 }
 
 // NewApp constructs the application shell with all backend dependencies.

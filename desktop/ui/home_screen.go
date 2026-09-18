@@ -15,12 +15,12 @@ import (
 
 // homeViewModel manages home screen state.
 type homeViewModel struct {
-	app      *App
-	todayCount *widget.Label
-	totalCount *widget.Label
+	app         *App
+	todayCount  *widget.Label
+	totalCount  *widget.Label
 	modelBanner *widget.Label
 	recordList  *widget.List
-	records   []domain.VoiceRecord
+	records     []domain.VoiceRecord
 }
 
 // newHomeScreen builds the home page with stats, model status, and recent records.
@@ -41,11 +41,18 @@ func newHomeScreen(win fyne.Window, app *App) fyne.CanvasObject {
 		},
 		func(i int, obj fyne.CanvasObject) {
 			rec := vm.records[i]
-			obj.(*widget.Label).SetText(rec.Title)
+			label := obj.(*widget.Label)
+			loc := time.Local
+			label.SetText(rec.Title + " · " + rec.StartTime.In(loc).Format("01/02 15:04"))
 		},
 	)
 
-	// Toolbar actions.
+	vm.recordList.OnSelected = func(id widget.ListItemID) {
+		if id >= 0 && id < len(vm.records) {
+			win.SetContent(app.detailScreen(vm.records[id].ID))
+		}
+	}
+
 	recordBtn := widget.NewButton("新建录音", func() {
 		win.SetContent(app.recordingScreen())
 	})
@@ -65,7 +72,6 @@ func newHomeScreen(win fyne.Window, app *App) fyne.CanvasObject {
 		statCard("总记录", "0"),
 	)
 
-	// Reload counts.
 	go vm.loadStats(statsRow)
 
 	content := container.NewBorder(
@@ -89,7 +95,6 @@ func (vm *homeViewModel) loadStats(statsRow *fyne.Container) {
 		return
 	}
 
-	// Count today's records.
 	now := time.Now()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	todayCount := 0
@@ -99,19 +104,22 @@ func (vm *homeViewModel) loadStats(statsRow *fyne.Container) {
 		}
 	}
 
-	// Update UI on the main thread via fyne.Do.
+	// Rebuild stats cards with actual numbers.
+	todayCard := statCard("今日记录", fmt.Sprintf("%d", todayCount))
+	totalCard := statCard("总记录", fmt.Sprintf("%d", len(records)))
+
 	fyne.Do(func() {
-		vm.todayCount.SetText(fmt.Sprintf("%d", todayCount))
-		vm.totalCount.SetText(fmt.Sprintf("%d", len(records)))
+		statsRow.Objects = []fyne.CanvasObject{todayCard, totalCard}
+		statsRow.Refresh()
 		vm.records = records
-		if len(vm.records) > 2 {
-			vm.records = vm.records[:2]
+		if len(vm.records) > 5 {
+			vm.records = vm.records[:5]
 		}
 		vm.recordList.Refresh()
 
 		// Update model banner.
-		if vm.app.asrEngine == nil {
-			vm.modelBanner.SetText("离线模型未安装或加载失败，请检查模型文件")
+		if vm.app.asrEngine == nil || !vm.app.asrEngine.IsReady() {
+			vm.modelBanner.SetText("离线模型未加载，请确保 ~/.voicenote/models/ 中有模型文件")
 		} else {
 			vm.modelBanner.SetText("")
 			vm.modelBanner.Hide()

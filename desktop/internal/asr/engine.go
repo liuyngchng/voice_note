@@ -16,7 +16,7 @@ import (
 type ModelStatus int
 
 const (
-	StatusUnknown       ModelStatus = iota
+	StatusUnknown ModelStatus = iota
 	StatusMissing
 	StatusLoading
 	StatusReady
@@ -70,7 +70,7 @@ func New(dataDir string) (*Engine, error) {
 	modelDir := filepath.Join(dataDir, "models")
 	e.modelDir = modelDir
 
-	modelPath := filepath.Join(modelDir, "model.int8.onnx")
+	modelPath := filepath.Join(modelDir, "model.onnx")
 	tokensPath := filepath.Join(modelDir, "tokens.txt")
 	vadPath := filepath.Join(modelDir, "silero_vad.onnx")
 	punctPath := filepath.Join(modelDir, "punct_ct_transformer.onnx")
@@ -308,4 +308,3 @@ func (e *Engine) updateStatus(s ModelStatus) {
 	default:
 	}
 }
-

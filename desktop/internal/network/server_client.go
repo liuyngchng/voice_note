@@ -133,14 +133,14 @@ func (c *ServerClient) doUpload(serverURI, token, audioFilePath string, record d
 		inspectorName = record.Speakers[0]
 	}
 	metadata := map[string]string{
-		"id":              businessID,
-		"title":           record.Title,
-		"description":     record.Description,
-		"inspector_name":  inspectorName,
-		"customer_name":   "未知",
+		"id":               businessID,
+		"title":            record.Title,
+		"description":      record.Description,
+		"inspector_name":   inspectorName,
+		"customer_name":    "未知",
 		"customer_address": "",
 		"inspection_date":  time.Now().Format(time.RFC3339),
-		"source_type":     record.SourceType,
+		"source_type":      record.SourceType,
 	}
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 
 // DB wraps the SQLite connection and provides RecordDAO access.
 type DB struct {
-	conn     *sql.DB
+	conn      *sql.DB
 	RecordDAO *RecordDAO
 }
 

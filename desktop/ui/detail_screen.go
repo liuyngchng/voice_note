@@ -4,6 +4,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -58,7 +59,6 @@ func newDetailScreen(win fyne.Window, app *App, recordID int64) fyne.CanvasObjec
 	)
 
 	go vm.loadRecord()
-	// Default to audio tab.
 	tabBar.SetSelected("音频")
 
 	return content
@@ -115,7 +115,6 @@ func (vm *detailViewModel) buildAudioTab(win fyne.Window, app *App) fyne.CanvasO
 		if rec.AudioFilePath == "" {
 			return
 		}
-		// Load WAV metadata.
 		info, err := audio.ReadWavInfo(rec.AudioFilePath)
 		if err != nil {
 			return
@@ -126,7 +125,6 @@ func (vm *detailViewModel) buildAudioTab(win fyne.Window, app *App) fyne.CanvasO
 		}
 		defer player.Close()
 
-		// Read PCM data and play (naive: reads entire file into memory).
 		go func() {
 			data, err := loadPCMData(rec.AudioFilePath, info)
 			if err == nil {
@@ -135,23 +133,31 @@ func (vm *detailViewModel) buildAudioTab(win fyne.Window, app *App) fyne.CanvasO
 		}()
 	})
 
-	// Upload button.
-	uploadBtn := widget.NewButton("上传到服务器", func() {
-		// TODO: wire up upload
-	})
-	uploadBtn.Disable()
-
 	// Delete button.
 	deleteBtn := widget.NewButton("删除记录", func() {
 		ctx := context.Background()
-		vm.app.repo.Delete(ctx, rec.ID)
+		app.repo.Delete(ctx, rec.ID)
 		win.SetContent(app.homeScreen())
 	})
 	deleteBtn.Importance = widget.DangerImportance
 
+	audioInfo := widget.NewLabel("")
+	if rec.AudioFilePath != "" {
+		info, err := audio.ReadWavInfo(rec.AudioFilePath)
+		if err == nil {
+			bytesPerSec := int64(info.SampleRate) * int64(info.Channels) * int64(info.BitsPerSample/8)
+			durationSec := int64(0)
+			if bytesPerSec > 0 {
+				durationSec = info.DataSize / bytesPerSec
+			}
+			audioInfo.SetText(fmt.Sprintf("时长: %s  |  采样率: %d Hz  |  声道: %d",
+				formatDuration(durationSec), info.SampleRate, info.Channels))
+		}
+	}
+
 	return container.NewVBox(
+		audioInfo,
 		playBtn,
-		uploadBtn,
 		deleteBtn,
 	)
 }
@@ -163,16 +169,19 @@ func (vm *detailViewModel) buildTranscriptTab(win fyne.Window, app *App) fyne.Ca
 
 	text := "转写内容为空"
 	if rec.TranscriptFilePath != "" {
-		data, err := loadFileContent(rec.TranscriptFilePath)
-		if err == nil && data != "" {
-			text = data
+		data, err := os.ReadFile(rec.TranscriptFilePath)
+		if err == nil && len(data) > 0 {
+			text = string(data)
 		}
 	}
 
 	label := widget.NewLabel(text)
 	label.Wrapping = fyne.TextWrapWord
 
-	return container.NewVBox(label)
+	// Scroll container for long transcripts.
+	scroll := container.NewScroll(label)
+
+	return container.NewVBox(scroll)
 }
 
 // ---- Summary tab ----
@@ -192,14 +201,8 @@ func (vm *detailViewModel) buildSummaryTab(win fyne.Window, app *App) fyne.Canva
 	label := widget.NewLabel(text)
 	label.Wrapping = fyne.TextWrapWord
 
-	generateBtn := widget.NewButton("生成总结", func() {
-		// TODO: wire up LLM summary generation
-	})
-	if rec.Summary != nil {
-		generateBtn.SetText("重新生成")
-	}
-
-	return container.NewVBox(label, generateBtn)
+	scroll := container.NewScroll(label)
+	return container.NewVBox(scroll)
 }
 
 // ---- Helpers ----
@@ -238,26 +241,6 @@ func formatSummary(s *domain.RecordSummary) string {
 		}
 	}
 	return out
-}
-
-func loadFileContent(path string) (string, error) {
-	return readFileContent(path)
-}
-
-// ---- Low-level helpers (platform-independent file reading) ----
-
-func readFileContent(path string) (string, error) {
-	file, err := openFileForRead(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	data := make([]byte, 65536)
-	n, err := file.Read(data)
-	if err != nil {
-		return "", err
-	}
-	return string(data[:n]), nil
 }
 
 func loadPCMData(path string, info audio.WavInfo) ([]float32, error) {

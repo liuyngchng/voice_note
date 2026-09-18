@@ -16,24 +16,24 @@ const (
 
 // VoiceRecord represents a single voice recording with its metadata.
 type VoiceRecord struct {
-	ID                int64             `json:"id"`
-	Title             string            `json:"title"`
-	Memo              string            `json:"memo"`
-	Description       string            `json:"description"`
-	Speakers          []string          `json:"speakers"`
-	SourceType        string            `json:"source_type"`
-	StartTime         time.Time         `json:"start_time"`
-	EndTime           *time.Time        `json:"end_time,omitempty"`
-	TranscriptStatus  ProcessingStatus  `json:"transcript_status"`
-	AudioFilePath     string            `json:"audio_file_path"`
+	ID                 int64            `json:"id"`
+	Title              string           `json:"title"`
+	Memo               string           `json:"memo"`
+	Description        string           `json:"description"`
+	Speakers           []string         `json:"speakers"`
+	SourceType         string           `json:"source_type"`
+	StartTime          time.Time        `json:"start_time"`
+	EndTime            *time.Time       `json:"end_time,omitempty"`
+	TranscriptStatus   ProcessingStatus `json:"transcript_status"`
+	AudioFilePath      string           `json:"audio_file_path"`
 	TranscriptFilePath string           `json:"transcript_file_path"`
-	CreatedAt         time.Time         `json:"created_at"`
+	CreatedAt          time.Time        `json:"created_at"`
 	// AI summary (online LLM)
-	SummaryStatus     ProcessingStatus  `json:"summary_status"`
-	Summary           *RecordSummary    `json:"summary,omitempty"`
+	SummaryStatus      ProcessingStatus `json:"summary_status"`
+	Summary            *RecordSummary   `json:"summary,omitempty"`
 	SummaryGeneratedAt *time.Time       `json:"summary_generated_at,omitempty"`
 	// Server upload record ID (non-empty means uploaded)
-	ServerRecordID    string            `json:"server_record_id"`
+	ServerRecordID string `json:"server_record_id"`
 }
 
 // RecordSummary is the AI-generated meeting summary.

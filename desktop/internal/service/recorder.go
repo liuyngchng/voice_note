@@ -12,20 +12,20 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/liuyngchng/voice-note-desktop/internal/asr"
 	"github.com/liuyngchng/voice-note-desktop/internal/audio"
 	"github.com/liuyngchng/voice-note-desktop/internal/common"
-	"github.com/liuyngchng/voice-note-desktop/internal/asr"
 )
 
 const (
-	decodeIntervalMs  = 5000
-	recentCharWindow  = 100
+	decodeIntervalMs     = 5000
+	recentCharWindow     = 100
 	decodeRingBufferSize = 640000 // 20s at 16kHz/16bit/mono
-	diskCheckInterval = 5 * time.Minute
-	maxTranscriptChars = 1000000
+	diskCheckInterval    = 5 * time.Minute
+	maxTranscriptChars   = 1000000
 	punctuationChunkSize = 5000
-	checkpointInterval = 2 * time.Minute
-	activeRecordingFile = "active_recording.txt"
+	checkpointInterval   = 2 * time.Minute
+	activeRecordingFile  = "active_recording.txt"
 )
 
 // State holds the current recording session state, exposed to the UI via channels.
@@ -41,13 +41,13 @@ type State struct {
 
 // Recorder orchestrates a single recording session.
 type Recorder struct {
-	audioRec RecorderImpl
+	audioRec  RecorderImpl
 	asrEngine *asr.Engine
-	dataDir     string
+	dataDir   string
 
-	stateCh   chan State
-	stopCh    chan struct{}
-	doneCh    chan struct{}
+	stateCh chan State
+	stopCh  chan struct{}
+	doneCh  chan struct{}
 }
 
 // RecorderImpl is the audio capture implementation (platform-specific).

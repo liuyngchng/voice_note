@@ -3,6 +3,9 @@ package ui
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -11,14 +14,16 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/liuyngchng/voice-note-desktop/domain"
+	"github.com/liuyngchng/voice-note-desktop/internal/asr"
+	"github.com/liuyngchng/voice-note-desktop/internal/audio"
 )
 
 // historyViewModel manages history screen state.
 type historyViewModel struct {
-	app        *App
-	records    []domain.VoiceRecord
+	app         *App
+	records     []domain.VoiceRecord
 	searchEntry *widget.Entry
-	list       *widget.List
+	list        *widget.List
 }
 
 // newHistoryScreen builds the history page with search and list.
@@ -148,14 +153,101 @@ func (vm *historyViewModel) importAudio(path string, win fyne.Window) {
 		return
 	}
 
-	// Import audio file (TODO: ASR processing).
+	// Copy audio into app-managed directory.
 	destPath, err := importAudioFile(path, vm.app.dataDir, recordID)
 	if err != nil {
 		return
 	}
-	_ = destPath
+	_ = vm.app.repo.UpdateAudioFilePath(ctx, recordID, destPath, now.UnixMilli())
 
 	fyne.Do(func() {
 		vm.loadAll()
 	})
+
+	// Background ASR processing.
+	go vm.processImportedAudio(recordID, destPath)
+}
+
+// processImportedAudio runs offline ASR on the imported audio and persists
+// the transcript, mirroring Android's AudioImporter.processAudio.
+func (vm *historyViewModel) processImportedAudio(recordID int64, audioPath string) {
+	ctx := context.Background()
+
+	if vm.app.asrEngine == nil || !vm.app.asrEngine.IsReady() {
+		_ = vm.app.repo.UpdateTranscriptStatus(ctx, recordID, domain.StatusUnavailable)
+		return
+	}
+
+	_ = vm.app.repo.UpdateTranscriptStatus(ctx, recordID, domain.StatusProcessing)
+
+	text, err := transcribeFile(vm.app.asrEngine, audioPath)
+	if err != nil || text == "" {
+		_ = vm.app.repo.UpdateTranscriptStatus(ctx, recordID, domain.StatusUnavailable)
+		return
+	}
+
+	// Write transcript file.
+	audioDir := audioDirPath(vm.app.dataDir, recordID)
+	if err := os.MkdirAll(audioDir, 0700); err == nil {
+		txtPath := filepath.Join(audioDir, fmt.Sprintf("import_%s.txt", time.Now().Format("20060102_150405")))
+		if os.WriteFile(txtPath, []byte(text), 0600) == nil {
+			_ = vm.app.repo.UpdateTranscriptWithFile(ctx, recordID, txtPath)
+		}
+	}
+	_ = vm.app.repo.UpdateTranscriptStatus(ctx, recordID, domain.StatusCompleted)
+
+	// Refresh list so status is reflected.
+	fyne.Do(func() {
+		vm.loadAll()
+	})
+}
+
+// transcribeFile decodes an audio file (WAV/PCM) in chunks and returns the
+// concatenated transcript.
+func transcribeFile(engine *asr.Engine, audioPath string) (string, error) {
+	info, err := audio.ReadWavInfo(audioPath)
+	if err != nil {
+		return "", err
+	}
+	bytesPerSec := int64(info.SampleRate) * int64(info.Channels) * int64(info.BitsPerSample/8)
+	if bytesPerSec <= 0 {
+		return "", fmt.Errorf("invalid WAV format")
+	}
+
+	chunkSizeBytes := int64(30 * bytesPerSec) // 30-second chunks
+	if chunkSizeBytes < 32000 {
+		chunkSizeBytes = 32000
+	}
+
+	f, err := os.Open(audioPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	_, err = f.Seek(info.DataOffset, 0)
+	if err != nil {
+		return "", err
+	}
+
+	var result string
+	remaining := info.DataSize
+	buf := make([]byte, chunkSizeBytes)
+	for remaining > 0 {
+		toRead := chunkSizeBytes
+		if remaining < toRead {
+			toRead = remaining
+		}
+		n, err := f.Read(buf[:toRead])
+		if err != nil && n == 0 {
+			break
+		}
+		chunk := buf[:n]
+		text, err := engine.Decode(audio.ConvertPCMToFloats(chunk))
+		if err == nil && text != "" {
+			result += text
+		}
+		remaining -= int64(n)
+	}
+	return result, nil
 }
