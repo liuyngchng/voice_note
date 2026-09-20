@@ -7,6 +7,24 @@
 
 FROM ubuntu:24.04
 
+# Optional proxy for apt-get (passed via --build-arg, e.g. HTTP_PROXY=http://proxy:8080).
+# Empty by default → direct connection, no behavior change.
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY=""
+# apt ignores the UPPERCASE vars (httpoxy); it only honors lowercase or Acquire config.
+# Set both so Go / wget / apt all pick the proxy up.
+ENV HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" NO_PROXY="$NO_PROXY" \
+    http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" no_proxy="$NO_PROXY"
+
+# Explicit apt proxy config (only written when a proxy was actually provided).
+RUN if [ -n "$HTTP_PROXY" ]; then \
+        echo "Acquire::http::Proxy \"$HTTP_PROXY\";" > /etc/apt/apt.conf.d/01proxy; \
+    fi; \
+    if [ -n "$HTTPS_PROXY" ]; then \
+        echo "Acquire::https::Proxy \"$HTTPS_PROXY\";" >> /etc/apt/apt.conf.d/01proxy; \
+    fi
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Go + CGo essentials
     ca-certificates gcc libc6-dev pkg-config \

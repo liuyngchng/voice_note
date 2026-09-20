@@ -18,6 +18,39 @@ DEPS_DIR="$SCRIPT_DIR/build/deps"
 # Default: ~/.voicenote/models (the app's own data dir)
 MODEL_SRC="${MODEL_SRC:-$HOME/.voicenote/models}"
 
+# ── Optional proxy (build.sh http_proxy=... https_proxy=... no_proxy=...) ──
+HTTP_PROXY_VAL=""
+HTTPS_PROXY_VAL=""
+NO_PROXY_VAL=""
+for arg in "$@"; do
+  case "$arg" in
+    http_proxy=*|HTTP_PROXY=*)   HTTP_PROXY_VAL="${arg#*=}" ;;
+    https_proxy=*|HTTPS_PROXY=*) HTTPS_PROXY_VAL="${arg#*=}" ;;
+    no_proxy=*|NO_PROXY=*)       NO_PROXY_VAL="${arg#*=}" ;;
+    *) echo "WARNING: ignoring unknown arg: $arg" ;;
+  esac
+done
+# Fall back to env vars if not passed on command line.
+HTTP_PROXY_VAL="${HTTP_PROXY_VAL:-${HTTP_PROXY:-${http_proxy:-}}}"
+HTTPS_PROXY_VAL="${HTTPS_PROXY_VAL:-${HTTPS_PROXY:-${https_proxy:-}}}"
+NO_PROXY_VAL="${NO_PROXY_VAL:-${NO_PROXY:-${no_proxy:-}}}"
+
+# Ensure http:// scheme (apt / wget / Docker all need it).
+add_scheme() { local v="$1"; [[ -z "$v" || "$v" == *"://"* ]] && { printf '%s' "$v"; return; }; printf 'http://%s' "$v"; }
+HTTP_PROXY_VAL="$(add_scheme "$HTTP_PROXY_VAL")"
+HTTPS_PROXY_VAL="$(add_scheme "$HTTPS_PROXY_VAL")"
+
+DOCKER_BUILD_ARGS=()
+DOCKER_RUN_ENV=()
+if [[ -n "$HTTP_PROXY_VAL" || -n "$HTTPS_PROXY_VAL" ]]; then
+  echo "Proxy: http=${HTTP_PROXY_VAL:-<none>} https=${HTTPS_PROXY_VAL:-<none>} no_proxy=${NO_PROXY_VAL:-<none>}"
+  export HTTP_PROXY="$HTTP_PROXY_VAL" HTTPS_PROXY="$HTTPS_PROXY_VAL"
+  export http_proxy="$HTTP_PROXY_VAL" https_proxy="$HTTPS_PROXY_VAL"
+  export NO_PROXY="$NO_PROXY_VAL"     no_proxy="$NO_PROXY_VAL"
+  DOCKER_BUILD_ARGS=(--build-arg "HTTP_PROXY=$HTTP_PROXY_VAL" --build-arg "HTTPS_PROXY=$HTTPS_PROXY_VAL" --build-arg "NO_PROXY=$NO_PROXY_VAL")
+  DOCKER_RUN_ENV=(-e "HTTP_PROXY=$HTTP_PROXY_VAL" -e "HTTPS_PROXY=$HTTPS_PROXY_VAL" -e "NO_PROXY=$NO_PROXY_VAL" -e "http_proxy=$HTTP_PROXY_VAL" -e "https_proxy=$HTTPS_PROXY_VAL" -e "no_proxy=$NO_PROXY_VAL")
+fi
+
 cd "$SCRIPT_DIR"
 
 # ── 1. Check prerequisites ──────────────────────────────────────
@@ -35,7 +68,11 @@ fi
 mkdir -p "$DEPS_DIR"
 if [[ ! -f "$DEPS_DIR/$GO_TAR" ]]; then
   echo "Downloading Go $GO_VERSION ..."
-  wget -q --show-progress "$GO_URL" -O "$DEPS_DIR/$GO_TAR"
+  if [[ -n "$HTTP_PROXY_VAL" || -n "$HTTPS_PROXY_VAL" ]]; then
+    wget -q --show-progress -e use_proxy=yes "$GO_URL" -O "$DEPS_DIR/$GO_TAR"
+  else
+    wget -q --show-progress "$GO_URL" -O "$DEPS_DIR/$GO_TAR"
+  fi
   echo "Go tarball cached at build/deps/$GO_TAR"
 else
   echo "Go $GO_VERSION cached ($(du -h "$DEPS_DIR/$GO_TAR" | cut -f1))"
@@ -44,7 +81,7 @@ fi
 # ── 3. Build Docker image if missing ────────────────────────────
 if ! docker image inspect "$IMAGE" &>/dev/null; then
   echo "Building Docker image $IMAGE ..."
-  docker build -t "$IMAGE" -f Dockerfile .
+  docker build "${DOCKER_BUILD_ARGS[@]}" -t "$IMAGE" -f Dockerfile .
   echo "Docker image $IMAGE built"
 else
   echo "Docker image $IMAGE ready"
@@ -60,6 +97,7 @@ docker run --rm \
   -e GOFLAGS="-buildvcs=false" \
   -e GOCACHE=/tmp/gocache \
   -e GOPROXY="https://goproxy.cn,direct" \
+  ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \
   "$IMAGE" \

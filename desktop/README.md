@@ -57,6 +57,22 @@ models/
 
 首次运行会自动下载 Go 工具链并构建 Docker 镜像，之后编译 + 打包一气呵成。
 
+**代理环境**：如果构建机器需要通过代理上网，可以传入代理参数：
+
+```bash
+./build.sh http_proxy=<PROXY_HOST>:<PROXY_PORT> https_proxy=<PROXY_HOST>:<PROXY_PORT>
+```
+
+带不带 scheme 都支持（不带会自动补 `http://`），例如：
+
+```bash
+./build.sh http_proxy=your.proxy.domain:8080 https_proxy=your.proxy.domain:8080
+# 或
+./build.sh http_proxy=http://your.proxy.domain:8080 https_proxy=http://your.proxy.domain:8080
+```
+
+代理会自动注入到 `wget`（下载 Go 工具链）、`docker build`（apt-get 安装依赖）、`docker run`（go build 拉取模块）三个阶段。不需要代理时直接 `./build.sh` 即可，行为不变。
+
 产物：
 - `voice-note-desktop` + 3 个 `.so`（本地可直接运行）
 - `build/voice-note-desktop-YYYYMMDD.tar`（分发包）
