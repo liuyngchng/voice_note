@@ -38,7 +38,7 @@ type recordingViewModel struct {
 }
 
 // newRecordingScreen builds the recording page.
-func newRecordingScreen(win fyne.Window, app *App) fyne.CanvasObject {
+func newRecordingScreen(app *App) fyne.CanvasObject {
 	vm := &recordingViewModel{
 		app:            app,
 		titleLabel:     widget.NewLabel("录音中"),
@@ -49,6 +49,9 @@ func newRecordingScreen(win fyne.Window, app *App) fyne.CanvasObject {
 	}
 
 	vm.transcriptArea.Wrapping = fyne.TextWrapWord
+
+	// Make the stop button stand out: red (danger) and on its own line.
+	vm.stopBtn.Importance = widget.DangerImportance
 
 	vm.stopBtn.OnTapped = func() {
 		vm.isStopping = true
@@ -61,9 +64,12 @@ func newRecordingScreen(win fyne.Window, app *App) fyne.CanvasObject {
 
 	vm.statusLabel.TextStyle = fyne.TextStyle{Italic: true}
 
+	// Stop button: fixed width, not full-width — centered in the bottom bar.
+	buttonBox := container.NewCenter(container.NewPadded(vm.stopBtn))
+
 	content := container.NewBorder(
 		vm.titleLabel,
-		container.NewBorder(nil, nil, nil, vm.stopBtn, vm.statusLabel),
+		container.NewVBox(vm.statusLabel, buttonBox),
 		nil, nil,
 		container.NewVBox(
 			vm.durationLabel,
@@ -71,12 +77,16 @@ func newRecordingScreen(win fyne.Window, app *App) fyne.CanvasObject {
 		),
 	)
 
-	go vm.startRecording(win)
+	// Mark recording active immediately so navigation is blocked while the
+	// recording screen is shown (startRecording may still be opening the mic).
+	app.beginRecording()
+
+	go vm.startRecording()
 
 	return content
 }
 
-func (vm *recordingViewModel) startRecording(win fyne.Window) {
+func (vm *recordingViewModel) startRecording() {
 	ctx := context.Background()
 
 	now := time.Now()
@@ -93,6 +103,7 @@ func (vm *recordingViewModel) startRecording(win fyne.Window) {
 	if err != nil {
 		fyne.Do(func() {
 			vm.statusLabel.SetText("创建录音记录失败")
+			vm.app.endRecording()
 		})
 		return
 	}
@@ -103,6 +114,7 @@ func (vm *recordingViewModel) startRecording(win fyne.Window) {
 	if err != nil {
 		fyne.Do(func() {
 			vm.statusLabel.SetText("无法打开麦克风: " + err.Error())
+			vm.app.endRecording()
 		})
 		return
 	}
@@ -114,15 +126,16 @@ func (vm *recordingViewModel) startRecording(win fyne.Window) {
 	if err := recorder.Start(recordID); err != nil {
 		fyne.Do(func() {
 			vm.statusLabel.SetText("启动录音失败: " + err.Error())
+			vm.app.endRecording()
 		})
 		return
 	}
 
 	// Listen for state updates.
-	go vm.stateLoop(recorder, win)
+	go vm.stateLoop(recorder)
 }
 
-func (vm *recordingViewModel) stateLoop(rec *service.Recorder, win fyne.Window) {
+func (vm *recordingViewModel) stateLoop(rec *service.Recorder) {
 	done := rec.Done()
 	stateCh := rec.StateChan()
 
@@ -192,7 +205,8 @@ finalize:
 	}
 
 	vm.isFinished = true
-	fyne.Do(func() { win.SetContent(vm.app.homeScreen()) })
+	vm.app.endRecording()
+	fyne.Do(func() { vm.app.navigate(0) })
 }
 
 func findWavFiles(dir string) []string {

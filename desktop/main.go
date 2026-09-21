@@ -17,7 +17,6 @@ import (
 	"fyne.io/fyne/v2/app"
 
 	"github.com/liuyngchng/voice-note-desktop/internal/database"
-	"github.com/liuyngchng/voice-note-desktop/internal/settings"
 	"github.com/liuyngchng/voice-note-desktop/ui"
 )
 
@@ -66,13 +65,6 @@ func main() {
 	// Determine model directory (portable-first).
 	modelDir := findModelDir(dataDir)
 
-	// Load settings.
-	store, err := settings.LoadStore(dataDir)
-	if err != nil {
-		slog.Error("failed to load settings", "error", err)
-		os.Exit(1)
-	}
-
 	// Open database.
 	db, err := database.Open(dataDir)
 	if err != nil {
@@ -86,9 +78,9 @@ func main() {
 	w := a.NewWindow("语音笔记")
 
 	// Build and run the UI.
-	nav := ui.NewApp(w, dataDir, modelDir, db.RecordDAO, store)
+	nav := ui.NewApp(w, dataDir, modelDir, db.RecordDAO)
 	nav.Show()
 
-	w.Resize(fyne.NewSize(420, 720))
+	w.Resize(fyne.NewSize(900, 640))
 	w.ShowAndRun()
 }

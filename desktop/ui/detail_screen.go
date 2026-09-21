@@ -30,7 +30,7 @@ type detailViewModel struct {
 }
 
 // newDetailScreen builds the detail page with 3 tabs (Audio, Transcript, Summary).
-func newDetailScreen(win fyne.Window, app *App, recordID int64) fyne.CanvasObject {
+func newDetailScreen(app *App, recordID int64) fyne.CanvasObject {
 	vm := &detailViewModel{app: app, recordID: recordID}
 
 	vm.titleLabel = widget.NewLabel("")
@@ -45,11 +45,11 @@ func newDetailScreen(win fyne.Window, app *App, recordID int64) fyne.CanvasObjec
 	vm.tabContainer = &fyne.Container{}
 
 	tabBar.OnChanged = func(selected string) {
-		vm.switchTab(win, app, selected)
+		vm.switchTab(app, selected)
 	}
 
 	backBtn := widget.NewButton("返回", func() {
-		win.SetContent(app.homeScreen())
+		app.goBack()
 	})
 
 	content := container.NewBorder(
@@ -84,22 +84,22 @@ func (vm *detailViewModel) loadRecord() {
 	})
 }
 
-func (vm *detailViewModel) switchTab(win fyne.Window, app *App, tab string) {
+func (vm *detailViewModel) switchTab(app *App, tab string) {
 	if vm.record == nil {
 		return
 	}
 	switch tab {
 	case "音频":
 		vm.tabContainer.Objects = []fyne.CanvasObject{
-			vm.buildAudioTab(win, app),
+			vm.buildAudioTab(app),
 		}
 	case "转写":
 		vm.tabContainer.Objects = []fyne.CanvasObject{
-			vm.buildTranscriptTab(win, app),
+			vm.buildTranscriptTab(app),
 		}
 	case "总结":
 		vm.tabContainer.Objects = []fyne.CanvasObject{
-			vm.buildSummaryTab(win, app),
+			vm.buildSummaryTab(app),
 		}
 	}
 	vm.tabContainer.Refresh()
@@ -107,7 +107,7 @@ func (vm *detailViewModel) switchTab(win fyne.Window, app *App, tab string) {
 
 // ---- Audio tab ----
 
-func (vm *detailViewModel) buildAudioTab(win fyne.Window, app *App) fyne.CanvasObject {
+func (vm *detailViewModel) buildAudioTab(app *App) fyne.CanvasObject {
 	rec := vm.record
 
 	// Play button.
@@ -137,7 +137,7 @@ func (vm *detailViewModel) buildAudioTab(win fyne.Window, app *App) fyne.CanvasO
 	deleteBtn := widget.NewButton("删除记录", func() {
 		ctx := context.Background()
 		app.repo.Delete(ctx, rec.ID)
-		win.SetContent(app.homeScreen())
+		app.goBack()
 	})
 	deleteBtn.Importance = widget.DangerImportance
 
@@ -164,7 +164,7 @@ func (vm *detailViewModel) buildAudioTab(win fyne.Window, app *App) fyne.CanvasO
 
 // ---- Transcript tab ----
 
-func (vm *detailViewModel) buildTranscriptTab(win fyne.Window, app *App) fyne.CanvasObject {
+func (vm *detailViewModel) buildTranscriptTab(app *App) fyne.CanvasObject {
 	rec := vm.record
 
 	text := "转写内容为空"
@@ -186,7 +186,7 @@ func (vm *detailViewModel) buildTranscriptTab(win fyne.Window, app *App) fyne.Ca
 
 // ---- Summary tab ----
 
-func (vm *detailViewModel) buildSummaryTab(win fyne.Window, app *App) fyne.CanvasObject {
+func (vm *detailViewModel) buildSummaryTab(app *App) fyne.CanvasObject {
 	rec := vm.record
 
 	text := "暂无总结内容"

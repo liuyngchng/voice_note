@@ -17,9 +17,6 @@ type AppSettings struct {
 	LLMAPIKey           string `json:"llm_api_key"`
 	LLMModelName        string `json:"llm_model_name"`
 	ServerURI           string `json:"server_uri"`
-	AuthToken           string `json:"auth_token"`
-	Username            string `json:"username"`
-	Password            string `json:"password"`
 }
 
 // DefaultAppSettings returns the factory defaults.
@@ -100,33 +97,6 @@ func (s *Store) UpdateServerURI(uri string) error {
 	s.settings.ServerURI = uri
 	s.mu.Unlock()
 	return s.flush()
-}
-
-// UpdateAuth persists login credentials.
-func (s *Store) UpdateAuth(token, username, password string) error {
-	s.mu.Lock()
-	s.settings.AuthToken = token
-	s.settings.Username = username
-	s.settings.Password = password
-	s.mu.Unlock()
-	return s.flush()
-}
-
-// ClearAuth removes login credentials.
-func (s *Store) ClearAuth() error {
-	s.mu.Lock()
-	s.settings.AuthToken = ""
-	s.settings.Username = ""
-	s.settings.Password = ""
-	s.mu.Unlock()
-	return s.flush()
-}
-
-// IsLoggedIn returns true when a valid auth token is present.
-func (s *Store) IsLoggedIn() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.settings.AuthToken != ""
 }
 
 func (s *Store) flush() error {

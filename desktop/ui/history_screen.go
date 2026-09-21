@@ -27,7 +27,7 @@ type historyViewModel struct {
 }
 
 // newHistoryScreen builds the history page with search and list.
-func newHistoryScreen(win fyne.Window, app *App) fyne.CanvasObject {
+func newHistoryScreen(app *App) fyne.CanvasObject {
 	vm := &historyViewModel{app: app}
 
 	vm.searchEntry = widget.NewEntry()
@@ -48,17 +48,13 @@ func newHistoryScreen(win fyne.Window, app *App) fyne.CanvasObject {
 
 	vm.list.OnSelected = func(id widget.ListItemID) {
 		if id >= 0 && id < len(vm.records) {
-			win.SetContent(app.detailScreen(vm.records[id].ID))
+			app.showDetail(vm.records[id].ID)
 		}
 	}
 
 	vm.searchEntry.OnChanged = func(query string) {
 		go vm.search(query)
 	}
-
-	backBtn := widget.NewButton("返回", func() {
-		win.SetContent(app.homeScreen())
-	})
 
 	deleteAllBtn := widget.NewButton("清空", func() {
 		dialog.ShowConfirm("清空所有记录",
@@ -68,7 +64,7 @@ func newHistoryScreen(win fyne.Window, app *App) fyne.CanvasObject {
 					return
 				}
 				go vm.deleteAll()
-			}, win)
+			}, app.win)
 	})
 	deleteAllBtn.Importance = widget.DangerImportance
 
@@ -79,14 +75,14 @@ func newHistoryScreen(win fyne.Window, app *App) fyne.CanvasObject {
 			}
 			path := reader.URI().Path()
 			reader.Close()
-			go vm.importAudio(path, win)
-		}, win)
+			go vm.importAudio(path)
+		}, app.win)
 		fd.SetFilter(nil)
 		fd.Show()
 	})
 
 	content := container.NewBorder(
-		container.NewVBox(backBtn, vm.searchEntry, importBtn, deleteAllBtn),
+		container.NewVBox(vm.searchEntry, importBtn, deleteAllBtn),
 		nil, nil, nil,
 		vm.list,
 	)
@@ -136,7 +132,7 @@ func (vm *historyViewModel) deleteAll() {
 	})
 }
 
-func (vm *historyViewModel) importAudio(path string, win fyne.Window) {
+func (vm *historyViewModel) importAudio(path string) {
 	ctx := context.Background()
 
 	now := time.Now()
