@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -111,6 +112,13 @@ fun DetailScreen(
         }
     }
 
+    LaunchedEffect(uiState.exportMessage) {
+        uiState.exportMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.dismissExportMessage()
+        }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
@@ -187,6 +195,8 @@ fun DetailScreen(
                             onSkipBack = viewModel::skipBack,
                             onSkipForward = viewModel::skipForward,
                             onShare = viewModel::shareAudio,
+                            isExporting = uiState.isExporting,
+                            onExport = viewModel::exportAudio,
                             isUploading = uiState.isUploadingToServer,
                             uploadProgressMessage = uiState.uploadProgressMessage,
                             uploadError = uiState.uploadError,
@@ -354,6 +364,8 @@ private fun AudioTab(
     onSkipBack: () -> Unit,
     onSkipForward: () -> Unit,
     onShare: () -> Unit,
+    isExporting: Boolean = false,
+    onExport: () -> Unit = {},
     isUploading: Boolean = false,
     uploadProgressMessage: String = "",
     uploadError: String? = null,
@@ -452,6 +464,17 @@ private fun AudioTab(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
+                        IconButton(onClick = onExport, enabled = !isExporting) {
+                            if (isExporting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Default.SaveAlt, contentDescription = "导出录音",
+                                    modifier = Modifier.size(22.dp))
+                            }
+                        }
                         IconButton(onClick = onShare) {
                             Icon(Icons.Default.Share, contentDescription = "分享录音")
                         }

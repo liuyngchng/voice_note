@@ -1,6 +1,10 @@
 package com.voicenote.app.core.audio
 
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -214,6 +218,48 @@ class AudioFileManager @Inject constructor(
             if (txtFile.exists()) txtFile.delete()
         }
         file.parentFile?.delete() // remove empty directory
+    }
+
+    // ── Export to public storage ─────────────────────────────────────────────
+
+    /**
+     * Copy a recording WAV file from the app-private directory to the public
+     * Downloads/VoiceNote/ directory so it can be seen when the phone is
+     * connected to a computer over USB (MTP / file manager).
+     *
+     * Uses MediaStore.Downloads (API 29+) to comply with scoped storage.
+     *
+     * @return success message on success, or failure on error.
+     */
+    fun exportToDownloads(audioFilePath: String): Result<String> {
+        if (audioFilePath.isBlank()) return Result.failure(IllegalArgumentException("音频路径为空"))
+        val source = File(audioFilePath)
+        if (!source.exists()) return Result.failure(IllegalArgumentException("录音文件不存在"))
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return Result.failure(UnsupportedOperationException("该功能要求 Android 10 或更高版本"))
+        }
+
+        return try {
+            val fileName = source.name
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/VoiceNote")
+            }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: return Result.failure(IllegalStateException("无法在公共目录创建文件"))
+
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            } ?: return Result.failure(IllegalStateException("无法写入公共目录"))
+
+            Log.i(TAG, "Exported to public Downloads: $fileName")
+            Result.success("已导出到 下载/VoiceNote/$fileName")
+        } catch (e: Exception) {
+            Log.e(TAG, "Export to Downloads failed: ${e.message}", e)
+            Result.failure(e)
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

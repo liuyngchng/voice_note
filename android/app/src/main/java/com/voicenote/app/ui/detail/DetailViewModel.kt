@@ -54,7 +54,10 @@ data class DetailUiState(
     val isUploadingToServer: Boolean = false,
     val uploadProgressMessage: String = "",
     val uploadError: String? = null,
-    val showUploadConfirm: Boolean = false
+    val showUploadConfirm: Boolean = false,
+    // Export
+    val isExporting: Boolean = false,
+    val exportMessage: String? = null
 )
 
 @HiltViewModel
@@ -205,6 +208,34 @@ class DetailViewModel @Inject constructor(
             context.startActivity(Intent.createChooser(intent, "分享总结").apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
         } catch (e: Exception) { _uiState.value = _uiState.value.copy(error = "分享失败") }
     }
+
+    // ── Export to public storage ─────────────────────────────────────────
+
+    /**
+     * Copy the recording to the public Downloads/VoiceNote/ directory so it is
+     * visible when the phone is connected to a computer. Result is surfaced via
+     * a one-shot [exportMessage] in the UI state (shown as a snackbar).
+     */
+    fun exportAudio() {
+        val record = _uiState.value.record ?: return
+        if (_uiState.value.isExporting) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isExporting = true)
+            val result = audioFileManager.exportToDownloads(record.audioFilePath)
+            result.onSuccess { message ->
+                _uiState.value = _uiState.value.copy(exportMessage = message)
+            }.onFailure { e ->
+                val msg = when (e) {
+                    is UnsupportedOperationException -> e.message
+                    else -> "导出失败: ${e.message}"
+                }
+                _uiState.value = _uiState.value.copy(exportMessage = msg)
+            }
+            _uiState.value = _uiState.value.copy(isExporting = false)
+        }
+    }
+
+    fun dismissExportMessage() { _uiState.value = _uiState.value.copy(exportMessage = null) }
 
     // ── Transcript (delegate) ───────────────────────────────────────────
 
