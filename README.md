@@ -73,6 +73,22 @@ cd android
 
 > **注意**: `android/app/src/main/cpp/CMakeLists.txt` 会在 CMake 配置阶段检查 `jniLibs/` 中的预编译库是否存在，不存在则跳过 JNI 桥接库的编译。如果下载脚本在 CMake 配置之后执行，CMake 缓存了 "库不存在" 的结果，需要清除缓存后重建。
 
+#### 内网代理配置（仅办公网环境需要）
+
+Gradle 不会自动读取 `http_proxy` / `https_proxy` 环境变量，需要显式配置代理。项目 `gradle.properties` 中**不包含**代理配置，请按需配置在用户级文件，避免污染项目：
+
+办公机器上，编辑 `~/.gradle/gradle.properties`（用户级，全局对所有 Gradle 项目生效）：
+
+```properties
+# 内网代理（拉取 google/mavenCentral/gradlePluginPortal 依赖时使用）
+systemProp.http.proxyHost=<你的代理主机名>
+systemProp.http.proxyPort=<代理端口>
+systemProp.https.proxyHost=<你的代理主机名>
+systemProp.https.proxyPort=<代理端口>
+```
+
+在非内网环境（家庭 / 外网）直接联网时，无需配置代理，上述代理配置不存在即可正常构建。
+
 #### 4. 故障排除：清除 CMake 缓存
 
 如果 app 安装后提示 **"sherpa-onnx 原生库未安装"**，说明 CMake 构建时没有找到预编译库（通常是因为下载脚本在首次构建之后才执行）。
