@@ -24,13 +24,13 @@ import (
 // 1. ./models/ adjacent to the current working directory, then
 // 2. %APPDATA%/VoiceNote/models/ (Windows) or ~/.voicenote/models/ (Unix).
 //
-// The function checks for model.onnx as a sentinel file.
+// The function checks for model.int8.onnx as a sentinel file.
 func findModelDir(dataDir string) string {
 	// Portable: check ./models/ relative to the current working directory.
 	cwd, err := os.Getwd()
 	if err == nil {
 		portable := filepath.Join(cwd, "models")
-		if _, err := os.Stat(filepath.Join(portable, "model.onnx")); err == nil {
+		if _, err := os.Stat(filepath.Join(portable, "model.int8.onnx")); err == nil {
 			slog.Info("using portable model directory", "path", portable)
 			return portable
 		}
@@ -41,7 +41,7 @@ func findModelDir(dataDir string) string {
 	if err == nil {
 		exeDir := filepath.Dir(exePath)
 		portable := filepath.Join(exeDir, "models")
-		if _, err := os.Stat(filepath.Join(portable, "model.onnx")); err == nil {
+		if _, err := os.Stat(filepath.Join(portable, "model.int8.onnx")); err == nil {
 			slog.Info("using portable model directory", "path", portable)
 			return portable
 		}

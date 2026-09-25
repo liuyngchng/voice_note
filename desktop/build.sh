@@ -14,7 +14,7 @@ GO_URL="https://golang.google.cn/dl/${GO_TAR}"
 DEPS_DIR="$SCRIPT_DIR/build/deps"
 
 # ── Model sources (edit to point to your model files) ───────────
-# Linux: point to the directory containing model.onnx, tokens.txt, etc.
+# Linux: point to the directory containing model.int8.onnx, tokens.txt, etc.
 # Default: ~/.voicenote/models (the app's own data dir)
 MODEL_SRC="${MODEL_SRC:-$HOME/.voicenote/models}"
 
@@ -116,7 +116,7 @@ docker run --rm \
 echo "Packaging..."
 
 # Check model files exist
-MODEL_FILES=("model.onnx" "tokens.txt" "silero_vad.onnx" "punct_ct_transformer.onnx")
+MODEL_FILES=("model.int8.onnx" "tokens.txt" "silero_vad.onnx" "punct_ct_transformer.onnx")
 for mf in "${MODEL_FILES[@]}"; do
   if [[ ! -f "$MODEL_SRC/$mf" ]]; then
     echo "ERROR: model file not found: $MODEL_SRC/$mf"
@@ -149,7 +149,7 @@ mkdir -p "$PKG_DIR/models"
 cp "$BINARY" "$PKG_DIR/"
 cp "$SCRIPT_DIR"/*.so "$PKG_DIR/"
 
-# Models — symlink to avoid duplicating 1.2GB on disk
+# Models — symlink to avoid duplicating ~520MB on disk
 for mf in "${MODEL_FILES[@]}"; do
   ln -s "$(readlink -f "$MODEL_SRC/$mf")" "$PKG_DIR/models/$mf"
 done
@@ -168,7 +168,7 @@ cp "$SCRIPT_DIR"/*.so "$DEST/"
 # Install models to ~/.voicenote/models/ if not already present
 MODEL_DIR="$HOME/.voicenote/models"
 mkdir -p "$MODEL_DIR"
-for f in model.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx; do
+for f in model.int8.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx; do
   if [[ ! -f "$MODEL_DIR/$f" ]]; then
     cp "$SCRIPT_DIR/models/$f" "$MODEL_DIR/"
     echo "Model installed: $f"

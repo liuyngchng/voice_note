@@ -21,7 +21,7 @@
 
 ```
 models/
-├── model.onnx                 # SenseVoiceSmall FP32, ~929MB
+├── model.int8.onnx            # SenseVoiceSmall INT8, ~226MB
 ├── punct_ct_transformer.onnx  # 标点模型, ~294MB
 ├── silero_vad.onnx            # VAD, ~0.6MB
 └── tokens.txt                 # ~316KB
@@ -32,7 +32,7 @@ models/
 
 如果模型文件还是 tarball 格式，需要先解压：
 
-1. 解压 FP32 SenseVoice tarball，从中取 `model.onnx` 和 `tokens.txt`
+1. 解压 INT8 SenseVoice tarball（推荐），从中取 `model.int8.onnx` 和 `tokens.txt`
 2. 解压标点模型 tarball，从中取 `model.onnx`，重命名为 `punct_ct_transformer.onnx`
 3. 把 `silero_vad.onnx` 直接复制过去
 
@@ -94,7 +94,7 @@ voice-note-desktop-YYYYMMDD/
 ├── libsherpa-onnx-c-api.so
 ├── libsherpa-onnx-cxx-api.so
 ├── models/
-│   ├── model.onnx
+│   ├── model.int8.onnx
 │   ├── punct_ct_transformer.onnx
 │   ├── silero_vad.onnx
 │   └── tokens.txt
@@ -110,7 +110,7 @@ voice-note-windows-amd64/
 ├── sherpa-onnx-c-api.dll
 ├── sherpa-onnx-cxx-api.dll
 └── models/
-    ├── model.onnx
+    ├── model.int8.onnx
     ├── punct_ct_transformer.onnx
     ├── silero_vad.onnx
     └── tokens.txt

@@ -32,7 +32,7 @@ func newSettingsScreen(app *App) fyne.CanvasObject {
 	vm.dataDir.Wrapping = fyne.TextWrapWord
 
 	// Model status.
-	vm.modelStatus = widget.NewLabel(checkModelStatus(app.modelDir, "model.onnx"))
+	vm.modelStatus = widget.NewLabel(checkModelStatus(app.modelDir, "model.int8.onnx"))
 	vm.vadStatus = widget.NewLabel(checkModelStatus(app.modelDir, "silero_vad.onnx"))
 	vm.punctStatus = widget.NewLabel(checkModelStatus(app.modelDir, "punct_ct_transformer.onnx"))
 
@@ -40,7 +40,7 @@ func newSettingsScreen(app *App) fyne.CanvasObject {
 		dataTitle,
 		widget.NewLabel("数据目录"),
 		vm.dataDir,
-		widget.NewLabel("ASR 模型 (SenseVoice FP32)"),
+		widget.NewLabel("ASR 模型 (SenseVoiceSmall INT8)"),
 		vm.modelStatus,
 		widget.NewLabel("VAD 模型"),
 		vm.vadStatus,

@@ -68,7 +68,7 @@ func New(modelDir string) (*Engine, error) {
 		modelDir:   modelDir,
 	}
 
-	modelPath := filepath.Join(modelDir, "model.onnx")
+	modelPath := filepath.Join(modelDir, "model.int8.onnx")
 	tokensPath := filepath.Join(modelDir, "tokens.txt")
 	vadPath := filepath.Join(modelDir, "silero_vad.onnx")
 	punctPath := filepath.Join(modelDir, "punct_ct_transformer.onnx")
@@ -100,7 +100,7 @@ func New(modelDir string) (*Engine, error) {
 			SenseVoice: sherpa.OfflineSenseVoiceModelConfig{
 				Model:                       modelPath,
 				Language:                    "auto",
-				UseInverseTextNormalization: 1,
+				UseInverseTextNormalization: 0,
 			},
 			Tokens:     tokensPath,
 			NumThreads: numThreads,
