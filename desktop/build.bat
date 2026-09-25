@@ -169,7 +169,7 @@ echo          Done.
 echo.
 echo [8/8] Creating tar package...
 
-set TAR_NAME=voice-note-windows-amd64-%date:~0,4%%date:~5,2%%date:~8,2%.tar
+for /f %%d in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"') do set TAR_NAME=voice-note-windows-amd64-%%d.tar
 set TAR_PATH=dist\%TAR_NAME%
 
 if exist "%TAR_PATH%" del /q "%TAR_PATH%" 2>nul
