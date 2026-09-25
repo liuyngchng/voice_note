@@ -12,7 +12,7 @@ title Building Voice Note Desktop
 ::   sherpa-onnx-c-api.dll        (included)
 ::   sherpa-onnx-cxx-api.dll      (included)
 ::   models/                      (model files)
-::     model.onnx                 (~930 MB)
+::     model.int8.onnx              (~227 MB)
 ::     tokens.txt
 ::     punct_ct_transformer.onnx  (~295 MB)
 ::     silero_vad.onnx            (~0.6 MB)
@@ -58,7 +58,7 @@ if not defined MODEL_SRC set MODEL_SRC=%USERPROFILE%\.voicenote\models
 
 echo          Model source: %MODEL_SRC%
 
-set MODEL_FILES=model.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx
+set MODEL_FILES=model.int8.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx
 for %%m in (%MODEL_FILES%) do (
     if not exist "%MODEL_SRC%\%%m" (
         echo ERROR: model file not found: %MODEL_SRC%\%%m
@@ -75,7 +75,7 @@ echo          OK: All model files found
 echo.
 echo [2/8] Copying models...
 
-for %%m in (model.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx) do (
+for %%m in (model.int8.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx) do (
     copy /y "%MODEL_SRC%\%%m" "%MODEL_DIST%\%%m" >nul
 )
 
@@ -194,7 +194,7 @@ echo     onnxruntime.dll
 echo     sherpa-onnx-c-api.dll
 echo     sherpa-onnx-cxx-api.dll
 echo     models\
-echo       model.onnx                 (SenseVoiceSmall FP32)
+echo       model.int8.onnx              (SenseVoiceSmall INT8)
 echo       tokens.txt
 echo       punct_ct_transformer.onnx   (punctuation)
 echo       silero_vad.onnx             (VAD)
