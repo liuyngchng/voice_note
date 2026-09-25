@@ -65,6 +65,10 @@ if ! command -v docker &>/dev/null; then
 fi
 
 # ── 2. Cache Go toolchain ───────────────────────────────────────
+# Note: Go is downloaded here as part of the Docker build environment (see
+# Dockerfile), so the container always has a known-good Go version regardless
+# of what the host has installed. The tarball is cached in build/deps/ to
+# avoid re-downloading every run.
 mkdir -p "$DEPS_DIR"
 if [[ ! -f "$DEPS_DIR/$GO_TAR" ]]; then
   echo "Downloading Go $GO_VERSION ..."
