@@ -12,40 +12,29 @@
 
 - **Go** 1.24+（需在 PATH 中）
 - **MinGW-w64 gcc**（CGo 编译需要，需在 PATH 中）
-- **tar**（Windows 10 1803+ 自带）
 - **go-winres**（嵌入图标和版本信息）：`go install github.com/tc-hib/go-winres@latest`
+- **tar**（打包分发需要，Windows 10 1803+ 自带）
 
 ## 准备模型文件
 
-假定有一个 `models/` 目录，包含以下文件：
+准备好 4 个模型文件：
 
 ```
 models/
-├── sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09.tar    # FP32, ~936MB
-├── sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar  # ~298MB
-└── silero_vad.onnx                                            # ~0.6MB
+├── model.onnx                 # SenseVoiceSmall FP32, ~929MB
+├── punct_ct_transformer.onnx  # 标点模型, ~294MB
+├── silero_vad.onnx            # VAD, ~0.6MB
+└── tokens.txt                 # ~316KB
 ```
 
-### 解压模型
+> **Linux**：默认从 `~/.voicenote/models/` 读取（可用 `MODEL_SRC` 环境变量覆盖）。
+> **Windows**：默认从 `%USERPROFILE%\.voicenote\models\` 读取（可用 `MODEL_SRC` 环境变量覆盖）。
 
-解压两个 tarball，把需要的文件汇总到模型目录（Linux 下默认 `~/.voicenote/models/`，Windows 下由 `build.bat` 里的 `MODEL_SRC` 指定）：
+如果模型文件还是 tarball 格式，需要先解压：
 
 1. 解压 FP32 SenseVoice tarball，从中取 `model.onnx` 和 `tokens.txt`
 2. 解压标点模型 tarball，从中取 `model.onnx`，重命名为 `punct_ct_transformer.onnx`
 3. 把 `silero_vad.onnx` 直接复制过去
-
-最终目录结构（4 个文件）：
-
-```
-models/
-├── model.onnx                 # ~929MB
-├── punct_ct_transformer.onnx  # ~294MB
-├── silero_vad.onnx            # ~0.6MB
-└── tokens.txt                 # ~316KB
-```
-
-> `build.sh` 默认从 `~/.voicenote/models/` 读取模型（可用 `MODEL_SRC` 环境变量覆盖）。
-> `build.bat` 从 `MODEL_SRC`（默认 `C:\workspace\models`）读取，编辑脚本顶部即可。
 
 ## 构建
 
@@ -86,11 +75,13 @@ build.bat
 首次运行前需确认：
 
 1. `go`、`gcc`、`tar`、`go-winres` 均在 PATH 中
-2. 脚本顶部的 `MODEL_SRC` 指向包含 tarball 和 `silero_vad.onnx` 的目录
+2. 模型文件已放入 `%USERPROFILE%\.voicenote\models\`（或设置 `MODEL_SRC` 环境变量指向模型目录）
 
-脚本会编译 `voice-note-desktop.exe`，嵌入图标和版本信息，并把 EXE、3 个 DLL 和 `models/` 全部汇总到 `dist\voice-note-windows-amd64\`。
+脚本会编译 `voice-note-desktop.exe`，嵌入图标和版本信息，并把 EXE、3 个 DLL 和 `models/` 全部汇总到 `dist\voice-note-windows-amd64\`，最后自动打包为带日期的 tar 包（不压缩，模型文件本身已是高熵数据）。
 
-产物：`dist\voice-note-windows-amd64\` 目录（可直接打包成 ZIP 分发）
+产物：
+- `dist\voice-note-windows-amd64\` 目录（本地可直接运行）
+- `dist\voice-note-windows-amd64-YYYYMMDD.tar`（分发包）
 
 ## 分发包内容
 
@@ -135,6 +126,6 @@ voice-note-windows-amd64/
 
 ### Windows
 
-**免安装（便携版）**：解压 ZIP 后，双击 `voice-note-desktop.exe` 即可运行，无需安装。模型从同目录下的 `models/` 自动加载，用户数据（数据库、设置、音频）存到 `%APPDATA%\VoiceNote\`。
+**免安装（便携版）**：解包 `voice-note-windows-amd64-YYYYMMDD.tar` 后，双击 `voice-note-desktop.exe` 即可运行，无需安装。模型从同目录下的 `models/` 自动加载，用户数据（数据库、设置、音频）存到 `%APPDATA%\VoiceNote\`。
 
 > 程序启动时会按顺序查找模型目录：`./models/`（可执行文件同目录）→ `%APPDATA%\VoiceNote\models\`。只要 ZIP 解压后 `models/` 和 EXE 在同一目录，就能正常识别语音。

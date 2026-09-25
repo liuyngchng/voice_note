@@ -28,10 +28,11 @@ echo [BUILD] Working directory: %CD%
 :: 1. Check prerequisites
 :: ----------------------------------------------------------
 echo.
-echo [1/7] Checking environment...
+echo [1/8] Checking environment...
 
 where go >nul 2>&1 || (echo ERROR: go not found in PATH & exit /b 1)
 where gcc >nul 2>&1 || (echo ERROR: gcc - MinGW-w64 - not found in PATH & exit /b 1)
+where powershell >nul 2>&1 || (echo ERROR: powershell not found in PATH & exit /b 1)
 where tar >nul 2>&1 || (echo ERROR: tar not found in PATH - Windows 10 1803 or newer required & exit /b 1)
 
 for /f "tokens=3" %%v in ('go version') do echo          Go %%v
@@ -49,68 +50,34 @@ mkdir "%MODEL_DIST%"
 echo          Output: %RELEASE_DIR%
 
 :: ----------------------------------------------------------
-:: 3. Model sources (USER: edit these paths)
+:: 3. Model sources
+::    Default: %USERPROFILE%\.voicenote\models
+::    Override with MODEL_SRC env var
 :: ----------------------------------------------------------
-set MODEL_SRC=C:\workspace\models
-set FP32_TAR=sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2025-09-09.tar
-set PUNCT_TAR=sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12.tar
-set VAD_SRC=%MODEL_SRC%\silero_vad.onnx
-set IOS_VAD=..\ios\VoiceNote\VoiceNote\Resources\VAD\silero_vad.onnx
+if not defined MODEL_SRC set MODEL_SRC=%USERPROFILE%\.voicenote\models
 
-if not exist "%MODEL_SRC%\%FP32_TAR%" (
-    echo ERROR: %MODEL_SRC%\%FP32_TAR% not found
-    exit /b 1
+echo          Model source: %MODEL_SRC%
+
+set MODEL_FILES=model.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx
+for %%m in (%MODEL_FILES%) do (
+    if not exist "%MODEL_SRC%\%%m" (
+        echo ERROR: model file not found: %MODEL_SRC%\%%m
+        echo   Download them to %USERPROFILE%\.voicenote\models\ first
+        echo   or set MODEL_SRC to the directory containing model files.
+        exit /b 1
+    )
 )
-if not exist "%MODEL_SRC%\%PUNCT_TAR%" (
-    echo ERROR: %MODEL_SRC%\%PUNCT_TAR% not found
-    exit /b 1
-)
-echo          OK: Model sources found
+echo          OK: All model files found
 
 :: ----------------------------------------------------------
-:: 4. Extract & copy models → dist/.../models/
+:: 4. Copy models → dist/.../models/
 :: ----------------------------------------------------------
 echo.
-echo [2/7] Extracting models...
+echo [2/8] Copying models...
 
-set TMP_EXTRACT=%TEMP%\voice_note_model_extract
-if exist "%TMP_EXTRACT%" rmdir /s /q "%TMP_EXTRACT%" 2>nul
-mkdir "%TMP_EXTRACT%"
-
-:: Extract fp32 SenseVoice model
-echo          Extracting FP32 SenseVoice model...
-tar -xf "%MODEL_SRC%\%FP32_TAR%" -C "%TMP_EXTRACT%" >nul 2>&1
-if errorlevel 1 (echo ERROR: tar extract failed for FP32 tar & exit /b 1)
-
-for /d %%d in ("%TMP_EXTRACT%\*") do set EXTRACT_DIR=%%d
-if not defined EXTRACT_DIR (echo ERROR: Could not find extracted directory & exit /b 1)
-
-copy /y "!EXTRACT_DIR!\model.onnx" "%MODEL_DIST%\model.onnx" >nul || (echo ERROR: model.onnx not found in tar & exit /b 1)
-copy /y "!EXTRACT_DIR!\tokens.txt" "%MODEL_DIST%\tokens.txt" >nul || (echo ERROR: tokens.txt not found in tar & exit /b 1)
-echo          Copied model.onnx and tokens.txt
-
-:: Extract punctuation model
-echo          Extracting punctuation model...
-rmdir /s /q "%TMP_EXTRACT%" 2>nul
-mkdir "%TMP_EXTRACT%"
-tar -xf "%MODEL_SRC%\%PUNCT_TAR%" -C "%TMP_EXTRACT%" >nul 2>&1
-if errorlevel 1 (echo ERROR: tar extract failed for punct tar & exit /b 1)
-
-for /d %%d in ("%TMP_EXTRACT%\*") do set PUNCT_DIR=%%d
-copy /y "!PUNCT_DIR!\model.onnx" "%MODEL_DIST%\punct_ct_transformer.onnx" >nul || (echo ERROR: punct model.onnx not found & exit /b 1)
-echo          Copied punct_ct_transformer.onnx
-
-:: Copy silero_vad.onnx
-if exist "%VAD_SRC%" (
-    copy /y "%VAD_SRC%" "%MODEL_DIST%\silero_vad.onnx" >nul
-) else if exist "%IOS_VAD%" (
-    copy /y "%IOS_VAD%" "%MODEL_DIST%\silero_vad.onnx" >nul
-) else (
-    echo          WARNING: silero_vad.onnx not found - VAD will be disabled
+for %%m in (model.onnx tokens.txt silero_vad.onnx punct_ct_transformer.onnx) do (
+    copy /y "%MODEL_SRC%\%%m" "%MODEL_DIST%\%%m" >nul
 )
-if exist "%MODEL_DIST%\silero_vad.onnx" echo          Copied silero_vad.onnx
-
-rmdir /s /q "%TMP_EXTRACT%" 2>nul
 
 echo          Models prepared:
 for %%f in ("%MODEL_DIST%\*") do echo            %%~nxf  (%%~zf bytes)
@@ -119,7 +86,7 @@ for %%f in ("%MODEL_DIST%\*") do echo            %%~nxf  (%%~zf bytes)
 :: 5. Set build environment
 :: ----------------------------------------------------------
 echo.
-echo [3/7] Setting build environment...
+echo [3/8] Setting build environment...
 
 set CGO_ENABLED=1
 set GOOS=windows
@@ -133,7 +100,7 @@ echo          CGO_ENABLED=1  GOOS=windows  GOARCH=amd64
 :: 6. Embed Windows resources (icon, version info, manifest)
 :: ----------------------------------------------------------
 echo.
-echo [4/7] Embedding Windows resources...
+echo [4/8] Embedding Windows resources...
 
 where go-winres >nul 2>&1 || (echo ERROR: go-winres not found - run: go install github.com/tc-hib/go-winres@latest & exit /b 1)
 
@@ -145,7 +112,7 @@ echo          Generated rsrc_windows_amd64.syso
 :: 7. Build app
 :: ----------------------------------------------------------
 echo.
-echo [5/7] Building voice-note-desktop.exe...
+echo [5/8] Building voice-note-desktop.exe...
 echo          This may take several minutes due to CGo linking...
 
 set APP_EXE=voice-note-desktop.exe
@@ -161,7 +128,7 @@ for %%A in ("%APP_EXE%") do echo          %APP_EXE% built ^(size: %%~zA bytes^)
 :: 8. Copy build artifacts to dist/
 :: ----------------------------------------------------------
 echo.
-echo [6/7] Copying to dist...
+echo [6/8] Copying to dist...
 
 copy /y "%APP_EXE%" "%RELEASE_DIR%\%APP_EXE%" >nul
 echo          Copied %APP_EXE%
@@ -189,12 +156,27 @@ for %%d in (onnxruntime.dll sherpa-onnx-c-api.dll sherpa-onnx-cxx-api.dll) do (
 :: 9. Cleanup
 :: ----------------------------------------------------------
 echo.
-echo [7/7] Cleanup...
+echo [7/8] Cleanup...
 
 del /q "%APP_EXE%" 2>nul
 del /q rsrc_windows_amd64.syso 2>nul
 
 echo          Done.
+
+:: ----------------------------------------------------------
+:: 10. Package into tar (no compression)
+:: ----------------------------------------------------------
+echo.
+echo [8/8] Creating tar package...
+
+set TAR_NAME=voice-note-windows-amd64-%date:~0,4%%date:~5,2%%date:~8,2%.tar
+set TAR_PATH=dist\%TAR_NAME%
+
+if exist "%TAR_PATH%" del /q "%TAR_PATH%" 2>nul
+tar -cf "%TAR_PATH%" -C dist voice-note-windows-amd64
+if errorlevel 1 (echo ERROR: tar package failed & exit /b 1)
+
+for %%A in ("%TAR_PATH%") do echo          Package: %TAR_PATH% ^(size: %%~zA bytes^)
 
 :: ----------------------------------------------------------
 :: Done
@@ -203,7 +185,8 @@ echo.
 echo ============================================================
 echo   BUILD SUCCESSFUL
 echo.
-echo   Output: %CD%\%RELEASE_DIR%\
+echo   Output folder:  %CD%\%RELEASE_DIR%\
+echo   Tar package:    %CD%\%TAR_PATH%
 echo.
 echo   Contents:
 echo     voice-note-desktop.exe       (portable app)
@@ -217,9 +200,9 @@ echo       punct_ct_transformer.onnx   (punctuation)
 echo       silero_vad.onnx             (VAD)
 echo.
 echo   To distribute:
-echo     1. Zip the %RELEASE_DIR% folder
-echo     2. User unzips and runs voice-note-desktop.exe
-echo     3. Double-click to run - no installation needed
+echo     1. Send %TAR_NAME%
+echo     2. User extracts with: tar -xf %TAR_NAME%
+echo     3. Double-click voice-note-desktop.exe to run
 echo.
 echo   Models are auto-detected from the adjacent models/ folder.
 echo ============================================================
