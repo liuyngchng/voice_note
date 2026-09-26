@@ -444,6 +444,10 @@ func slidingWindow(s string) string {
 // ---------------------------------------------------------------------------
 
 func (m *mainScreen) run() {
+	// errStatus, when non-empty, records why the session aborted. The deferred
+	// cleanup preserves it instead of overwriting with the generic "已停止".
+	var errStatus string
+
 	defer func() {
 		m.mu.Lock()
 		finalText := m.displayedText()
@@ -464,9 +468,14 @@ func (m *mainScreen) run() {
 			m.toggleBtn.SetText("启动")
 			m.endBtn.Hide()
 		})
-		m.setUIStatus("已停止")
+		if errStatus != "" {
+			m.setUIStatus(errStatus)
+			m.showWarning(errStatus)
+		} else {
+			m.setUIStatus("已停止")
+			m.clearWarning()
+		}
 		m.setUIMode(stateIdle)
-		m.clearWarning()
 		m.mu.Unlock()
 	}()
 
@@ -475,7 +484,7 @@ func (m *mainScreen) run() {
 	raw, err := net.DialTimeout("tcp", addr, tcpPrecheckTimeout)
 	if err != nil {
 		slog.Error("precheck_unreachable", "addr", addr, "err", err)
-		m.setUIStatus("服务不可达 - " + err.Error())
+		errStatus = "无法连接服务器，请检查地址和端口"
 		return
 	}
 	raw.Close()
@@ -484,7 +493,7 @@ func (m *mainScreen) run() {
 	c := &client.Client{}
 	if err := c.Connect(m.cfg.host, m.cfg.port); err != nil {
 		slog.Error("funasr_connect", "err", err)
-		m.setUIStatus("连接失败: " + err.Error())
+		errStatus = "连接服务器失败: " + err.Error()
 		return
 	}
 	defer c.Close()
@@ -494,13 +503,13 @@ func (m *mainScreen) run() {
 	rec, err := audio.NewRecorder()
 	if err != nil {
 		slog.Error("mic_open", "err", err)
-		m.setUIStatus("无法打开麦克风: " + err.Error())
+		errStatus = "无法打开麦克风: " + err.Error()
 		return
 	}
 	sampleCh, err := rec.Start()
 	if err != nil {
 		slog.Error("mic_start", "err", err)
-		m.setUIStatus("启动录音失败: " + err.Error())
+		errStatus = "启动录音失败: " + err.Error()
 		rec.Stop()
 		return
 	}
@@ -563,7 +572,7 @@ func (m *mainScreen) run() {
 			// Send to FunASR.
 			if err := c.SendAudio(audio.ConvertFloatsToPCM(samples)); err != nil {
 				slog.Error("send_audio", "err", err)
-				m.setUIStatus("发送音频失败: " + err.Error())
+				errStatus = "发送音频失败: " + err.Error()
 				goto done
 			}
 
