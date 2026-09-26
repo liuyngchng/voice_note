@@ -81,9 +81,9 @@ desktop/dist/
 desktop/rsrc_windows_amd64.syso
 
 # ===== Desktop FunASR Client (Go + Fyne) =====
-desktop_fun_asr_client/funasr-desktop-client
-desktop_fun_asr_client/funasr-desktop-client.exe
-desktop_fun_asr_client/.gocache/
+fun_asr_desktop_client/funasr-desktop-client
+fun_asr_desktop_client/funasr-desktop-client.exe
+fun_asr_desktop_client/.gocache/
 
 # ===== Claude Code =====
 .claude/settings.local.json
