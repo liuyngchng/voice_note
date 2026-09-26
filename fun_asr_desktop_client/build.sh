@@ -87,11 +87,20 @@ fi
 
 # ── 4. Build in Docker ──
 echo "Building $BINARY (in Docker)..."
+
+# Persistent Go caches on the host so deps aren't re-downloaded every build.
+GOCACHE_DIR="$SCRIPT_DIR/build/gocache"
+GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
+mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR"
+
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
+  -v "$GOCACHE_DIR":/tmp/gocache \
+  -v "$GOMODCACHE_DIR":/go/pkg/mod \
   -w /workspace \
   -e GOFLAGS="-buildvcs=false" \
   -e GOCACHE=/tmp/gocache \
+  -e GOMODCACHE=/go/pkg/mod \
   -e GOPROXY="https://goproxy.cn,direct" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
   -e HOST_UID="$(id -u)" \

@@ -86,6 +86,7 @@ fun_asr_desktop_client/funasr-desktop-client
 fun_asr_desktop_client/funasr-desktop-client.exe
 fun_asr_desktop_client/.gocache/
 fun_asr_desktop_client/output/
+fun_asr_desktop_client/logs/
 
 # ===== Claude Code =====
 .claude/settings.local.json
