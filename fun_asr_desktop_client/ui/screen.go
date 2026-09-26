@@ -4,6 +4,7 @@ package ui
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -159,7 +160,7 @@ type mainScreen struct {
 	warningLabel *widget.Label
 	toggleBtn    *widget.Button
 	endBtn       *widget.Button
-	textArea     *widget.Label
+	textEntry    *widget.Entry
 	durationLbl  *widget.Label
 	saveCheck    *widget.Check
 
@@ -193,8 +194,13 @@ func NewMainScreen() fyne.CanvasObject {
 	m.endBtn.Importance = widget.DangerImportance
 	m.endBtn.Hide()
 
-	m.textArea = widget.NewLabel("识别结果将在此显示...")
-	m.textArea.Wrapping = fyne.TextWrapWord
+	m.textEntry = widget.NewEntry()
+	m.textEntry.MultiLine = true
+	m.textEntry.Wrapping = fyne.TextWrapWord
+	m.textEntry.SetMinRowsVisible(8)
+	m.textEntry.Disable() // read-only style (greyed bg), but text is selectable
+	m.textEntry.TextStyle = fyne.TextStyle{Monospace: true}
+	m.textEntry.SetPlaceHolder("识别结果将在此显示...")
 	m.durationLbl = widget.NewLabel("00:00")
 
 	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
@@ -228,7 +234,7 @@ func NewMainScreen() fyne.CanvasObject {
 			form,
 			m.saveCheck,
 			btnWrap,
-			m.textArea,
+			m.textEntry,
 		),
 	)
 
@@ -366,7 +372,13 @@ func (m *mainScreen) clearWarning() {
 }
 
 func (m *mainScreen) setUIText(t string) {
-	fyne.Do(func() { m.textArea.SetText(slidingWindow(t)) })
+	text := slidingWindow(t)
+	fyne.Do(func() {
+		m.textEntry.SetText(text)
+		// Scroll to the bottom so the newest text is always visible.
+		// CursorRow is clamped by the entry internals, so use a huge value.
+		m.textEntry.CursorRow = math.MaxInt
+	})
 }
 
 // setUIMode toggles host/port entries and save checkbox.
