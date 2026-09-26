@@ -113,3 +113,31 @@ docker run --rm \
   "
 
 echo "Binary: $SCRIPT_DIR/$BINARY"
+
+# ── 5. Install desktop integration (optional, host-side) ──
+# Registers the app so docks show the proper (Chinese) name and icon. The
+# WM_CLASS set in main.go must stay in sync with StartupWMClass below.
+DESKTOP_FILE="$SCRIPT_DIR/funasr-desktop-client.desktop"
+DESKTOP_INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
+
+if [[ -f "$DESKTOP_FILE" ]]; then
+  mkdir -p "$DESKTOP_INSTALL_DIR"
+  # Set an absolute path so the entry works regardless of the launch directory.
+  sed "s|^Exec=.*|Exec=$SCRIPT_DIR/$BINARY|" "$DESKTOP_FILE" > "$DESKTOP_INSTALL_DIR/funasr-desktop-client.desktop"
+  echo "Installed desktop entry: $DESKTOP_INSTALL_DIR/funasr-desktop-client.desktop"
+
+  # Install an icon if one is provided.
+  for src in "$SCRIPT_DIR"/icon.png "$SCRIPT_DIR"/icon.svg; do
+    if [[ -f "$src" ]]; then
+      mkdir -p "$ICON_DIR"
+      cp "$src" "$ICON_DIR/funasr-desktop-client.${src##*.}"
+      echo "Installed icon: $ICON_DIR/funasr-desktop-client.${src##*.}"
+      break
+    fi
+  done
+
+  if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database "$DESKTOP_INSTALL_DIR" 2>/dev/null || true
+  fi
+fi
