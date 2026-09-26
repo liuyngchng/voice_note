@@ -27,7 +27,7 @@ type serverConfig struct {
 const (
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
-	maxDisplayBlocks   = 6
+	maxDisplayBlocks   = 3
 
 	defaultHost = "127.0.0.1"
 	defaultPort = 10096
@@ -53,7 +53,6 @@ type mainScreen struct {
 	state           int
 	recording       bool
 	partialText     string
-	displayPartial  string   // accumulated display buffer (never shrinks until offline)
 	finalizedBlocks []string // finalized offline blocks, each is a natural sentence
 	startTime       time.Time
 	pausedAt        time.Time
@@ -71,6 +70,7 @@ type mainScreen struct {
 	toggleBtn    *widget.Button
 	endBtn       *widget.Button
 	textDisplay  *widget.RichText
+	textScroll   *container.Scroll
 	durationLbl  *widget.Label
 	saveCheck    *widget.Check
 
@@ -117,6 +117,7 @@ func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
 
 	m.textDisplay = widget.NewRichTextWithText("识别结果将在此显示...")
 	m.textDisplay.Wrapping = fyne.TextWrapWord
+	m.textScroll = container.NewScroll(m.textDisplay)
 	m.durationLbl = widget.NewLabel("00:00")
 
 	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
@@ -150,7 +151,7 @@ func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
 			form,
 			m.saveCheck,
 			btnWrap,
-			m.textDisplay,
+			m.textScroll,
 		),
 	)
 
@@ -201,7 +202,6 @@ func (m *mainScreen) startSession() {
 	m.recording = false
 	m.partialText = ""
 	m.finalizedBlocks = nil
-	m.displayPartial = ""
 	m.lastFlushedLen = 0
 	m.pausedElapsed = 0
 	m.startTime = time.Now()
@@ -299,6 +299,7 @@ func (m *mainScreen) setUIText(t string) {
 			},
 		}
 		m.textDisplay.Refresh()
+		m.textScroll.ScrollToBottom()
 	})
 }
 
@@ -336,9 +337,8 @@ func (m *mainScreen) appendBlock(text string) {
 	m.finalizedBlocks = append(m.finalizedBlocks, text)
 }
 
-// displaySmoothed builds the display text using the accumulated online
-// fragments so the text grows smoothly instead of jumping word by word.
-// Only the most recent finalized blocks are included to keep rendering fast.
+// displaySmoothed builds the display text from recent blocks plus current partial.
+// Only the most recent finalized blocks are kept to maintain a typewriter-like feel.
 func (m *mainScreen) displaySmoothed() string {
 	var b strings.Builder
 	blocks := m.finalizedBlocks
@@ -348,7 +348,7 @@ func (m *mainScreen) displaySmoothed() string {
 	for _, block := range blocks {
 		b.WriteString(block)
 	}
-	b.WriteString(m.displayPartial)
+	b.WriteString(m.partialText)
 	return b.String()
 }
 
@@ -492,15 +492,12 @@ func (m *mainScreen) run() {
 			switch r.Mode {
 			case "2pass-online":
 				m.partialText = r.Text
-				m.displayPartial += r.Text
 			case "2pass-offline":
 				m.appendBlock(r.Text)
 				m.partialText = ""
-				m.displayPartial = ""
 			default:
 				m.appendBlock(r.Text)
 				m.partialText = ""
-				m.displayPartial = ""
 			}
 			displayed := m.displaySmoothed()
 			m.mu.Unlock()
