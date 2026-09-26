@@ -85,6 +85,7 @@ desktop/rsrc_windows_amd64.syso
 fun_asr_desktop_client/funasr-desktop-client
 fun_asr_desktop_client/funasr-desktop-client.exe
 fun_asr_desktop_client/.gocache/
+fun_asr_desktop_client/output/
 
 # ===== Claude Code =====
 .claude/settings.local.json

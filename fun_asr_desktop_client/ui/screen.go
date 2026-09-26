@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +15,7 @@ import (
 
 	"github.com/liuyngchng/funasr-desktop-client/client"
 	"github.com/liuyngchng/funasr-desktop-client/internal/audio"
+	"github.com/liuyngchng/funasr-desktop-client/internal/storage"
 )
 
 // serverConfig holds the FunASR server address.
@@ -28,7 +27,6 @@ type serverConfig struct {
 const (
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
-	diskSampleBufSize  = 128
 	maxDisplayBlocks   = 20
 
 	defaultHost = "127.0.0.1"
@@ -45,119 +43,24 @@ const (
 	statePaused
 )
 
-// diskWriter handles local file persistence in a background goroutine,
-// isolated from the real-time ASR pipeline.
-type diskWriter struct {
-	wavWriter      *audio.WavWriter
-	transcriptPath string
-
-	samplesCh chan []float32
-	textCh    chan string
-	doneCh    chan struct{}
-	warnFn    func(string)
-}
-
-// newDiskWriter creates files and starts the background writer goroutine.
-// wavPath may be empty, in which case only transcript writes are performed.
-func newDiskWriter(wavPath, transcriptPath string, warnFn func(string)) (*diskWriter, error) {
-	dw := &diskWriter{
-		transcriptPath: transcriptPath,
-		samplesCh:      make(chan []float32, diskSampleBufSize),
-		textCh:         make(chan string, 4),
-		doneCh:         make(chan struct{}),
-		warnFn:         warnFn,
-	}
-
-	if wavPath != "" {
-		ww, err := audio.NewWavWriter(wavPath)
-		if err != nil {
-			return nil, err
-		}
-		dw.wavWriter = ww
-	}
-
-	go dw.run()
-	return dw, nil
-}
-
-func (dw *diskWriter) run() {
-	defer func() {
-		if dw.wavWriter != nil {
-			if err := dw.wavWriter.Close(); err != nil {
-				slog.Error("wav_close", "err", err)
-			}
-		}
-	}()
-
-	for {
-		select {
-		case samples := <-dw.samplesCh:
-			if dw.wavWriter != nil {
-				if err := dw.wavWriter.WriteSamples(samples); err != nil {
-					slog.Error("wav_write", "err", err)
-					dw.warn("录音保存失败")
-				}
-			}
-
-		case text := <-dw.textCh:
-			if dw.transcriptPath != "" {
-				if err := os.WriteFile(dw.transcriptPath, []byte(text), 0o644); err != nil {
-					slog.Error("transcript_write", "err", err)
-					dw.warn("文本保存失败")
-				}
-			}
-
-		case <-dw.doneCh:
-			for {
-				select {
-				case samples := <-dw.samplesCh:
-					if dw.wavWriter != nil {
-						_ = dw.wavWriter.WriteSamples(samples)
-					}
-				case text := <-dw.textCh:
-					if dw.transcriptPath != "" {
-						_ = os.WriteFile(dw.transcriptPath, []byte(text), 0o644)
-					}
-				default:
-					return
-				}
-			}
-		}
-	}
-}
-
-func (dw *diskWriter) warn(msg string) {
-	if dw.warnFn != nil {
-		dw.warnFn(msg)
-	}
-}
-
-func (dw *diskWriter) shutdown(finalText string) {
-	select {
-	case dw.textCh <- finalText:
-	case <-time.After(2 * time.Second):
-	}
-	close(dw.doneCh)
-}
-
 // ---------------------------------------------------------------------------
 
 type mainScreen struct {
 	cfg   serverConfig
 	prefs fyne.Preferences
 
-	mu            sync.Mutex
-	state         int
-	recording     bool
+	mu              sync.Mutex
+	state           int
+	recording       bool
 	partialText     string
 	displayPartial  string   // accumulated display buffer (never shrinks until offline)
 	finalizedBlocks []string // finalized offline blocks, each is a natural sentence
-	startTime     time.Time
-	pausedAt      time.Time
-	pausedElapsed int64
-	saveRecording bool // controlled by checkbox
+	startTime       time.Time
+	pausedAt        time.Time
+	pausedElapsed   int64
+	saveRecording   bool // controlled by checkbox
 
-	dw             *diskWriter
+	sw             *storage.Writer
 	lastFlushedLen int
 
 	// UI widgets.
@@ -167,8 +70,8 @@ type mainScreen struct {
 	warningLabel *widget.Label
 	toggleBtn    *widget.Button
 	endBtn       *widget.Button
-	textDisplay *widget.RichText
-	textScroll  *container.Scroll
+	textDisplay  *widget.RichText
+	textScroll   *container.Scroll
 	durationLbl  *widget.Label
 	saveCheck    *widget.Check
 
@@ -311,26 +214,24 @@ func (m *mainScreen) startSession() {
 	m.setUIMode(stateActive)
 	m.clearWarning()
 
-	// Transcript is always saved. Recording is optional.
 	ts := time.Now().Format("2006-01-02_150405")
-	transcriptPath := filepath.Join(".", "transcript_"+ts+".txt")
-	var wavPath string
+	wavName := ""
 	if m.saveRecording {
-		wavPath = filepath.Join(".", "recording_"+ts+".wav")
+		wavName = "recording_" + ts + ".wav"
 	}
-	slog.Info("session_started", "transcript", transcriptPath, "recording", wavPath)
+	slog.Info("session_started", "transcript", "transcript_"+ts+".txt", "recording", wavName)
 
-	dw, err := newDiskWriter(wavPath, transcriptPath, func(msg string) {
+	sw, err := storage.New("output", wavName, "transcript_"+ts+".txt", func(msg string) {
 		fyne.Do(func() {
 			m.warningLabel.SetText("⚠ " + msg)
 			m.warningLabel.Show()
 		})
 	})
 	if err != nil {
-		slog.Error("disk_writer_create", "err", err)
+		slog.Error("storage_create", "err", err)
 		m.showWarning("创建文件失败，" + err.Error())
 	} else {
-		m.dw = dw
+		m.sw = sw
 	}
 
 	m.setUIStatus("连接中...")
@@ -466,12 +367,12 @@ func (m *mainScreen) run() {
 	defer func() {
 		m.mu.Lock()
 		finalText := m.displayedText()
-		dw := m.dw
-		m.dw = nil
+		sw := m.sw
+		m.sw = nil
 		m.mu.Unlock()
 
-		if dw != nil {
-			dw.shutdown(finalText)
+		if sw != nil {
+			sw.Shutdown(finalText)
 		}
 
 		m.mu.Lock()
@@ -574,15 +475,12 @@ func (m *mainScreen) run() {
 			if paused {
 				continue
 			}
-			// Feed disk writer (non-blocking). Only writes WAV if recording is enabled.
+			// Feed disk writer (non-blocking).
 			m.mu.Lock()
-			dw := m.dw
+			sw := m.sw
 			m.mu.Unlock()
-			if dw != nil {
-				select {
-				case dw.samplesCh <- samples:
-				default:
-				}
+			if sw != nil {
+				sw.WriteSamples(samples)
 			}
 			// Send to FunASR.
 			if err := c.SendAudio(audio.ConvertFloatsToPCM(samples)); err != nil {
@@ -618,11 +516,8 @@ func (m *mainScreen) run() {
 			text := m.displayedText()
 			if len(text) > m.lastFlushedLen {
 				m.lastFlushedLen = len(text)
-				if m.dw != nil {
-					select {
-					case m.dw.textCh <- text:
-					default:
-					}
+				if m.sw != nil {
+					m.sw.WriteText(text)
 				}
 			}
 			m.mu.Unlock()
