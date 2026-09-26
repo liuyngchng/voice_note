@@ -28,6 +28,7 @@ const (
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
 	maxDisplayBlocks   = 3
+	maxDisplayChars    = 300
 
 	defaultHost = "127.0.0.1"
 	defaultPort = 10096
@@ -72,6 +73,7 @@ type mainScreen struct {
 	toggleBtn    *widget.Button
 	endBtn       *widget.Button
 	textDisplay  *widget.RichText
+	textScroll   *container.Scroll
 	durationLbl  *widget.Label
 	saveCheck    *widget.Check
 
@@ -119,6 +121,7 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 
 	m.textDisplay = widget.NewRichTextWithText("识别结果将在此显示...")
 	m.textDisplay.Wrapping = fyne.TextWrapWord
+	m.textScroll = container.NewScroll(m.textDisplay)
 	m.durationLbl = widget.NewLabel("00:00")
 
 	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
@@ -144,16 +147,11 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 	btnWrap := container.NewCenter(btnBox)
 
 	content := container.NewBorder(
-		nil,
+		container.NewVBox(form, m.saveCheck, btnWrap),
 		container.NewVBox(m.statusLabel, m.warningLabel, m.durationLbl),
 		nil,
 		nil,
-		container.NewVBox(
-			form,
-			m.saveCheck,
-			btnWrap,
-			m.textDisplay,
-		),
+		m.textScroll,
 	)
 
 	// Register the space-bar toggle shortcut at the canvas level so it fires
@@ -321,6 +319,7 @@ func (m *mainScreen) setUIText(t string) {
 			},
 		}
 		m.textDisplay.Refresh()
+		m.textScroll.ScrollToBottom()
 	})
 }
 
@@ -370,7 +369,12 @@ func (m *mainScreen) displaySmoothed() string {
 		b.WriteString(block)
 	}
 	b.WriteString(m.displayPartial)
-	return b.String()
+	s := b.String()
+	if len([]rune(s)) > maxDisplayChars {
+		r := []rune(s)
+		s = "…" + string(r[len(r)-maxDisplayChars:])
+	}
+	return s
 }
 
 // ---------------------------------------------------------------------------
