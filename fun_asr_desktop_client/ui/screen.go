@@ -8,9 +8,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/liuyngchng/funasr-desktop-client/client"
@@ -25,10 +27,14 @@ type serverConfig struct {
 }
 
 const (
-	flushInterval      = 30 * time.Second
-	tcpPrecheckTimeout = 2 * time.Second
-	maxDisplayBlocks   = 3
-	maxDisplayChars    = 300
+	flushInterval       = 30 * time.Second
+	tcpPrecheckTimeout  = 2 * time.Second
+	maxDisplaySentences = 3
+	maxDisplayChars     = 300
+
+	// scrollBottomTolerance, in px: closer to the bottom than this still
+	// counts as pinned, so auto-scroll keeps following the newest text.
+	scrollBottomTolerance = 4.0
 
 	defaultHost = "127.0.0.1"
 	defaultPort = 10096
@@ -51,19 +57,18 @@ type mainScreen struct {
 	prefs fyne.Preferences
 	win   fyne.Window
 
-	mu              sync.Mutex
-	state           int
-	recording       bool
-	partialText     string
-	displayPartial  string   // accumulated online partials (FunASR sends increments)
-	finalizedBlocks []string // finalized offline blocks, each is a natural sentence
-	startTime       time.Time
-	pausedAt        time.Time
-	pausedElapsed   int64
-	saveRecording   bool // controlled by checkbox
+	mu             sync.Mutex
+	state          int
+	recording      bool
+	finalizedText  string // latest 2pass-offline result: full corrected text so far
+	displayPartial string // accumulated online partials (FunASR sends increments)
+	startTime      time.Time
+	pausedAt       time.Time
+	pausedElapsed  int64
+	saveRecording  bool // controlled by checkbox
 
-	sw             *storage.Writer
-	lastFlushedLen int
+	sw              *storage.Writer
+	lastFlushedText string
 
 	// UI widgets.
 	hostEntry    *widget.Entry
@@ -121,7 +126,12 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 
 	m.textDisplay = widget.NewRichTextWithText("识别结果将在此显示...")
 	m.textDisplay.Wrapping = fyne.TextWrapWord
-	m.textScroll = container.NewScroll(m.textDisplay)
+	// A spacer above the text anchors it to the bottom of the view, so the
+	// transcript grows upward like a terminal/chat window (Tetris style).
+	m.textScroll = container.NewScroll(container.NewVBox(
+		layout.NewSpacer(),
+		m.textDisplay,
+	))
 	m.durationLbl = widget.NewLabel("00:00")
 
 	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
@@ -219,15 +229,15 @@ func (m *mainScreen) startSession() {
 
 	m.state = stateActive
 	m.recording = false
-	m.partialText = ""
-	m.finalizedBlocks = nil
+	m.finalizedText = ""
 	m.displayPartial = ""
-	m.lastFlushedLen = 0
+	m.lastFlushedText = ""
 	m.pausedElapsed = 0
 	m.startTime = time.Now()
 	m.toggleBtn.SetText("暂停")
 	m.endBtn.Show()
 	m.setUIMode(stateActive)
+	m.setUIParagraphs(nil) // reset the display to the placeholder
 	m.clearWarning()
 
 	ts := time.Now().Format("2006-01-02_150405")
@@ -310,17 +320,44 @@ func (m *mainScreen) clearWarning() {
 	fyne.Do(func() { m.warningLabel.Hide() })
 }
 
-func (m *mainScreen) setUIText(t string) {
+// setUIParagraphs renders the display paragraphs, one TextSegment each.
+// Keeping paragraphs as separate segments means appending to the last one (the
+// live partial) leaves all earlier paragraphs untouched, so their wrapped
+// lines never shift. Auto-scrolls only while the view is already pinned to
+// the bottom, so reading history is not interrupted.
+func (m *mainScreen) setUIParagraphs(paras []string) {
 	fyne.Do(func() {
-		m.textDisplay.Segments = []widget.RichTextSegment{
-			&widget.TextSegment{
+		atBottom := m.atScrollBottom()
+		segs := make([]widget.RichTextSegment, 0, len(paras))
+		for _, p := range paras {
+			segs = append(segs, &widget.TextSegment{
 				Style: widget.RichTextStyleParagraph,
-				Text:  t,
-			},
+				Text:  p,
+			})
 		}
+		if len(segs) == 0 {
+			segs = []widget.RichTextSegment{&widget.TextSegment{
+				Style: widget.RichTextStyleParagraph,
+				Text:  "识别结果将在此显示...",
+			}}
+		}
+		m.textDisplay.Segments = segs
 		m.textDisplay.Refresh()
-		m.textScroll.ScrollToBottom()
+		if atBottom {
+			m.textScroll.ScrollToBottom()
+		}
 	})
+}
+
+// atScrollBottom reports whether the scroll view is pinned to the bottom.
+// Must be called on the UI thread.
+func (m *mainScreen) atScrollBottom() bool {
+	content := m.textScroll.Content
+	if content == nil {
+		return true
+	}
+	return m.textScroll.Offset.Y+m.textScroll.Size().Height >=
+		content.Size().Height-scrollBottomTolerance
 }
 
 // setUIMode toggles host/port entries and save checkbox.
@@ -339,42 +376,107 @@ func (m *mainScreen) setUIMode(state int) {
 	})
 }
 
+// displayedText returns the full transcript text for saving to disk.
+// Caller must hold m.mu.
 func (m *mainScreen) displayedText() string {
+	return m.finalizedText + m.displayPartial
+}
+
+// stripPunct removes punctuation and whitespace so texts can be compared on
+// content alone (corrections insert/remove punctuation between updates).
+func stripPunct(s string) string {
 	var b strings.Builder
-	for _, block := range m.finalizedBlocks {
-		b.WriteString(block)
+	for _, r := range s {
+		if !unicode.IsPunct(r) && !unicode.IsSpace(r) {
+			b.WriteRune(r)
+		}
 	}
-	b.WriteString(m.partialText)
 	return b.String()
 }
 
-// appendBlock appends a finalized offline block.
-// Caller must hold m.mu.
-func (m *mainScreen) appendBlock(text string) {
-	if text == "" {
-		return
+// mergeFinalized merges a newly received offline result into the finalized
+// text. FunASR may stream offline results as small fragments ("我", "今天",
+// …) and later send the full corrected sentence ("我今天没吃饭， 好吗？"),
+// so a naive append would duplicate text and a naive replace would lose it.
+// Comparing with punctuation/whitespace stripped detects which case we have:
+// cumulative/full results replace, duplicates are dropped, new fragments are
+// appended. Note: corrections that rewrite earlier characters (not just add
+// punctuation) are not detected and will append after the older text.
+func mergeFinalized(cur, next string) string {
+	curNorm := stripPunct(cur)
+	nextNorm := stripPunct(next)
+	switch {
+	case nextNorm == "":
+		return cur
+	case curNorm == "":
+		return next
+	case strings.HasPrefix(nextNorm, curNorm):
+		// next contains everything already finalized (plus corrections):
+		// it is the cumulative/full version — replace.
+		return next
+	case strings.HasPrefix(curNorm, nextNorm):
+		// next is already fully covered: duplicate fragment — keep cur.
+		return cur
+	default:
+		// New fragment: append.
+		return cur + next
 	}
-	m.finalizedBlocks = append(m.finalizedBlocks, text)
 }
 
-// displaySmoothed builds the display text from recent blocks plus accumulated
-// online partials. Only the most recent finalized blocks are kept.
-func (m *mainScreen) displaySmoothed() string {
-	var b strings.Builder
-	blocks := m.finalizedBlocks
-	if len(blocks) > maxDisplayBlocks {
-		blocks = blocks[len(blocks)-maxDisplayBlocks:]
+// isSentenceEnd reports whether r terminates a sentence in the transcript.
+func isSentenceEnd(r rune) bool {
+	switch r {
+	case '。', '！', '？', '；', '!', '?', ';', '\n', '\r':
+		return true
 	}
-	for _, block := range blocks {
-		b.WriteString(block)
+	return false
+}
+
+// splitSentences splits text into sentences, keeping the ending punctuation
+// attached to its sentence. Text without final punctuation still yields a
+// trailing sentence.
+func splitSentences(text string) []string {
+	var sentences []string
+	var cur strings.Builder
+	for _, r := range text {
+		cur.WriteRune(r)
+		if isSentenceEnd(r) {
+			sentences = append(sentences, cur.String())
+			cur.Reset()
+		}
 	}
-	b.WriteString(m.displayPartial)
-	s := b.String()
-	if len([]rune(s)) > maxDisplayChars {
-		r := []rune(s)
-		s = "…" + string(r[len(r)-maxDisplayChars:])
+	if cur.Len() > 0 {
+		sentences = append(sentences, cur.String())
 	}
-	return s
+	return sentences
+}
+
+// displayParagraphs builds the paragraphs shown in the text display: the most
+// recent finalized sentences followed by the accumulated online partial.
+// Whole sentences are dropped from the front while the total exceeds the char
+// limit, so the remaining paragraphs are never rewritten and their rendered
+// lines stay stable: new words extend the last line to the right, filled
+// lines push upward, and old sentences scroll out at the top.
+// Caller must hold m.mu.
+func (m *mainScreen) displayParagraphs() []string {
+	paras := splitSentences(m.finalizedText)
+	if n := len(paras); n > maxDisplaySentences {
+		paras = paras[n-maxDisplaySentences:]
+	}
+	if m.displayPartial != "" {
+		paras = append(paras, m.displayPartial)
+	}
+
+	total := 0
+	for _, p := range paras {
+		total += len([]rune(p))
+	}
+	start := 0
+	for start < len(paras)-1 && total > maxDisplayChars {
+		total -= len([]rune(paras[start]))
+		start++
+	}
+	return paras[start:]
 }
 
 // ---------------------------------------------------------------------------
@@ -516,26 +618,25 @@ func (m *mainScreen) run() {
 			m.mu.Lock()
 			switch r.Mode {
 			case "2pass-online":
-				m.partialText = r.Text
 				m.displayPartial += r.Text
 			case "2pass-offline":
-				m.appendBlock(r.Text)
-				m.partialText = ""
+				// Offline results may stream in as fragments and later
+				// arrive as the full corrected text; merge accordingly.
+				m.finalizedText = mergeFinalized(m.finalizedText, r.Text)
 				m.displayPartial = ""
 			default:
-				m.appendBlock(r.Text)
-				m.partialText = ""
+				m.finalizedText = mergeFinalized(m.finalizedText, r.Text)
 				m.displayPartial = ""
 			}
-			displayed := m.displaySmoothed()
+			paras := m.displayParagraphs()
 			m.mu.Unlock()
-			m.setUIText(displayed)
+			m.setUIParagraphs(paras)
 
 		case <-flushTicker.C:
 			m.mu.Lock()
 			text := m.displayedText()
-			if len(text) > m.lastFlushedLen {
-				m.lastFlushedLen = len(text)
+			if text != m.lastFlushedText {
+				m.lastFlushedText = text
 				if m.sw != nil {
 					m.sw.WriteText(text)
 				}
