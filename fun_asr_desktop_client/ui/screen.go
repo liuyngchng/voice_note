@@ -48,11 +48,13 @@ const (
 type mainScreen struct {
 	cfg   serverConfig
 	prefs fyne.Preferences
+	win   fyne.Window
 
 	mu              sync.Mutex
 	state           int
 	recording       bool
 	partialText     string
+	displayPartial  string   // accumulated online partials (FunASR sends increments)
 	finalizedBlocks []string // finalized offline blocks, each is a natural sentence
 	startTime       time.Time
 	pausedAt        time.Time
@@ -80,8 +82,9 @@ type mainScreen struct {
 }
 
 // NewMainScreen builds the main UI page.
-func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
+func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 	m := &mainScreen{
+		win:           win,
 		cfg:           serverConfig{host: defaultHost, port: defaultPort},
 		prefs:         prefs,
 		saveRecording: true,
@@ -155,7 +158,27 @@ func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
 		),
 	)
 
+	// Register the space-bar toggle shortcut at the canvas level so it fires
+	// regardless of which widget has focus (except while typing in an Entry).
+	if canvas := win.Canvas(); canvas != nil {
+		canvas.SetOnTypedKey(m.handleKey)
+	}
+
 	return content
+}
+
+// handleKey implements the space-bar shortcut: idle→start, active→pause,
+// paused→resume. Typing space in a text field should not trigger it.
+func (m *mainScreen) handleKey(ev *fyne.KeyEvent) {
+	if ev.Name != fyne.KeySpace {
+		return
+	}
+	if c := m.win.Canvas(); c != nil {
+		if _, ok := c.Focused().(*widget.Entry); ok {
+			return
+		}
+	}
+	m.toggle()
 }
 
 // toggle cycles through idle → active → paused → active → ...
@@ -202,6 +225,7 @@ func (m *mainScreen) startSession() {
 	m.recording = false
 	m.partialText = ""
 	m.finalizedBlocks = nil
+	m.displayPartial = ""
 	m.lastFlushedLen = 0
 	m.pausedElapsed = 0
 	m.startTime = time.Now()
@@ -337,8 +361,8 @@ func (m *mainScreen) appendBlock(text string) {
 	m.finalizedBlocks = append(m.finalizedBlocks, text)
 }
 
-// displaySmoothed builds the display text from recent blocks plus current partial.
-// Only the most recent finalized blocks are kept to maintain a typewriter-like feel.
+// displaySmoothed builds the display text from recent blocks plus accumulated
+// online partials. Only the most recent finalized blocks are kept.
 func (m *mainScreen) displaySmoothed() string {
 	var b strings.Builder
 	blocks := m.finalizedBlocks
@@ -348,7 +372,7 @@ func (m *mainScreen) displaySmoothed() string {
 	for _, block := range blocks {
 		b.WriteString(block)
 	}
-	b.WriteString(m.partialText)
+	b.WriteString(m.displayPartial)
 	return b.String()
 }
 
@@ -492,12 +516,15 @@ func (m *mainScreen) run() {
 			switch r.Mode {
 			case "2pass-online":
 				m.partialText = r.Text
+				m.displayPartial += r.Text
 			case "2pass-offline":
 				m.appendBlock(r.Text)
 				m.partialText = ""
+				m.displayPartial = ""
 			default:
 				m.appendBlock(r.Text)
 				m.partialText = ""
+				m.displayPartial = ""
 			}
 			displayed := m.displaySmoothed()
 			m.mu.Unlock()
