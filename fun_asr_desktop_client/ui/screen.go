@@ -26,56 +26,155 @@ type serverConfig struct {
 }
 
 const (
-	// maxDisplayRunes is the number of characters kept in the on-screen sliding window.
-	maxDisplayRunes = 200
-	// flushInterval controls how often finalized text is persisted to disk.
-	flushInterval = 30 * time.Second
-	// tcpPrecheckTimeout is the max time to wait for a TCP dial during pre-check.
+	maxDisplayRunes    = 200
+	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
+	diskSampleBufSize  = 128
 )
 
 // session states.
 const (
-	stateIdle   = iota // not started
-	stateActive        // recording + streaming
-	statePaused        // paused (audio stream suspended)
+	stateIdle = iota
+	stateActive
+	statePaused
 )
+
+// diskWriter handles local file persistence in a background goroutine,
+// isolated from the real-time ASR pipeline.
+type diskWriter struct {
+	wavWriter      *audio.WavWriter
+	transcriptPath string
+
+	samplesCh chan []float32
+	textCh    chan string
+	doneCh    chan struct{}
+	warnFn    func(string)
+}
+
+// newDiskWriter creates files and starts the background writer goroutine.
+// wavPath may be empty, in which case only transcript writes are performed.
+func newDiskWriter(wavPath, transcriptPath string, warnFn func(string)) (*diskWriter, error) {
+	dw := &diskWriter{
+		transcriptPath: transcriptPath,
+		samplesCh:      make(chan []float32, diskSampleBufSize),
+		textCh:         make(chan string, 4),
+		doneCh:         make(chan struct{}),
+		warnFn:         warnFn,
+	}
+
+	if wavPath != "" {
+		ww, err := audio.NewWavWriter(wavPath)
+		if err != nil {
+			return nil, err
+		}
+		dw.wavWriter = ww
+	}
+
+	go dw.run()
+	return dw, nil
+}
+
+func (dw *diskWriter) run() {
+	defer func() {
+		if dw.wavWriter != nil {
+			if err := dw.wavWriter.Close(); err != nil {
+				slog.Error("wav_close", "err", err)
+			}
+		}
+	}()
+
+	for {
+		select {
+		case samples := <-dw.samplesCh:
+			if dw.wavWriter != nil {
+				if err := dw.wavWriter.WriteSamples(samples); err != nil {
+					slog.Error("wav_write", "err", err)
+					dw.warn("录音保存失败")
+				}
+			}
+
+		case text := <-dw.textCh:
+			if dw.transcriptPath != "" {
+				if err := os.WriteFile(dw.transcriptPath, []byte(text), 0o644); err != nil {
+					slog.Error("transcript_write", "err", err)
+					dw.warn("文本保存失败")
+				}
+			}
+
+		case <-dw.doneCh:
+			for {
+				select {
+				case samples := <-dw.samplesCh:
+					if dw.wavWriter != nil {
+						_ = dw.wavWriter.WriteSamples(samples)
+					}
+				case text := <-dw.textCh:
+					if dw.transcriptPath != "" {
+						_ = os.WriteFile(dw.transcriptPath, []byte(text), 0o644)
+					}
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+func (dw *diskWriter) warn(msg string) {
+	if dw.warnFn != nil {
+		dw.warnFn(msg)
+	}
+}
+
+func (dw *diskWriter) shutdown(finalText string) {
+	select {
+	case dw.textCh <- finalText:
+	case <-time.After(2 * time.Second):
+	}
+	close(dw.doneCh)
+}
+
+// ---------------------------------------------------------------------------
 
 type mainScreen struct {
 	cfg serverConfig
 
-	mu             sync.Mutex
-	state          int
-	recording      bool
-	partialText    string // transient online partial text
-	finalizedText  string // accumulated finalized (offline) text
-	connStatus     string
-	startTime      time.Time
-	pausedAt       time.Time // when pause started (to adjust elapsed display)
-	pausedElapsed  int64     // total seconds spent paused
-	transcriptPath string    // path of the on-disk transcript file
-	lastFlushedLen int       // length of text already flushed to disk
+	mu            sync.Mutex
+	state         int
+	recording     bool
+	partialText   string
+	finalizedText string
+	startTime     time.Time
+	pausedAt      time.Time
+	pausedElapsed int64
+	saveRecording bool // controlled by checkbox
+
+	dw             *diskWriter
+	lastFlushedLen int
 
 	// UI widgets.
-	hostEntry   *widget.Entry
-	portEntry   *widget.Entry
-	statusLabel *widget.Label
-	toggleBtn   *widget.Button
-	endBtn      *widget.Button
-	textArea    *widget.Label
-	durationLbl *widget.Label
+	hostEntry    *widget.Entry
+	portEntry    *widget.Entry
+	statusLabel  *widget.Label
+	warningLabel *widget.Label
+	toggleBtn    *widget.Button
+	endBtn       *widget.Button
+	textArea     *widget.Label
+	durationLbl  *widget.Label
+	saveCheck    *widget.Check
 
 	// Control channels.
 	stopCh  chan struct{}
-	pauseCh chan bool // true = pause, false = resume
+	pauseCh chan bool
 }
 
 // NewMainScreen builds the main UI page.
 func NewMainScreen() fyne.CanvasObject {
 	m := &mainScreen{
-		cfg:     serverConfig{host: "127.0.0.1", port: 10096},
-		stopCh:  make(chan struct{}),
-		pauseCh: make(chan bool, 1),
+		cfg:           serverConfig{host: "127.0.0.1", port: 10096},
+		saveRecording: true,
+		stopCh:        make(chan struct{}),
+		pauseCh:       make(chan bool, 1),
 	}
 
 	m.hostEntry = widget.NewEntry()
@@ -84,6 +183,9 @@ func NewMainScreen() fyne.CanvasObject {
 	m.portEntry.SetText(fmt.Sprintf("%d", m.cfg.port))
 
 	m.statusLabel = widget.NewLabel("未连接")
+	m.warningLabel = widget.NewLabel("")
+	m.warningLabel.Hide()
+
 	m.toggleBtn = widget.NewButton("启动", m.toggle)
 	m.toggleBtn.Importance = widget.HighImportance
 
@@ -95,6 +197,13 @@ func NewMainScreen() fyne.CanvasObject {
 	m.textArea.Wrapping = fyne.TextWrapWord
 	m.durationLbl = widget.NewLabel("00:00")
 
+	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
+		m.mu.Lock()
+		m.saveRecording = checked
+		m.mu.Unlock()
+	})
+	m.saveCheck.SetChecked(true)
+
 	hostLabel := widget.NewLabel("服务器地址")
 	portLabel := widget.NewLabel("端口")
 	form := container.NewGridWithColumns(2,
@@ -102,22 +211,22 @@ func NewMainScreen() fyne.CanvasObject {
 		portLabel, m.portEntry,
 	)
 
-	// Two centered buttons side by side.
 	btnBox := container.NewHBox(
-		widget.NewLabel(""), // spacer
+		widget.NewLabel(""),
 		container.NewGridWrap(fyne.NewSize(120, 40), m.toggleBtn),
 		container.NewGridWrap(fyne.NewSize(120, 40), m.endBtn),
-		widget.NewLabel(""), // spacer
+		widget.NewLabel(""),
 	)
 	btnWrap := container.NewCenter(btnBox)
 
 	content := container.NewBorder(
 		nil,
-		container.NewVBox(m.statusLabel, m.durationLbl),
+		container.NewVBox(m.statusLabel, m.warningLabel, m.durationLbl),
 		nil,
 		nil,
 		container.NewVBox(
 			form,
+			m.saveCheck,
 			btnWrap,
 			m.textArea,
 		),
@@ -150,7 +259,6 @@ func (m *mainScreen) endSession() {
 		return
 	}
 	m.stopInternal()
-	// UI will transition in the deferred cleanup of run().
 }
 
 // startSession begins a new transcription session.
@@ -173,10 +281,29 @@ func (m *mainScreen) startSession() {
 	m.toggleBtn.SetText("暂停")
 	m.endBtn.Show()
 	m.setUIMode(stateActive)
+	m.clearWarning()
 
-	// Create transcript file.
-	m.transcriptPath = filepath.Join(".", "transcript_"+time.Now().Format("2006-01-02_150405")+".txt")
-	slog.Info("transcript_file", "path", m.transcriptPath)
+	// Transcript is always saved. Recording is optional.
+	ts := time.Now().Format("2006-01-02_150405")
+	transcriptPath := filepath.Join(".", "transcript_"+ts+".txt")
+	var wavPath string
+	if m.saveRecording {
+		wavPath = filepath.Join(".", "recording_"+ts+".wav")
+	}
+	slog.Info("session_started", "transcript", transcriptPath, "recording", wavPath)
+
+	dw, err := newDiskWriter(wavPath, transcriptPath, func(msg string) {
+		fyne.Do(func() {
+			m.warningLabel.SetText("⚠ " + msg)
+			m.warningLabel.Show()
+		})
+	})
+	if err != nil {
+		slog.Error("disk_writer_create", "err", err)
+		m.showWarning("创建文件失败，" + err.Error())
+	} else {
+		m.dw = dw
+	}
 
 	m.setUIStatus("连接中...")
 
@@ -224,38 +351,44 @@ func (m *mainScreen) stopInternal() {
 }
 
 func (m *mainScreen) setUIStatus(s string) {
-	m.connStatus = s
 	fyne.Do(func() { m.statusLabel.SetText(s) })
 }
 
-func (m *mainScreen) setUISubtitle(s string) {
-	fyne.Do(func() { m.statusLabel.SetText(m.connStatus + "  " + s) })
+func (m *mainScreen) showWarning(s string) {
+	fyne.Do(func() {
+		m.warningLabel.SetText("⚠ " + s)
+		m.warningLabel.Show()
+	})
+}
+
+func (m *mainScreen) clearWarning() {
+	fyne.Do(func() { m.warningLabel.Hide() })
 }
 
 func (m *mainScreen) setUIText(t string) {
 	fyne.Do(func() { m.textArea.SetText(slidingWindow(t)) })
 }
 
-// setUIMode toggles host/port entries (disabled while session is live).
+// setUIMode toggles host/port entries and save checkbox.
 func (m *mainScreen) setUIMode(state int) {
 	locked := state != stateIdle
 	fyne.Do(func() {
 		if locked {
 			m.hostEntry.Disable()
 			m.portEntry.Disable()
+			m.saveCheck.Disable()
 		} else {
 			m.hostEntry.Enable()
 			m.portEntry.Enable()
+			m.saveCheck.Enable()
 		}
 	})
 }
 
-// displayedText returns the combined online partial + offline finalized text.
 func (m *mainScreen) displayedText() string {
 	return m.finalizedText + m.partialText
 }
 
-// slidingWindow trims text to the last maxDisplayRunes characters for display.
 func slidingWindow(s string) string {
 	runes := []rune(s)
 	if len(runes) <= maxDisplayRunes {
@@ -264,26 +397,21 @@ func slidingWindow(s string) string {
 	return string(runes[len(runes)-maxDisplayRunes:])
 }
 
-// flushToDisk writes the full text to disk. Caller must hold m.mu.
-func (m *mainScreen) flushToDisk() error {
-	if m.transcriptPath == "" {
-		return nil
-	}
-	full := m.displayedText()
-	if len(full) <= m.lastFlushedLen {
-		return nil
-	}
-	if err := os.WriteFile(m.transcriptPath, []byte(full), 0o644); err != nil {
-		return err
-	}
-	m.lastFlushedLen = len(full)
-	return nil
-}
+// ---------------------------------------------------------------------------
 
 func (m *mainScreen) run() {
 	defer func() {
 		m.mu.Lock()
-		_ = m.flushToDisk()
+		finalText := m.displayedText()
+		dw := m.dw
+		m.dw = nil
+		m.mu.Unlock()
+
+		if dw != nil {
+			dw.shutdown(finalText)
+		}
+
+		m.mu.Lock()
 		m.state = stateIdle
 		m.recording = false
 		m.stopCh = make(chan struct{})
@@ -292,10 +420,11 @@ func (m *mainScreen) run() {
 		fyne.Do(func() { m.endBtn.Hide() })
 		m.setUIStatus("已停止")
 		m.setUIMode(stateIdle)
+		m.clearWarning()
 		m.mu.Unlock()
 	}()
 
-	// ---- 1. Pre-check: test TCP reachability before dialing WebSocket ----
+	// ---- 1. Pre-check TCP ----
 	addr := net.JoinHostPort(m.cfg.host, fmt.Sprintf("%d", m.cfg.port))
 	raw, err := net.DialTimeout("tcp", addr, tcpPrecheckTimeout)
 	if err != nil {
@@ -305,7 +434,7 @@ func (m *mainScreen) run() {
 	}
 	raw.Close()
 
-	// ---- 2. Connect to FunASR server ----
+	// ---- 2. Connect to FunASR ----
 	c := &client.Client{}
 	if err := c.Connect(m.cfg.host, m.cfg.port); err != nil {
 		slog.Error("funasr_connect", "err", err)
@@ -336,7 +465,7 @@ func (m *mainScreen) run() {
 	m.mu.Unlock()
 	m.setUIStatus("识别中...")
 
-	// ---- 4. Start result reader ----
+	// ---- 4. Result reader ----
 	resultCh := make(chan *client.Result, 32)
 	go func() {
 		for {
@@ -373,8 +502,19 @@ func (m *mainScreen) run() {
 				goto done
 			}
 			if paused {
-				continue // drain audio while paused
+				continue
 			}
+			// Feed disk writer (non-blocking). Only writes WAV if recording is enabled.
+			m.mu.Lock()
+			dw := m.dw
+			m.mu.Unlock()
+			if dw != nil {
+				select {
+				case dw.samplesCh <- samples:
+				default:
+				}
+			}
+			// Send to FunASR.
 			if err := c.SendAudio(audio.ConvertFloatsToPCM(samples)); err != nil {
 				slog.Error("send_audio", "err", err)
 				m.setUIStatus("发送音频失败: " + err.Error())
@@ -393,7 +533,6 @@ func (m *mainScreen) run() {
 				m.finalizedText += r.Text
 				m.partialText = ""
 			default:
-				// online / offline (non-2pass modes) — just accumulate
 				m.finalizedText += r.Text
 				m.partialText = ""
 			}
@@ -403,7 +542,16 @@ func (m *mainScreen) run() {
 
 		case <-flushTicker.C:
 			m.mu.Lock()
-			_ = m.flushToDisk()
+			text := m.displayedText()
+			if len(text) > m.lastFlushedLen {
+				m.lastFlushedLen = len(text)
+				if m.dw != nil {
+					select {
+					case m.dw.textCh <- text:
+					default:
+					}
+				}
+			}
 			m.mu.Unlock()
 
 		case <-secTicker.C:
@@ -422,6 +570,5 @@ func (m *mainScreen) run() {
 
 done:
 	_ = c.SendEnd()
-	// Give the server a moment to flush any remaining results.
 	time.Sleep(100 * time.Millisecond)
 }
