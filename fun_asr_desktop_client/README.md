@@ -1,4 +1,4 @@
-# FunASR 实时语音转文本客户端
+# 实时语音转文本客户端
 
 Go + Fyne + WebSocket 实现的桌面端实时语音识别客户端。
 
@@ -58,8 +58,16 @@ nohup bash run_server_2pass.sh \
 1. 启动 `myfunasr_online` 容器（见上方）
 2. 运行 `./funasr-desktop-client`
 3. 确认服务器地址（默认 127.0.0.1:10096）
-4. 点击「开始识别」，开始说话
-5. 点击「停止识别」结束
+4. 勾选「保存录音到本地」决定是否保留原始音频（转录文本始终保存）
+5. 点击「启动」开始识别
+6. 点击「暂停」暂停 / 「继续」恢复，或点击「结束」停止本次会话
+
+每次会话在程序目录下生成：
+
+- `transcript_YYYY-MM-DD_HHMMSS.txt` — 转写文本（始终生成）
+- `recording_YYYY-MM-DD_HHMMSS.wav` — 原始录音（仅在勾选时生成）
+
+运行日志写入 `logs/app_YYYY-MM-DD.log`。
 
 ## 架构
 
@@ -75,6 +83,11 @@ nohup bash run_server_2pass.sh \
                  │  WebSocket 接收           │
                  │      → JSON 解析         │
                  │      → 实时显示文本      │
+                 │      (滑动窗口, 200 字)   │
+                 │                         │
+                 │  落盘 (独立 goroutine)    │
+                 │      → WAV 录音写入      │
+                 │      → TXT 文本写入      │
                  └──────────┬──────────────┘
                             │ ws://127.0.0.1:10096
                             │ mode=2pass
@@ -90,16 +103,18 @@ nohup bash run_server_2pass.sh \
 
 ```
 fun_asr_desktop_client/
-├── main.go                      # 程序入口
+├── main.go                      # 程序入口, 日志初始化
 ├── client/
 │   └── funasr.go                # FunASR WebSocket 2pass 客户端
 ├── internal/
 │   └── audio/
 │       ├── capture.go           # 录音接口
 │       ├── capture_linux.go     # ALSA 录音实现 (CGo)
-│       └── pcm_util.go          # float32 ↔ PCM 转换
+│       ├── capture_windows.go   # WASAPI 录音实现 (Windows)
+│       ├── pcm_util.go          # float32 ↔ PCM 转换
+│       └── wav_writer.go        # WAV 文件写入
 ├── ui/
-│   ├── screen.go                # 主界面
+│   ├── screen.go                # 主界面 + 会话管理 + 落盘调度
 │   ├── helpers.go               # 工具函数
 │   └── theme.go                 # 颜色主题
 ├── build.sh                     # Docker 构建脚本

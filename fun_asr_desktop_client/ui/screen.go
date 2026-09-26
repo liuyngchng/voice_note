@@ -416,8 +416,10 @@ func (m *mainScreen) run() {
 		m.recording = false
 		m.stopCh = make(chan struct{})
 		m.pauseCh = make(chan bool, 1)
-		m.toggleBtn.SetText("启动")
-		fyne.Do(func() { m.endBtn.Hide() })
+		fyne.Do(func() {
+			m.toggleBtn.SetText("启动")
+			m.endBtn.Hide()
+		})
 		m.setUIStatus("已停止")
 		m.setUIMode(stateIdle)
 		m.clearWarning()

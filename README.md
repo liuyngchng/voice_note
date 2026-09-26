@@ -324,6 +324,22 @@ TodoItem:
   task, owner, deadline
 ```
 
+## 桌面客户端
+
+项目提供了两个桌面端应用（Go + Fyne）。
+
+### 离线 ASR（`desktop/`）
+
+基于本地 sherpa-onnx + SenseVoice 模型的离线语音转写，无需网络。跨平台（Linux / Windows）。
+
+详见 [desktop/README.md](./desktop/README.md)。
+
+### 实时转写（`fun_asr_desktop_client/`）
+
+通过 WebSocket 连接 FunASR 2pass 服务，实时采集麦克风推流、实时显示转写文本。支持暂停/继续、录音本地保存。
+
+详见 [fun_asr_desktop_client/README.md](./fun_asr_desktop_client/README.md)。
+
 ## 最低要求
 
 - **Android** 8.0 (API 26)，离线 ASR 需 arm64-v8a 设备
