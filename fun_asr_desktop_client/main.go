@@ -46,7 +46,7 @@ func main() {
 	a := app.NewWithID("com.funasr.desktop.client")
 	w := a.NewWindow("实时语音转文本")
 
-	w.SetContent(ui.NewMainScreen())
+	w.SetContent(ui.NewMainScreen(a.Preferences()))
 
 	w.Resize(fyne.NewSize(600, 500))
 	w.ShowAndRun()

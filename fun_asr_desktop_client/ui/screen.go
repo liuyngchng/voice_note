@@ -4,7 +4,6 @@ package ui
 import (
 	"fmt"
 	"log/slog"
-	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -31,6 +30,12 @@ const (
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
 	diskSampleBufSize  = 128
+
+	defaultHost = "127.0.0.1"
+	defaultPort = 10096
+
+	prefKeyHost = "server.host"
+	prefKeyPort = "server.port"
 )
 
 // session states.
@@ -138,13 +143,15 @@ func (dw *diskWriter) shutdown(finalText string) {
 // ---------------------------------------------------------------------------
 
 type mainScreen struct {
-	cfg serverConfig
+	cfg   serverConfig
+	prefs fyne.Preferences
 
 	mu            sync.Mutex
 	state         int
 	recording     bool
-	partialText   string
-	finalizedText string
+	partialText    string
+	finalizedText  string
+	displayPartial string // accumulated display buffer (never shrinks until offline)
 	startTime     time.Time
 	pausedAt      time.Time
 	pausedElapsed int64
@@ -160,7 +167,8 @@ type mainScreen struct {
 	warningLabel *widget.Label
 	toggleBtn    *widget.Button
 	endBtn       *widget.Button
-	textEntry    *widget.Entry
+	textDisplay *widget.RichText
+	textScroll  *container.Scroll
 	durationLbl  *widget.Label
 	saveCheck    *widget.Check
 
@@ -170,9 +178,10 @@ type mainScreen struct {
 }
 
 // NewMainScreen builds the main UI page.
-func NewMainScreen() fyne.CanvasObject {
+func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
 	m := &mainScreen{
-		cfg:           serverConfig{host: "127.0.0.1", port: 10096},
+		cfg:           serverConfig{host: defaultHost, port: defaultPort},
+		prefs:         prefs,
 		saveRecording: true,
 		stopCh:        make(chan struct{}),
 		pauseCh:       make(chan bool, 1),
@@ -182,6 +191,16 @@ func NewMainScreen() fyne.CanvasObject {
 	m.hostEntry.SetText(m.cfg.host)
 	m.portEntry = widget.NewEntry()
 	m.portEntry.SetText(fmt.Sprintf("%d", m.cfg.port))
+
+	// Restore saved server config (overrides defaults when present).
+	if h := prefs.StringWithFallback(prefKeyHost, ""); h != "" {
+		m.cfg.host = h
+		m.hostEntry.SetText(h)
+	}
+	if p := prefs.IntWithFallback(prefKeyPort, 0); p != 0 {
+		m.cfg.port = p
+		m.portEntry.SetText(fmt.Sprintf("%d", p))
+	}
 
 	m.statusLabel = widget.NewLabel("未连接")
 	m.warningLabel = widget.NewLabel("")
@@ -194,13 +213,11 @@ func NewMainScreen() fyne.CanvasObject {
 	m.endBtn.Importance = widget.DangerImportance
 	m.endBtn.Hide()
 
-	m.textEntry = widget.NewEntry()
-	m.textEntry.MultiLine = true
-	m.textEntry.Wrapping = fyne.TextWrapWord
-	m.textEntry.SetMinRowsVisible(8)
-	m.textEntry.Disable() // read-only style (greyed bg), but text is selectable
-	m.textEntry.TextStyle = fyne.TextStyle{Monospace: true}
-	m.textEntry.SetPlaceHolder("识别结果将在此显示...")
+	m.textDisplay = widget.NewRichTextWithText("识别结果将在此显示...")
+	m.textDisplay.Wrapping = fyne.TextWrapWord
+	m.textDisplay.Scroll = container.ScrollNone
+	m.textScroll = container.NewVScroll(m.textDisplay)
+	m.textScroll.SetMinSize(fyne.NewSize(0, 200))
 	m.durationLbl = widget.NewLabel("00:00")
 
 	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
@@ -234,7 +251,7 @@ func NewMainScreen() fyne.CanvasObject {
 			form,
 			m.saveCheck,
 			btnWrap,
-			m.textEntry,
+			m.textScroll,
 		),
 	)
 
@@ -277,10 +294,15 @@ func (m *mainScreen) startSession() {
 	}
 	m.cfg = serverConfig{host: host, port: port}
 
+	// Remember for next launch.
+	m.prefs.SetString(prefKeyHost, host)
+	m.prefs.SetInt(prefKeyPort, port)
+
 	m.state = stateActive
 	m.recording = false
 	m.partialText = ""
 	m.finalizedText = ""
+	m.displayPartial = ""
 	m.lastFlushedLen = 0
 	m.pausedElapsed = 0
 	m.startTime = time.Now()
@@ -374,10 +396,14 @@ func (m *mainScreen) clearWarning() {
 func (m *mainScreen) setUIText(t string) {
 	text := slidingWindow(t)
 	fyne.Do(func() {
-		m.textEntry.SetText(text)
-		// Scroll to the bottom so the newest text is always visible.
-		// CursorRow is clamped by the entry internals, so use a huge value.
-		m.textEntry.CursorRow = math.MaxInt
+		m.textDisplay.Segments = []widget.RichTextSegment{
+			&widget.TextSegment{
+				Style: widget.RichTextStyleParagraph,
+				Text:  text,
+			},
+		}
+		m.textDisplay.Refresh()
+		m.textScroll.ScrollToBottom()
 	})
 }
 
@@ -399,6 +425,12 @@ func (m *mainScreen) setUIMode(state int) {
 
 func (m *mainScreen) displayedText() string {
 	return m.finalizedText + m.partialText
+}
+
+// displaySmoothed builds the display text using the accumulated online
+// fragments so the text grows smoothly instead of jumping word by word.
+func (m *mainScreen) displaySmoothed() string {
+	return m.finalizedText + m.displayPartial
 }
 
 func slidingWindow(s string) string {
@@ -543,14 +575,17 @@ func (m *mainScreen) run() {
 			switch r.Mode {
 			case "2pass-online":
 				m.partialText = r.Text
+				m.displayPartial += r.Text
 			case "2pass-offline":
 				m.finalizedText += r.Text
 				m.partialText = ""
+				m.displayPartial = ""
 			default:
 				m.finalizedText += r.Text
 				m.partialText = ""
+				m.displayPartial = ""
 			}
-			displayed := m.displayedText()
+			displayed := m.displaySmoothed()
 			m.mu.Unlock()
 			m.setUIText(displayed)
 
