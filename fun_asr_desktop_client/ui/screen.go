@@ -27,10 +27,10 @@ type serverConfig struct {
 }
 
 const (
-	flushInterval       = 30 * time.Second
-	tcpPrecheckTimeout  = 2 * time.Second
-	maxDisplaySentences = 3
-	maxDisplayChars     = 300
+	flushInterval      = 30 * time.Second
+	tcpPrecheckTimeout = 2 * time.Second
+	maxDisplayChars    = 300
+	trimStep           = 60 // runes; fallback cut granularity for unpunctuated text
 
 	// scrollBottomTolerance, in px: closer to the bottom than this still
 	// counts as pinned, so auto-scroll keeps following the newest text.
@@ -60,15 +60,17 @@ type mainScreen struct {
 	mu             sync.Mutex
 	state          int
 	recording      bool
-	finalizedText  string // latest 2pass-offline result: full corrected text so far
-	displayPartial string // accumulated online partials (FunASR sends increments)
+	finalizedText  string   // merged offline text shown in the UI (see mergeFinalized)
+	displayPartial string   // accumulated online partials (FunASR sends increments)
+	savedBlocks    []string // offline results appended verbatim for the saved transcript
+	partialText    string   // latest online fragment for the saved transcript
 	startTime      time.Time
 	pausedAt       time.Time
 	pausedElapsed  int64
 	saveRecording  bool // controlled by checkbox
 
-	sw              *storage.Writer
-	lastFlushedText string
+	sw             *storage.Writer
+	lastFlushedLen int
 
 	// UI widgets.
 	hostEntry    *widget.Entry
@@ -231,7 +233,9 @@ func (m *mainScreen) startSession() {
 	m.recording = false
 	m.finalizedText = ""
 	m.displayPartial = ""
-	m.lastFlushedText = ""
+	m.savedBlocks = nil
+	m.partialText = ""
+	m.lastFlushedLen = 0
 	m.pausedElapsed = 0
 	m.startTime = time.Now()
 	m.toggleBtn.SetText("暂停")
@@ -376,10 +380,26 @@ func (m *mainScreen) setUIMode(state int) {
 	})
 }
 
-// displayedText returns the full transcript text for saving to disk.
+// displayedText returns the transcript text for saving to disk: all offline
+// results appended verbatim plus the latest online fragment. This mirrors the
+// original save behavior and is independent of the UI display merging.
 // Caller must hold m.mu.
 func (m *mainScreen) displayedText() string {
-	return m.finalizedText + m.displayPartial
+	var b strings.Builder
+	for _, block := range m.savedBlocks {
+		b.WriteString(block)
+	}
+	b.WriteString(m.partialText)
+	return b.String()
+}
+
+// appendBlock appends a finalized offline result for the saved transcript.
+// Caller must hold m.mu.
+func (m *mainScreen) appendBlock(text string) {
+	if text == "" {
+		return
+	}
+	m.savedBlocks = append(m.savedBlocks, text)
 }
 
 // stripPunct removes punctuation and whitespace so texts can be compared on
@@ -432,51 +452,50 @@ func isSentenceEnd(r rune) bool {
 	return false
 }
 
-// splitSentences splits text into sentences, keeping the ending punctuation
-// attached to its sentence. Text without final punctuation still yields a
-// trailing sentence.
-func splitSentences(text string) []string {
-	var sentences []string
-	var cur strings.Builder
-	for _, r := range text {
-		cur.WriteRune(r)
-		if isSentenceEnd(r) {
-			sentences = append(sentences, cur.String())
-			cur.Reset()
+// trimSentences returns the tail of text, cut at a sentence boundary, so it
+// is roughly at most maxChars runes long. The cut anchors at the most recent
+// sentence end before the window start, so the tail only grows at its end
+// while new text appends (stable wrapping) and re-wraps once per completed
+// sentence, when the cut jumps forward to the next boundary. Long stretches
+// without punctuation fall back to a cut snapped to fixed trimStep steps.
+func trimSentences(text string, maxChars int) string {
+	r := []rune(text)
+	if len(r) <= maxChars {
+		return text
+	}
+	keepStart := len(r) - maxChars
+	for i := keepStart; i >= keepStart-trimStep && i >= 0; i-- {
+		if isSentenceEnd(r[i]) {
+			return string(r[i+1:])
 		}
 	}
-	if cur.Len() > 0 {
-		sentences = append(sentences, cur.String())
-	}
-	return sentences
+	// No recent sentence boundary: snap the cut to fixed steps so the tail
+	// still only changes every trimStep runes of new text.
+	start := keepStart - keepStart%trimStep
+	return string(r[start:])
 }
 
-// displayParagraphs builds the paragraphs shown in the text display: the most
-// recent finalized sentences followed by the accumulated online partial.
-// Whole sentences are dropped from the front while the total exceeds the char
-// limit, so the remaining paragraphs are never rewritten and their rendered
-// lines stay stable: new words extend the last line to the right, filled
-// lines push upward, and old sentences scroll out at the top.
+// displayParagraphs builds the paragraphs shown in the text display: the
+// finalized text, trimmed to the char limit, followed by the live partial.
+// Sentences flow continuously (no forced line break between them); each
+// paragraph is rewritten only when its own content changes, so existing
+// lines stay stable while new words extend the last line to the right.
 // Caller must hold m.mu.
 func (m *mainScreen) displayParagraphs() []string {
-	paras := splitSentences(m.finalizedText)
-	if n := len(paras); n > maxDisplaySentences {
-		paras = paras[n-maxDisplaySentences:]
-	}
-	if m.displayPartial != "" {
-		paras = append(paras, m.displayPartial)
+	finalized := trimSentences(m.finalizedText, maxDisplayChars)
+	partial := m.displayPartial
+	if r := []rune(partial); len(r) > maxDisplayChars {
+		partial = "…" + string(r[len(r)-maxDisplayChars:])
 	}
 
-	total := 0
-	for _, p := range paras {
-		total += len([]rune(p))
+	var paras []string
+	if finalized != "" {
+		paras = append(paras, finalized)
 	}
-	start := 0
-	for start < len(paras)-1 && total > maxDisplayChars {
-		total -= len([]rune(paras[start]))
-		start++
+	if partial != "" {
+		paras = append(paras, partial)
 	}
-	return paras[start:]
+	return paras
 }
 
 // ---------------------------------------------------------------------------
@@ -618,13 +637,19 @@ func (m *mainScreen) run() {
 			m.mu.Lock()
 			switch r.Mode {
 			case "2pass-online":
+				m.partialText = r.Text
 				m.displayPartial += r.Text
 			case "2pass-offline":
-				// Offline results may stream in as fragments and later
-				// arrive as the full corrected text; merge accordingly.
+				// Saved transcript: append the result verbatim, as before.
+				m.appendBlock(r.Text)
+				m.partialText = ""
+				// UI display: merge fragments / cumulative results so the
+				// visible text is neither duplicated nor lost.
 				m.finalizedText = mergeFinalized(m.finalizedText, r.Text)
 				m.displayPartial = ""
 			default:
+				m.appendBlock(r.Text)
+				m.partialText = ""
 				m.finalizedText = mergeFinalized(m.finalizedText, r.Text)
 				m.displayPartial = ""
 			}
@@ -635,8 +660,8 @@ func (m *mainScreen) run() {
 		case <-flushTicker.C:
 			m.mu.Lock()
 			text := m.displayedText()
-			if text != m.lastFlushedText {
-				m.lastFlushedText = text
+			if len(text) > m.lastFlushedLen {
+				m.lastFlushedLen = len(text)
 				if m.sw != nil {
 					m.sw.WriteText(text)
 				}
