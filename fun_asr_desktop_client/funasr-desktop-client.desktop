@@ -1,9 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=实时语音转文本
-Name[en]=FunASR Speech-to-Text
 Comment=使用 FunASR 2pass 引擎进行实时语音识别
-Comment[en]=Real-time speech recognition with FunASR 2pass
 Icon=funasr-desktop-client
 Exec=funasr-desktop-client
 StartupWMClass=FunASRDesktopClient
