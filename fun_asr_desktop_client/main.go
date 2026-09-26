@@ -44,10 +44,16 @@ func initLogging() {
 func main() {
 	initLogging()
 
-	// X11: without these hints GLFW falls back to using the window title
-	// (Chinese) as the ICCCM WM_CLASS property, which docks show as garbled
-	// text and which breaks .desktop matching. Must be set before the window
-	// is created (ShowAndRun below).
+	// GLFW must be initialized before we can set window hints.
+	// Fyne's own glfw.Init() later is a no-op after a successful init.
+	if err := glfw.Init(); err != nil {
+		panic("glfw init: " + err.Error())
+	}
+	defer glfw.Terminate()
+
+	// X11: without these ASCII hints GLFW falls back to using the window
+	// title (Chinese) as the ICCCM WM_CLASS property, which docks show as
+	// garbled text and which breaks .desktop matching.
 	glfw.WindowHintString(glfw.X11InstanceName, "funasr-desktop-client")
 	glfw.WindowHintString(glfw.X11ClassName, "FunASRDesktopClient")
 
