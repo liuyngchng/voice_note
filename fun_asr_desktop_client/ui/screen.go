@@ -27,7 +27,7 @@ type serverConfig struct {
 const (
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
-	maxDisplayBlocks   = 20
+	maxDisplayBlocks   = 6
 
 	defaultHost = "127.0.0.1"
 	defaultPort = 10096
@@ -71,7 +71,6 @@ type mainScreen struct {
 	toggleBtn    *widget.Button
 	endBtn       *widget.Button
 	textDisplay  *widget.RichText
-	textScroll   *container.Scroll
 	durationLbl  *widget.Label
 	saveCheck    *widget.Check
 
@@ -118,9 +117,6 @@ func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
 
 	m.textDisplay = widget.NewRichTextWithText("识别结果将在此显示...")
 	m.textDisplay.Wrapping = fyne.TextWrapWord
-	m.textDisplay.Scroll = container.ScrollNone
-	m.textScroll = container.NewVScroll(m.textDisplay)
-	m.textScroll.SetMinSize(fyne.NewSize(0, 200))
 	m.durationLbl = widget.NewLabel("00:00")
 
 	m.saveCheck = widget.NewCheck("保存录音到本地", func(checked bool) {
@@ -154,7 +150,7 @@ func NewMainScreen(prefs fyne.Preferences) fyne.CanvasObject {
 			form,
 			m.saveCheck,
 			btnWrap,
-			m.textScroll,
+			m.textDisplay,
 		),
 	)
 
@@ -303,7 +299,6 @@ func (m *mainScreen) setUIText(t string) {
 			},
 		}
 		m.textDisplay.Refresh()
-		m.textScroll.ScrollToBottom()
 	})
 }
 
