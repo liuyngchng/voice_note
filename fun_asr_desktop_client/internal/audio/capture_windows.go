@@ -28,7 +28,6 @@ type wasapiRecorder struct {
 	ch      chan []float32
 	stopCh  chan struct{}
 	started bool
-	once    sync.Once
 }
 
 // NewRecorder creates a new Windows WASAPI recorder.
@@ -43,7 +42,7 @@ func (r *wasapiRecorder) Start() (<-chan []float32, error) {
 	if !r.started {
 		r.stopCh = make(chan struct{})
 		r.started = true
-		go r.captureLoop()
+		go r.captureLoop(r.stopCh)
 	}
 
 	ch := make(chan []float32, 32)
@@ -51,17 +50,21 @@ func (r *wasapiRecorder) Start() (<-chan []float32, error) {
 	return ch, nil
 }
 
+// Stop stops capture and releases the WASAPI audio client, freeing the
+// microphone. Start may be called again afterwards to reacquire it.
 func (r *wasapiRecorder) Stop() {
-	r.once.Do(func() {
-		r.mu.Lock()
-		if r.stopCh != nil {
-			close(r.stopCh)
-		}
-		r.mu.Unlock()
-	})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.started {
+		return
+	}
+	close(r.stopCh)
+	r.started = false
+	r.ch = nil
 }
 
-func (r *wasapiRecorder) captureLoop() {
+func (r *wasapiRecorder) captureLoop(stopCh chan struct{}) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -139,7 +142,7 @@ func (r *wasapiRecorder) captureLoop() {
 
 	for {
 		select {
-		case <-r.stopCh:
+		case <-stopCh:
 			slog.Info("wasapi_capture_stopped")
 			return
 		default:

@@ -25,89 +25,96 @@ type alsaRecorder struct {
 	running  atomic.Bool
 	sampleCh chan []float32
 	done     chan struct{}
-	closed   bool
 }
 
-// NewRecorder creates a new Linux ALSA recorder (16kHz / mono / S16_LE).
+// NewRecorder creates a new Linux ALSA recorder (16kHz / mono / S16_LE) and
+// opens the capture device, which occupies the microphone until Stop.
 func NewRecorder() (Recorder, error) {
 	r := &alsaRecorder{
 		sampleCh: make(chan []float32, 8),
 		done:     make(chan struct{}),
 	}
+	if err := r.open(); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
 
+// open opens and configures the ALSA capture device. On failure the device
+// is closed again so the microphone is never left held.
+// Caller must hold r.mu.
+func (r *alsaRecorder) open() error {
 	deviceName := C.CString("default")
 	defer C.free(unsafe.Pointer(deviceName))
 
 	var handle *C.snd_pcm_t
 	ret := C.snd_pcm_open(&handle, deviceName, C.SND_PCM_STREAM_CAPTURE, 0)
 	if ret < 0 {
-		return nil, fmt.Errorf("audio: failed to open ALSA device: %s", alsaError(ret))
+		return fmt.Errorf("audio: failed to open ALSA device: %s", alsaError(ret))
 	}
-	r.handle = handle
 
 	var hwparams *C.snd_pcm_hw_params_t
 	C.snd_pcm_hw_params_malloc(&hwparams)
 	defer C.snd_pcm_hw_params_free(hwparams)
 
+	fail := func(err error) error {
+		C.snd_pcm_close(handle)
+		return err
+	}
+
 	ret = C.snd_pcm_hw_params_any(handle, hwparams)
 	if ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: hw_params_any: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: hw_params_any: %s", alsaError(ret)))
 	}
 
 	if ret = C.snd_pcm_hw_params_set_access(handle, hwparams, C.SND_PCM_ACCESS_RW_INTERLEAVED); ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: set_access: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: set_access: %s", alsaError(ret)))
 	}
 
 	ret = C.snd_pcm_hw_params_set_format(handle, hwparams, C.SND_PCM_FORMAT_S16_LE)
 	if ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: set_format: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: set_format: %s", alsaError(ret)))
 	}
 
 	rate := C.uint(16000)
 	ret = C.snd_pcm_hw_params_set_rate_near(handle, hwparams, &rate, nil)
 	if ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: set_rate: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: set_rate: %s", alsaError(ret)))
 	}
 
 	ret = C.snd_pcm_hw_params_set_channels(handle, hwparams, 1)
 	if ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: set_channels: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: set_channels: %s", alsaError(ret)))
 	}
 
 	bufferSize := C.snd_pcm_uframes_t(1600) // 100ms at 16kHz
 	ret = C.snd_pcm_hw_params_set_buffer_size_near(handle, hwparams, &bufferSize)
 	if ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: set_buffer_size: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: set_buffer_size: %s", alsaError(ret)))
 	}
 
 	ret = C.snd_pcm_hw_params(handle, hwparams)
 	if ret < 0 {
-		C.snd_pcm_close(handle)
-		return nil, fmt.Errorf("audio: hw_params: %s", alsaError(ret))
+		return fail(fmt.Errorf("audio: hw_params: %s", alsaError(ret)))
 	}
 
+	r.handle = handle
 	slog.Info("audio_capture_opened", "device", "default", "rate", 16000)
-	return r, nil
+	return nil
 }
 
 func (r *alsaRecorder) Start() (<-chan []float32, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.closed {
-		return nil, fmt.Errorf("audio: recorder already closed")
-	}
 	if r.running.Load() {
 		return r.sampleCh, nil
 	}
 	if r.handle == nil {
-		return nil, fmt.Errorf("audio: capture not initialized")
+		// A previous Stop closed the device; reopen it.
+		if err := r.open(); err != nil {
+			return nil, err
+		}
 	}
 
 	r.running.Store(true)
@@ -152,6 +159,8 @@ func (r *alsaRecorder) loop() {
 	}
 }
 
+// Stop stops capture and closes the ALSA device, releasing the microphone.
+// Start may be called again afterwards to reacquire it.
 func (r *alsaRecorder) Stop() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -161,7 +170,12 @@ func (r *alsaRecorder) Stop() {
 	}
 	r.running.Store(false)
 	close(r.done)
+	// Drain until the capture loop exits before closing the device under it.
 	for range r.sampleCh {
+	}
+	if r.handle != nil {
+		C.snd_pcm_close(r.handle)
+		r.handle = nil
 	}
 }
 

@@ -604,8 +604,19 @@ func (m *mainScreen) run() {
 		case p := <-m.pauseCh:
 			paused = p
 			if paused {
+				// Release the microphone while paused.
+				rec.Stop()
+				sampleCh = nil
 				_ = c.SendPause()
 			} else {
+				// Reacquire the microphone on resume.
+				ch, err := rec.Start()
+				if err != nil {
+					slog.Error("mic_resume", "err", err)
+					errStatus = "恢复录音失败: " + err.Error()
+					goto done
+				}
+				sampleCh = ch
 				_ = c.SendResume()
 			}
 
