@@ -89,7 +89,7 @@ nohup bash run_server_2pass.sh \
 ## 项目结构
 
 ```
-desktop_fun_asr_client/
+fun_asr_desktop_client/
 ├── main.go                      # 程序入口
 ├── client/
 │   └── funasr.go                # FunASR WebSocket 2pass 客户端

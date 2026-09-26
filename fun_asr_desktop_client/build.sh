@@ -47,7 +47,7 @@ cd "$SCRIPT_DIR"
 
 # ── 1. Check prerequisites ──
 if [[ ! -f "main.go" ]] || [[ ! -f "go.mod" ]]; then
-  echo "ERROR: run this script from the desktop_fun_asr_client/ directory"
+  echo "ERROR: run this script from the fun_asr_desktop_client/ directory"
   exit 1
 fi
 
