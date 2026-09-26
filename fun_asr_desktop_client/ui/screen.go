@@ -26,10 +26,10 @@ type serverConfig struct {
 }
 
 const (
-	maxDisplayRunes    = 200
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
 	diskSampleBufSize  = 128
+	maxDisplayBlocks   = 20
 
 	defaultHost = "127.0.0.1"
 	defaultPort = 10096
@@ -149,9 +149,9 @@ type mainScreen struct {
 	mu            sync.Mutex
 	state         int
 	recording     bool
-	partialText    string
-	finalizedText  string
-	displayPartial string // accumulated display buffer (never shrinks until offline)
+	partialText     string
+	displayPartial  string   // accumulated display buffer (never shrinks until offline)
+	finalizedBlocks []string // finalized offline blocks, each is a natural sentence
 	startTime     time.Time
 	pausedAt      time.Time
 	pausedElapsed int64
@@ -301,7 +301,7 @@ func (m *mainScreen) startSession() {
 	m.state = stateActive
 	m.recording = false
 	m.partialText = ""
-	m.finalizedText = ""
+	m.finalizedBlocks = nil
 	m.displayPartial = ""
 	m.lastFlushedLen = 0
 	m.pausedElapsed = 0
@@ -394,12 +394,11 @@ func (m *mainScreen) clearWarning() {
 }
 
 func (m *mainScreen) setUIText(t string) {
-	text := slidingWindow(t)
 	fyne.Do(func() {
 		m.textDisplay.Segments = []widget.RichTextSegment{
 			&widget.TextSegment{
 				Style: widget.RichTextStyleParagraph,
-				Text:  text,
+				Text:  t,
 			},
 		}
 		m.textDisplay.Refresh()
@@ -424,21 +423,37 @@ func (m *mainScreen) setUIMode(state int) {
 }
 
 func (m *mainScreen) displayedText() string {
-	return m.finalizedText + m.partialText
+	var b strings.Builder
+	for _, block := range m.finalizedBlocks {
+		b.WriteString(block)
+	}
+	b.WriteString(m.partialText)
+	return b.String()
+}
+
+// appendBlock appends a finalized offline block.
+// Caller must hold m.mu.
+func (m *mainScreen) appendBlock(text string) {
+	if text == "" {
+		return
+	}
+	m.finalizedBlocks = append(m.finalizedBlocks, text)
 }
 
 // displaySmoothed builds the display text using the accumulated online
 // fragments so the text grows smoothly instead of jumping word by word.
+// Only the most recent finalized blocks are included to keep rendering fast.
 func (m *mainScreen) displaySmoothed() string {
-	return m.finalizedText + m.displayPartial
-}
-
-func slidingWindow(s string) string {
-	runes := []rune(s)
-	if len(runes) <= maxDisplayRunes {
-		return s
+	var b strings.Builder
+	blocks := m.finalizedBlocks
+	if len(blocks) > maxDisplayBlocks {
+		blocks = blocks[len(blocks)-maxDisplayBlocks:]
 	}
-	return string(runes[len(runes)-maxDisplayRunes:])
+	for _, block := range blocks {
+		b.WriteString(block)
+	}
+	b.WriteString(m.displayPartial)
+	return b.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -586,11 +601,11 @@ func (m *mainScreen) run() {
 				m.partialText = r.Text
 				m.displayPartial += r.Text
 			case "2pass-offline":
-				m.finalizedText += r.Text
+				m.appendBlock(r.Text)
 				m.partialText = ""
 				m.displayPartial = ""
 			default:
-				m.finalizedText += r.Text
+				m.appendBlock(r.Text)
 				m.partialText = ""
 				m.displayPartial = ""
 			}
