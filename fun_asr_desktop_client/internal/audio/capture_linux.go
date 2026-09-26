@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package audio provides PCM audio capture and playback.
 //
 // This file implements microphone capture via ALSA (Linux) using CGo.
