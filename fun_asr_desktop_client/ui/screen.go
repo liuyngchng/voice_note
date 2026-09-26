@@ -118,7 +118,7 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 	m.warningLabel = widget.NewLabel("")
 	m.warningLabel.Hide()
 
-	m.toggleBtn = widget.NewButton("启动", m.toggle)
+	m.toggleBtn = widget.NewButton("开始", m.toggle)
 	m.toggleBtn.Importance = widget.HighImportance
 
 	m.endBtn = widget.NewButton("结束", m.endSession)
@@ -151,6 +151,7 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 	btnBox := container.NewHBox(
 		widget.NewLabel(""),
 		container.NewGridWrap(fyne.NewSize(120, 40), m.toggleBtn),
+		widget.NewLabel("      "),
 		container.NewGridWrap(fyne.NewSize(120, 40), m.endBtn),
 		widget.NewLabel(""),
 	)
@@ -522,7 +523,7 @@ func (m *mainScreen) run() {
 		m.stopCh = make(chan struct{})
 		m.pauseCh = make(chan bool, 1)
 		fyne.Do(func() {
-			m.toggleBtn.SetText("启动")
+			m.toggleBtn.SetText("开始")
 			m.endBtn.Hide()
 		})
 		if errStatus != "" {
