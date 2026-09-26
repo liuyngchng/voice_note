@@ -30,7 +30,6 @@ const (
 	flushInterval      = 30 * time.Second
 	tcpPrecheckTimeout = 2 * time.Second
 	maxDisplayChars    = 300
-	trimStep           = 60 // runes; fallback cut granularity for unpunctuated text
 
 	// scrollBottomTolerance, in px: closer to the bottom than this still
 	// counts as pinned, so auto-scroll keeps following the newest text.
@@ -95,7 +94,7 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 		win:           win,
 		cfg:           serverConfig{host: defaultHost, port: defaultPort},
 		prefs:         prefs,
-		saveRecording: true,
+		saveRecording: false,
 		stopCh:        make(chan struct{}),
 		pauseCh:       make(chan bool, 1),
 	}
@@ -141,7 +140,6 @@ func NewMainScreen(win fyne.Window, prefs fyne.Preferences) fyne.CanvasObject {
 		m.saveRecording = checked
 		m.mu.Unlock()
 	})
-	m.saveCheck.SetChecked(true)
 
 	hostLabel := widget.NewLabel("服务器地址")
 	portLabel := widget.NewLabel("端口")
@@ -452,41 +450,43 @@ func isSentenceEnd(r rune) bool {
 	return false
 }
 
-// trimSentences returns the tail of text, cut at a sentence boundary, so it
-// is roughly at most maxChars runes long. The cut anchors at the most recent
-// sentence end before the window start, so the tail only grows at its end
-// while new text appends (stable wrapping) and re-wraps once per completed
-// sentence, when the cut jumps forward to the next boundary. Long stretches
-// without punctuation fall back to a cut snapped to fixed trimStep steps.
+// trimSentences returns the tail of text so it is at most maxChars runes
+// long, cutting at the earliest sentence end at or after the window start.
+// The cut anchors at that boundary while new text appends (stable wrapping)
+// and jumps forward to the next boundary — one re-wrap per completed
+// sentence. Only a window without any sentence punctuation falls back to a
+// plain mid-word cut, which slides with every update.
 func trimSentences(text string, maxChars int) string {
 	r := []rune(text)
+	if maxChars <= 0 {
+		return ""
+	}
 	if len(r) <= maxChars {
 		return text
 	}
-	keepStart := len(r) - maxChars
-	for i := keepStart; i >= keepStart-trimStep && i >= 0; i-- {
+	start := len(r) - maxChars
+	for i := start; i < len(r); i++ {
 		if isSentenceEnd(r[i]) {
 			return string(r[i+1:])
 		}
 	}
-	// No recent sentence boundary: snap the cut to fixed steps so the tail
-	// still only changes every trimStep runes of new text.
-	start := keepStart - keepStart%trimStep
 	return string(r[start:])
 }
 
 // displayParagraphs builds the paragraphs shown in the text display: the
-// finalized text, trimmed to the char limit, followed by the live partial.
-// Sentences flow continuously (no forced line break between them); each
-// paragraph is rewritten only when its own content changes, so existing
-// lines stay stable while new words extend the last line to the right.
+// finalized text plus the live partial, capped at maxDisplayChars runes in
+// total. The partial gets priority (it is the actively typed line); the
+// finalized text is trimmed to the remaining budget. Sentences flow
+// continuously (no forced line break between them); each paragraph is
+// rewritten only when its own content changes, so existing lines stay stable
+// while new words extend the last line to the right.
 // Caller must hold m.mu.
 func (m *mainScreen) displayParagraphs() []string {
-	finalized := trimSentences(m.finalizedText, maxDisplayChars)
 	partial := m.displayPartial
 	if r := []rune(partial); len(r) > maxDisplayChars {
-		partial = "…" + string(r[len(r)-maxDisplayChars:])
+		partial = "…" + string(r[len(r)-(maxDisplayChars-1):])
 	}
+	finalized := trimSentences(m.finalizedText, maxDisplayChars-len([]rune(partial)))
 
 	var paras []string
 	if finalized != "" {
