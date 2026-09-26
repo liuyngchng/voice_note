@@ -20,6 +20,7 @@ android/captures/
 android/*.apk
 android/*.aab
 android/*.keystore
+voice_note-release.keystore
 !android/gradle/wrapper/gradle-wrapper.jar
 
 # Local configuration
