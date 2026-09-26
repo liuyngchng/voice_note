@@ -18,11 +18,11 @@ import (
 
 // Result is a single recognition result frame pushed by the FunASR server.
 type Result struct {
-	Mode      string `json:"mode"`       // "2pass-online" (partial) or "2pass-offline" (finalized)
-	Text      string `json:"text"`       // recognized text for this frame
-	IsFinal   bool   `json:"is_final"`   // true when the server has finished the stream
-	Timestamp string `json:"timestamp"`  // word-level timestamps (optional)
-	WavName   string `json:"wav_name"`   // echo of the wav_name we sent
+	Mode      string `json:"mode"`      // "2pass-online" (partial) or "2pass-offline" (finalized)
+	Text      string `json:"text"`      // recognized text for this frame
+	IsFinal   bool   `json:"is_final"`  // true when the server has finished the stream
+	Timestamp string `json:"timestamp"` // word-level timestamps (optional)
+	WavName   string `json:"wav_name"`  // echo of the wav_name we sent
 }
 
 // config is the JSON control message sent right after connecting.
@@ -48,7 +48,7 @@ func (c *Client) Connect(host string, port int) error {
 	u := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", host, port), Path: "/"}
 
 	dialer := websocket.Dialer{
-		Subprotocols:    []string{"binary"},
+		Subprotocols:     []string{"binary"},
 		HandshakeTimeout: 10 * time.Second,
 	}
 	conn, _, err := dialer.Dial(u.String(), nil)
