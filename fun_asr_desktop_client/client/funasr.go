@@ -95,6 +95,20 @@ func (c *Client) SendEnd() error {
 	return c.conn.WriteMessage(websocket.TextMessage, payload)
 }
 
+// SendPause tells the server to finalize the current utterance and pause recognition.
+func (c *Client) SendPause() error {
+	return c.SendEnd() // same wire message: {"is_speaking": false}
+}
+
+// SendResume tells the server to resume recognition after a pause.
+func (c *Client) SendResume() error {
+	if c.conn == nil {
+		return fmt.Errorf("client: not connected")
+	}
+	payload, _ := json.Marshal(map[string]bool{"is_speaking": true})
+	return c.conn.WriteMessage(websocket.TextMessage, payload)
+}
+
 // ReadNext blocks until the next result frame arrives.
 func (c *Client) ReadNext() (*Result, error) {
 	if c.conn == nil {

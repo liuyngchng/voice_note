@@ -4,6 +4,9 @@ package ui
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,33 +25,57 @@ type serverConfig struct {
 	port int
 }
 
+const (
+	// maxDisplayRunes is the number of characters kept in the on-screen sliding window.
+	maxDisplayRunes = 200
+	// flushInterval controls how often finalized text is persisted to disk.
+	flushInterval = 30 * time.Second
+	// tcpPrecheckTimeout is the max time to wait for a TCP dial during pre-check.
+	tcpPrecheckTimeout = 2 * time.Second
+)
+
+// session states.
+const (
+	stateIdle   = iota // not started
+	stateActive        // recording + streaming
+	statePaused        // paused (audio stream suspended)
+)
+
 type mainScreen struct {
 	cfg serverConfig
 
 	mu             sync.Mutex
-	running        bool
+	state          int
 	recording      bool
 	partialText    string // transient online partial text
 	finalizedText  string // accumulated finalized (offline) text
 	connStatus     string
 	startTime      time.Time
+	pausedAt       time.Time // when pause started (to adjust elapsed display)
+	pausedElapsed  int64     // total seconds spent paused
+	transcriptPath string    // path of the on-disk transcript file
+	lastFlushedLen int       // length of text already flushed to disk
 
 	// UI widgets.
 	hostEntry   *widget.Entry
 	portEntry   *widget.Entry
 	statusLabel *widget.Label
-	connectBtn  *widget.Button
+	toggleBtn   *widget.Button
+	endBtn      *widget.Button
 	textArea    *widget.Label
 	durationLbl *widget.Label
 
-	stopCh chan struct{}
+	// Control channels.
+	stopCh  chan struct{}
+	pauseCh chan bool // true = pause, false = resume
 }
 
 // NewMainScreen builds the main UI page.
 func NewMainScreen() fyne.CanvasObject {
 	m := &mainScreen{
-		cfg:    serverConfig{host: "127.0.0.1", port: 10096},
-		stopCh: make(chan struct{}),
+		cfg:     serverConfig{host: "127.0.0.1", port: 10096},
+		stopCh:  make(chan struct{}),
+		pauseCh: make(chan bool, 1),
 	}
 
 	m.hostEntry = widget.NewEntry()
@@ -57,8 +84,12 @@ func NewMainScreen() fyne.CanvasObject {
 	m.portEntry.SetText(fmt.Sprintf("%d", m.cfg.port))
 
 	m.statusLabel = widget.NewLabel("未连接")
-	m.connectBtn = widget.NewButton("开始识别", m.toggle)
-	m.connectBtn.Importance = widget.HighImportance
+	m.toggleBtn = widget.NewButton("启动", m.toggle)
+	m.toggleBtn.Importance = widget.HighImportance
+
+	m.endBtn = widget.NewButton("结束", m.endSession)
+	m.endBtn.Importance = widget.DangerImportance
+	m.endBtn.Hide()
 
 	m.textArea = widget.NewLabel("识别结果将在此显示...")
 	m.textArea.Wrapping = fyne.TextWrapWord
@@ -71,27 +102,60 @@ func NewMainScreen() fyne.CanvasObject {
 		portLabel, m.portEntry,
 	)
 
-	content := container.NewVBox(
-		widget.NewLabel("FunASR 实时语音转文本客户端"),
-		form,
-		m.connectBtn,
-		m.statusLabel,
-		m.durationLbl,
-		m.textArea,
+	// Two centered buttons side by side.
+	btnBox := container.NewHBox(
+		widget.NewLabel(""), // spacer
+		container.NewGridWrap(fyne.NewSize(120, 40), m.toggleBtn),
+		container.NewGridWrap(fyne.NewSize(120, 40), m.endBtn),
+		widget.NewLabel(""), // spacer
+	)
+	btnWrap := container.NewCenter(btnBox)
+
+	content := container.NewBorder(
+		nil,
+		container.NewVBox(m.statusLabel, m.durationLbl),
+		nil,
+		nil,
+		container.NewVBox(
+			form,
+			btnWrap,
+			m.textArea,
+		),
 	)
 
 	return content
 }
 
+// toggle cycles through idle → active → paused → active → ...
 func (m *mainScreen) toggle() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.running {
-		m.stopInternal()
+	switch m.state {
+	case stateIdle:
+		m.startSession()
+	case stateActive:
+		m.doPause()
+	case statePaused:
+		m.doResume()
+	}
+}
+
+// endSession finalises the current transcription and returns to idle.
+func (m *mainScreen) endSession() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.state == stateIdle {
 		return
 	}
+	m.stopInternal()
+	// UI will transition in the deferred cleanup of run().
+}
 
+// startSession begins a new transcription session.
+// Caller must hold m.mu.
+func (m *mainScreen) startSession() {
 	host := strings.TrimSpace(m.hostEntry.Text)
 	port := 10096
 	if _, err := fmt.Sscanf(strings.TrimSpace(m.portEntry.Text), "%d", &port); err != nil {
@@ -99,15 +163,54 @@ func (m *mainScreen) toggle() {
 	}
 	m.cfg = serverConfig{host: host, port: port}
 
-	m.running = true
+	m.state = stateActive
 	m.recording = false
 	m.partialText = ""
 	m.finalizedText = ""
+	m.lastFlushedLen = 0
+	m.pausedElapsed = 0
 	m.startTime = time.Now()
-	m.connectBtn.SetText("停止识别")
+	m.toggleBtn.SetText("暂停")
+	m.endBtn.Show()
+	m.setUIMode(stateActive)
+
+	// Create transcript file.
+	m.transcriptPath = filepath.Join(".", "transcript_"+time.Now().Format("2006-01-02_150405")+".txt")
+	slog.Info("transcript_file", "path", m.transcriptPath)
+
 	m.setUIStatus("连接中...")
 
 	go m.run()
+}
+
+// doPause pauses the current session.
+// Caller must hold m.mu.
+func (m *mainScreen) doPause() {
+	m.state = statePaused
+	m.pausedAt = time.Now()
+	m.toggleBtn.SetText("继续")
+	m.setUIStatus("已暂停")
+	m.setUIMode(statePaused)
+
+	select {
+	case m.pauseCh <- true:
+	default:
+	}
+}
+
+// doResume resumes a paused session.
+// Caller must hold m.mu.
+func (m *mainScreen) doResume() {
+	m.state = stateActive
+	m.pausedElapsed += int64(time.Since(m.pausedAt).Seconds())
+	m.toggleBtn.SetText("暂停")
+	m.setUIStatus("识别中...")
+	m.setUIMode(stateActive)
+
+	select {
+	case m.pauseCh <- false:
+	default:
+	}
 }
 
 func (m *mainScreen) stopInternal() {
@@ -130,7 +233,21 @@ func (m *mainScreen) setUISubtitle(s string) {
 }
 
 func (m *mainScreen) setUIText(t string) {
-	fyne.Do(func() { m.textArea.SetText(t) })
+	fyne.Do(func() { m.textArea.SetText(slidingWindow(t)) })
+}
+
+// setUIMode toggles host/port entries (disabled while session is live).
+func (m *mainScreen) setUIMode(state int) {
+	locked := state != stateIdle
+	fyne.Do(func() {
+		if locked {
+			m.hostEntry.Disable()
+			m.portEntry.Disable()
+		} else {
+			m.hostEntry.Enable()
+			m.portEntry.Enable()
+		}
+	})
 }
 
 // displayedText returns the combined online partial + offline finalized text.
@@ -138,18 +255,57 @@ func (m *mainScreen) displayedText() string {
 	return m.finalizedText + m.partialText
 }
 
+// slidingWindow trims text to the last maxDisplayRunes characters for display.
+func slidingWindow(s string) string {
+	runes := []rune(s)
+	if len(runes) <= maxDisplayRunes {
+		return s
+	}
+	return string(runes[len(runes)-maxDisplayRunes:])
+}
+
+// flushToDisk writes the full text to disk. Caller must hold m.mu.
+func (m *mainScreen) flushToDisk() error {
+	if m.transcriptPath == "" {
+		return nil
+	}
+	full := m.displayedText()
+	if len(full) <= m.lastFlushedLen {
+		return nil
+	}
+	if err := os.WriteFile(m.transcriptPath, []byte(full), 0o644); err != nil {
+		return err
+	}
+	m.lastFlushedLen = len(full)
+	return nil
+}
+
 func (m *mainScreen) run() {
 	defer func() {
 		m.mu.Lock()
-		m.running = false
+		_ = m.flushToDisk()
+		m.state = stateIdle
 		m.recording = false
 		m.stopCh = make(chan struct{})
-		m.connectBtn.SetText("开始识别")
+		m.pauseCh = make(chan bool, 1)
+		m.toggleBtn.SetText("启动")
+		fyne.Do(func() { m.endBtn.Hide() })
 		m.setUIStatus("已停止")
+		m.setUIMode(stateIdle)
 		m.mu.Unlock()
 	}()
 
-	// ---- 1. Connect to FunASR server ----
+	// ---- 1. Pre-check: test TCP reachability before dialing WebSocket ----
+	addr := net.JoinHostPort(m.cfg.host, fmt.Sprintf("%d", m.cfg.port))
+	raw, err := net.DialTimeout("tcp", addr, tcpPrecheckTimeout)
+	if err != nil {
+		slog.Error("precheck_unreachable", "addr", addr, "err", err)
+		m.setUIStatus("服务不可达 - " + err.Error())
+		return
+	}
+	raw.Close()
+
+	// ---- 2. Connect to FunASR server ----
 	c := &client.Client{}
 	if err := c.Connect(m.cfg.host, m.cfg.port); err != nil {
 		slog.Error("funasr_connect", "err", err)
@@ -159,7 +315,7 @@ func (m *mainScreen) run() {
 	defer c.Close()
 	m.setUIStatus("已连接，正在打开麦克风...")
 
-	// ---- 2. Open microphone ----
+	// ---- 3. Open microphone ----
 	rec, err := audio.NewRecorder()
 	if err != nil {
 		slog.Error("mic_open", "err", err)
@@ -180,7 +336,7 @@ func (m *mainScreen) run() {
 	m.mu.Unlock()
 	m.setUIStatus("识别中...")
 
-	// ---- 3. Start result reader ----
+	// ---- 4. Start result reader ----
 	resultCh := make(chan *client.Result, 32)
 	go func() {
 		for {
@@ -194,15 +350,30 @@ func (m *mainScreen) run() {
 		}
 	}()
 
-	// ---- 4. Main loop ----
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	// ---- 5. Main loop ----
+	secTicker := time.NewTicker(time.Second)
+	defer secTicker.Stop()
+	flushTicker := time.NewTicker(flushInterval)
+	defer flushTicker.Stop()
+
+	paused := false
 
 	for {
 		select {
+		case p := <-m.pauseCh:
+			paused = p
+			if paused {
+				_ = c.SendPause()
+			} else {
+				_ = c.SendResume()
+			}
+
 		case samples, ok := <-sampleCh:
 			if !ok {
 				goto done
+			}
+			if paused {
+				continue // drain audio while paused
 			}
 			if err := c.SendAudio(audio.ConvertFloatsToPCM(samples)); err != nil {
 				slog.Error("send_audio", "err", err)
@@ -230,8 +401,18 @@ func (m *mainScreen) run() {
 			m.mu.Unlock()
 			m.setUIText(displayed)
 
-		case <-ticker.C:
+		case <-flushTicker.C:
+			m.mu.Lock()
+			_ = m.flushToDisk()
+			m.mu.Unlock()
+
+		case <-secTicker.C:
+			m.mu.Lock()
 			elapsed := int64(time.Since(m.startTime).Seconds())
+			if m.state == statePaused {
+				elapsed -= m.pausedElapsed
+			}
+			m.mu.Unlock()
 			fyne.Do(func() { m.durationLbl.SetText(formatDuration(elapsed)) })
 
 		case <-m.stopCh:

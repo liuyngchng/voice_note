@@ -4,7 +4,9 @@ go 1.24.13
 
 require (
 	fyne.io/fyne/v2 v2.8.1
+	github.com/go-ole/go-ole v1.3.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/moutend/go-wca v0.3.0
 )
 
 require (
