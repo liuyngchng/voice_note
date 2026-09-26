@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
+	"github.com/go-gl/glfw/v3.4/glfw"
 	"github.com/liuyngchng/funasr-desktop-client/ui"
 )
 
@@ -42,6 +43,13 @@ func initLogging() {
 
 func main() {
 	initLogging()
+
+	// X11: without these hints GLFW falls back to using the window title
+	// (Chinese) as the ICCCM WM_CLASS property, which docks show as garbled
+	// text and which breaks .desktop matching. Must be set before the window
+	// is created (ShowAndRun below).
+	glfw.WindowHintString(glfw.X11InstanceName, "funasr-desktop-client")
+	glfw.WindowHintString(glfw.X11ClassName, "FunASRDesktopClient")
 
 	a := app.NewWithID("com.funasr.desktop.client")
 	w := a.NewWindow("实时语音转文本")
