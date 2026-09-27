@@ -10,6 +10,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/liuyngchng/voice-note-desktop/internal/asr"
@@ -19,49 +21,56 @@ import (
 
 const (
 	decodeIntervalMs     = 5000
-	recentCharWindow     = 100
 	decodeRingBufferSize = 640000 // 20s at 16kHz/16bit/mono
 	diskCheckInterval    = 5 * time.Minute
 	maxTranscriptChars   = 1000000
 	punctuationChunkSize = 5000
 	checkpointInterval   = 2 * time.Minute
-	activeRecordingFile  = "active_recording.txt"
 )
 
 // State holds the current recording session state, exposed to the UI via channels.
 type State struct {
-	IsRecording   bool
-	DurationSec   int64
-	Transcript    string
-	StatusMessage string
-	AudioLevel    float32
-	RecordID      int64
-	Error         error
+	IsRecording    bool
+	DurationSec    int64
+	Transcript     string // only set in the final state (full text)
+	NewSegment     string // incremental text since last emit (short, for live display)
+	StatusMessage  string
+	AudioLevel     float32
+	RecordID       int64
+	Error          error
+	WavPath        string
+	TranscriptPath string
 }
 
 // Recorder orchestrates a single recording session.
 type Recorder struct {
 	audioRec  RecorderImpl
 	asrEngine *asr.Engine
-	dataDir   string
+	outputDir string
 
 	stateCh chan State
 	stopCh  chan struct{}
 	doneCh  chan struct{}
+
+	wavPath        string
+	transcriptPath string
+	paused         atomic.Bool
 }
 
 // RecorderImpl is the audio capture implementation (platform-specific).
 type RecorderImpl interface {
 	Start() (<-chan []float32, error)
 	Stop()
+	Pause()
+	Resume()
 }
 
 // NewRecorder creates a new recording orchestrator.
-func NewRecorder(audioRec RecorderImpl, asrEng *asr.Engine, dataDir string) *Recorder {
+func NewRecorder(audioRec RecorderImpl, asrEng *asr.Engine, outputDir string) *Recorder {
 	return &Recorder{
 		audioRec:  audioRec,
 		asrEngine: asrEng,
-		dataDir:   dataDir,
+		outputDir: outputDir,
 		stateCh:   make(chan State, 64),
 		stopCh:    make(chan struct{}),
 		doneCh:    make(chan struct{}),
@@ -85,27 +94,22 @@ func (r *Recorder) Start(recordID int64) error {
 		return err
 	}
 
-	// Set up audio directory and WAV writer.
-	audioDir := filepath.Join(r.dataDir, "audio", fmt.Sprintf("record_%d", recordID))
-	if err := os.MkdirAll(audioDir, 0700); err != nil {
-		return fmt.Errorf("create audio dir: %w", err)
+	// Ensure output directory exists.
+	if err := os.MkdirAll(r.outputDir, 0700); err != nil {
+		return fmt.Errorf("create output dir: %w", err)
 	}
 
+	// Flat file structure: all WAV and TXT files directly in outputDir.
 	dateStr := time.Now().Format("20060102_150405")
-	wavPath := filepath.Join(audioDir, dateStr+".wav")
-	wavWriter, err := audio.NewWavWriter(wavPath)
+	r.wavPath = filepath.Join(r.outputDir, dateStr+"_voice_note.wav")
+	r.transcriptPath = filepath.Join(r.outputDir, dateStr+"_voice_note.txt")
+
+	wavWriter, err := audio.NewWavWriter(r.wavPath)
 	if err != nil {
 		return fmt.Errorf("create WAV file: %w", err)
 	}
 
-	// Transcript file path.
-	transcriptPath := filepath.Join(audioDir, dateStr+"_voice_note.txt")
-
-	// Write active recording marker for crash recovery.
-	markerPath := filepath.Join(r.dataDir, activeRecordingFile)
-	os.WriteFile(markerPath, []byte(fmt.Sprintf("%d", recordID)), 0600)
-
-	go r.run(sampleCh, wavWriter, transcriptPath, recordID)
+	go r.run(sampleCh, wavWriter, recordID)
 	return nil
 }
 
@@ -119,12 +123,26 @@ func (r *Recorder) Stop() {
 	r.emit(State{StatusMessage: "录音已结束，正在保存..."})
 }
 
-func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, transcriptPath string, recordID int64) {
+// Pause suspends audio capture (releasing the mic) and skips ASR decoding.
+func (r *Recorder) Pause(paused bool) {
+	r.paused.Store(paused)
+	if paused {
+		r.audioRec.Pause()
+		r.emit(State{StatusMessage: "已暂停"})
+	} else {
+		r.audioRec.Resume()
+		r.emit(State{StatusMessage: "已恢复录音"})
+	}
+}
+
+// IsPaused reports whether recording is currently paused.
+func (r *Recorder) IsPaused() bool {
+	return r.paused.Load()
+}
+
+func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, recordID int64) {
 	defer close(r.doneCh)
 	defer r.audioRec.Stop()
-	defer func() {
-		os.Remove(filepath.Join(r.dataDir, activeRecordingFile))
-	}()
 
 	var (
 		mutableTranscript bytes.Buffer
@@ -142,25 +160,23 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, tr
 	defer diskTicker.Stop()
 	defer checkpointTicker.Stop()
 
-	// Ensure ASR is ready.
-	vadActive := r.asrEngine != nil && r.asrEngine.VadIsDetected() // initial check
-	asrReady := r.asrEngine != nil && r.asrEngine.IsReady()
+	// ASR is evaluated lazily each cycle, both at the top and inside the
+	// loop; engines can finish loading asynchronously while recording runs.
+	vadActive := r.asrEngine != nil && r.asrEngine.VadIsDetected()
 
 	for {
 		select {
 		case <-r.stopCh:
-			// Drain remaining and finalize.
-			goto finalize
+			goto finalizePunct
 
 		case samples, ok := <-sampleCh:
 			if !ok {
-				goto finalize
+				goto finalizePunct
 			}
 			// Write PCM to WAV.
 			pcm := audio.ConvertFloatsToPCM(samples)
 			if err := wavWriter.Write(pcm); err != nil {
 				r.emit(State{StatusMessage: "磁盘写入失败，录音已中断"})
-				// Finalize anyway to save what we have.
 				goto finalizePunct
 			}
 
@@ -168,7 +184,12 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, tr
 			level := computeRMS(samples)
 			r.emit(State{AudioLevel: level})
 
-			// ASR decode.
+			// ASR decode; skip when paused (audio is still written to WAV).
+			if r.paused.Load() {
+				continue
+			}
+			// re-check engine readiness every cycle so that late
+			asrReady := r.asrEngine != nil && r.asrEngine.IsReady()
 			if asrReady {
 				if vadActive {
 					// VAD path.
@@ -179,16 +200,11 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, tr
 						segments := r.asrEngine.VadDecodeSegments()
 						for _, text := range segments {
 							mutableTranscript.WriteString(text)
-							appendToFile(transcriptPath, text+"\n")
+							appendToFile(r.transcriptPath, text+"\n")
 						}
 						if len(segments) > 0 {
-							full := mutableTranscript.String()
-							tail := full
-							runes := []rune(full)
-							if len(runes) > recentCharWindow {
-								tail = string(runes[len(runes)-recentCharWindow:])
-							}
-							r.emit(State{Transcript: tail, StatusMessage: "正在转写... " + common.FormatDuration(durationSec)})
+							newSegment := strings.Join(segments, "\n") + "\n"
+							r.emit(State{NewSegment: newSegment, StatusMessage: "正在转写... " + common.FormatDuration(durationSec)})
 						} else {
 							r.emit(State{StatusMessage: "静音中... " + common.FormatDuration(durationSec)})
 						}
@@ -224,14 +240,8 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, tr
 							slog.Warn("recorder_decode_error", "error", err)
 						} else if text != "" {
 							mutableTranscript.WriteString(text)
-							appendToFile(transcriptPath, text+"\n")
-							full := mutableTranscript.String()
-							runes := []rune(full)
-							tail := full
-							if len(runes) > recentCharWindow {
-								tail = string(runes[len(runes)-recentCharWindow:])
-							}
-							r.emit(State{Transcript: tail, StatusMessage: "正在转写... " + common.FormatDuration(durationSec)})
+							appendToFile(r.transcriptPath, text+"\n")
+							r.emit(State{NewSegment: text + "\n", StatusMessage: "正在转写... " + common.FormatDuration(durationSec)})
 						}
 					}
 				}
@@ -242,13 +252,11 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, tr
 			r.emit(State{DurationSec: durationSec})
 
 		case <-diskTicker.C:
-			// Disk space check.
 			if wavWriter.HasWriteError() {
 				r.emit(State{StatusMessage: "磁盘写入失败，录音已中断"})
 				goto finalizePunct
 			}
 		case <-checkpointTicker.C:
-			// Checkpoint: flush WAV.
 			if err := wavWriter.Flush(); err != nil {
 				slog.Warn("recorder_checkpoint_flush_error", "error", err)
 			}
@@ -263,7 +271,7 @@ finalizePunct:
 		text, err := r.asrEngine.Decode(audio.ConvertPCMToFloats(chunk))
 		if err == nil && text != "" {
 			mutableTranscript.WriteString(text)
-			appendToFile(transcriptPath, text+"\n")
+			appendToFile(r.transcriptPath, text+"\n")
 		}
 	}
 
@@ -273,7 +281,7 @@ finalizePunct:
 		segments := r.asrEngine.VadDecodeSegments()
 		for _, text := range segments {
 			mutableTranscript.WriteString(text)
-			appendToFile(transcriptPath, text+"\n")
+			appendToFile(r.transcriptPath, text+"\n")
 		}
 	}
 
@@ -286,16 +294,15 @@ finalizePunct:
 
 	// Write final transcript file.
 	if finalTranscript != "" {
-		os.WriteFile(transcriptPath, []byte(finalTranscript), 0600)
+		os.WriteFile(r.transcriptPath, []byte(finalTranscript), 0600)
 	}
 	r.emit(State{Transcript: finalTranscript})
 
-finalize:
-	// Close WAV file (patches header).
+// Close WAV file (patches header).
 	if err := wavWriter.Close(); err != nil {
 		slog.Error("recorder_wav_close_error", "error", err)
 	}
-	r.emit(State{IsRecording: false, Transcript: mutableTranscript.String()})
+	r.emit(State{IsRecording: false, Transcript: mutableTranscript.String(), WavPath: r.wavPath, TranscriptPath: r.transcriptPath})
 }
 
 func (r *Recorder) emit(s State) {

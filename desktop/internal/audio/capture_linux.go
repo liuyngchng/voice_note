@@ -124,20 +124,26 @@ func (r *alsaRecorder) Start() (<-chan []float32, error) {
 	default:
 	}
 
-	go r.loop()
+	go r.loop(r.handle)
 	return r.sampleCh, nil
 }
 
-func (r *alsaRecorder) loop() {
+func (r *alsaRecorder) loop(handle *C.snd_pcm_t) {
 	defer close(r.sampleCh)
 
 	framesPerBuffer := 1600 // 100ms at 16kHz
 	buf := make([]int16, framesPerBuffer)
 
 	for r.running.Load() {
-		n := C.snd_pcm_readi(r.handle, unsafe.Pointer(&buf[0]), C.snd_pcm_uframes_t(framesPerBuffer))
+		n := C.snd_pcm_readi(handle, unsafe.Pointer(&buf[0]), C.snd_pcm_uframes_t(framesPerBuffer))
 		if n < 0 {
-			rec := C.snd_pcm_recover(r.handle, C.int(n), 1)
+			// Stop() closes the handle to interrupt the blocking read; if we've
+			// been asked to stop, exit immediately instead of recovering a
+			// now-closed device.
+			if !r.running.Load() {
+				return
+			}
+			rec := C.snd_pcm_recover(handle, C.int(n), 1)
 			if rec < 0 {
 				slog.Warn("audio_capture_error", "error", alsaError(rec))
 				return
@@ -166,16 +172,42 @@ func (r *alsaRecorder) Stop() {
 		return
 	}
 	r.running.Store(false)
+
+	// Close ALSA handle to interrupt any blocking snd_pcm_readi call in loop().
+	if r.handle != nil {
+		C.snd_pcm_close(r.handle)
+		r.handle = nil
+		r.closed = true
+		slog.Info("audio_capture_stopped")
+	}
+
 	close(r.done)
 	// Drain the channel.
 	for range r.sampleCh {
 	}
 }
 
+// Pause stops the ALSA stream without closing the device.
+func (r *alsaRecorder) Pause() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.handle != nil && r.running.Load() {
+		C.snd_pcm_pause(r.handle, 1)
+	}
+}
+
+// Resume restarts the ALSA stream after a pause.
+func (r *alsaRecorder) Resume() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.handle != nil && r.running.Load() {
+		C.snd_pcm_pause(r.handle, 0)
+	}
+}
+
 // Close releases the ALSA device permanently. Not exposed on the Recorder
 // interface; called during application shutdown.
 func (r *alsaRecorder) Close() {
-	r.Stop()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.handle != nil {

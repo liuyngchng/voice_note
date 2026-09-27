@@ -2,8 +2,10 @@
 package ui
 
 import (
+	"log/slog"
 	"os"
 	"sync"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
@@ -19,16 +21,20 @@ import (
 
 // App is the application shell, managing window and navigation between screens.
 type App struct {
-	win      fyne.Window
-	dataDir  string
-	modelDir string
+	win       fyne.Window
+	dataDir   string
+	modelDir  string
+	outputDir string
 
 	repo      *data.Repository
 	asrEngine *asr.Engine
+	engineMu  sync.RWMutex    // protects asrEngine reads/writes
+	engineReady chan struct{} // closed when ASR engine load finishes (success or failure)
 
 	// Recording guard — only one recording at a time.
 	recordingMu     sync.Mutex
 	recordingActive bool
+	recordingVM     *recordingViewModel // current recording page (set when page is shown)
 
 	// Sidebar widgets.
 	navButtons []*widget.Button
@@ -36,38 +42,106 @@ type App struct {
 
 	// Navigation state.
 	navIndex     int
-	prevNavIndex int // saved when showing a detail page
 	contentStack *fyne.Container // right pane, swapped by navigate
 }
 
 // NewApp constructs the application shell with all backend dependencies.
-func NewApp(win fyne.Window, dataDir, modelDir string, dao *database.RecordDAO) *App {
+func NewApp(win fyne.Window, dataDir, modelDir, outputDir string, dao *database.RecordDAO) *App {
 	a := &App{
-		win:      win,
-		dataDir:  dataDir,
-		modelDir: modelDir,
-		repo:     data.NewRepository(dao),
+		win:         win,
+		dataDir:     dataDir,
+		modelDir:    modelDir,
+		outputDir:   outputDir,
+		repo:        data.NewRepository(dao),
+		engineReady: make(chan struct{}),
 	}
 
-	// Initialize the offline ASR engine in the background. UI proceeds even if
-	// the model fails to load; the sidebar shows the appropriate status.
-	go func() {
-		engine, err := asr.New(modelDir)
-		if err != nil {
-			a.asrEngine = nil
-			return
-		}
-		a.asrEngine = engine
-		fyne.Do(a.refreshModelStatus)
-	}()
+	// Load the offline ASR engine in the background. Once done (success or
+	// failure) the engineReady channel is closed so that recording flows can
+	// wait on it.
+	go a.initEngine()
 
 	return a
+}
+
+// initEngine loads the ASR model in the background. This runs once at startup
+// so the model is typically ready by the time the user starts a recording.
+func (a *App) initEngine() {
+	defer close(a.engineReady)
+
+	engine, err := asr.New(a.modelDir)
+	a.engineMu.Lock()
+	if err != nil {
+		slog.Warn("app_asr_init_failed", "error", err)
+		a.asrEngine = nil
+	} else {
+		a.asrEngine = engine
+	}
+	a.engineMu.Unlock()
+
+	fyne.Do(a.refreshModelStatus)
+}
+
+// Engine returns the ASR engine (nil if loading failed).
+func (a *App) Engine() *asr.Engine {
+	a.engineMu.RLock()
+	defer a.engineMu.RUnlock()
+	return a.asrEngine
+}
+
+// WaitForEngine blocks until ASR loading completes or timeout expires.
+// Returns true if the engine is ready after waiting, false on timeout or failure.
+func (a *App) WaitForEngine(timeout time.Duration) bool {
+	select {
+	case <-a.engineReady:
+	case <-time.After(timeout):
+	}
+	eng := a.Engine()
+	return eng != nil && eng.IsReady()
+}
+
+// Close releases ASR engine resources (sherpa-onnx native handles).
+func (a *App) Close() {
+	a.engineMu.Lock()
+	eng := a.asrEngine
+	a.asrEngine = nil
+	a.engineMu.Unlock()
+
+	if eng != nil {
+		eng.Close()
+	}
 }
 
 // Show starts the app at the home screen and installs the top menu bar.
 func (a *App) Show() {
 	a.win.SetMainMenu(a.buildMainMenu())
 	a.win.SetContent(a.buildLayout())
+
+	// Intercept window close: if a recording is in progress, gracefully stop
+	// it first, then close after the finalize flow completes.
+	a.win.SetCloseIntercept(a.onCloseIntercepted)
+}
+
+// onCloseIntercepted handles the window close (X button). If a recording is
+// active it triggers the same stop flow as pressing the stop button, and the
+// recording view will call win.Close() when finalize is done. If no recording
+// is active the window closes immediately.
+func (a *App) onCloseIntercepted() {
+	if !a.isRecording() {
+		a.win.Close()
+		return
+	}
+	if a.recordingVM != nil {
+		a.recordingVM.stopRecording()
+	}
+}
+
+// closeWindowAfterRecording is called by the recording VM after its finalize
+// flow completes following a window-close-initiated stop.
+func (a *App) closeWindowAfterRecording() {
+	fyne.Do(func() {
+		a.win.Close()
+	})
 }
 
 // buildLayout creates the desktop layout: a left sidebar for navigation and a
@@ -79,9 +153,9 @@ func (a *App) buildLayout() fyne.CanvasObject {
 
 	// Navigation buttons.
 	homeBtn := widget.NewButton("首页", func() { a.navigate(0) })
-	recordBtn := widget.NewButton("开始录音", func() { a.navigate(1) })
+	recordBtn := widget.NewButton("录音", func() { a.navigate(1) })
 	historyBtn := widget.NewButton("历史记录", func() { a.navigate(2) })
-	settingsBtn := widget.NewButton("设置", func() { a.navigate(3) })
+	settingsBtn := widget.NewButton("系统信息", func() { a.navigate(3) })
 
 	a.navButtons = []*widget.Button{homeBtn, recordBtn, historyBtn, settingsBtn}
 
@@ -157,26 +231,6 @@ func (a *App) endRecording() {
 	a.recordingMu.Unlock()
 }
 
-// showDetail pushes a detail page onto the right pane, saving the current
-// navigation index so "back" can restore it.
-func (a *App) showDetail(recordID int64) {
-	if a.contentStack == nil {
-		return
-	}
-	a.prevNavIndex = a.navIndex
-	a.contentStack.Objects = []fyne.CanvasObject{a.detailScreen(recordID)}
-	a.contentStack.Refresh()
-}
-
-// goBack restores the right pane to the page that was shown before the last
-// detail view. Call this from the detail screen "back" button.
-func (a *App) goBack() {
-	if a.contentStack == nil {
-		return
-	}
-	a.navigate(a.prevNavIndex)
-}
-
 // updateNavHighlight marks the selected sidebar button.
 func (a *App) updateNavHighlight() {
 	for i, btn := range a.navButtons {
@@ -194,7 +248,8 @@ func (a *App) refreshModelStatus() {
 	if a.modelLabel == nil {
 		return
 	}
-	if a.asrEngine == nil || !a.asrEngine.IsReady() {
+	eng := a.Engine()
+	if eng == nil || !eng.IsReady() {
 		a.modelLabel.SetText("离线模型未加载")
 		return
 	}
@@ -251,19 +306,18 @@ func (a *App) homeScreen() fyne.CanvasObject {
 }
 
 func (a *App) recordingScreen() fyne.CanvasObject {
-	return newRecordingScreen(a)
+	vm := newRecordingScreen(a)
+	a.recordingVM = vm
+	return vm.content
 }
 
-func (a *App) detailScreen(recordID int64) fyne.CanvasObject {
-	return newDetailScreen(a, recordID)
-}
 
 func (a *App) historyScreen() fyne.CanvasObject {
 	return newHistoryScreen(a)
 }
 
 func (a *App) settingsScreen() fyne.CanvasObject {
-	return newSettingsScreen(a)
+	return newInfoScreen(a)
 }
 
 // ---- Shared UI helpers ----

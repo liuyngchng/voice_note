@@ -3,17 +3,28 @@ package ui
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/liuyngchng/voice-note-desktop/domain"
 	"github.com/liuyngchng/voice-note-desktop/internal/audio"
 	"github.com/liuyngchng/voice-note-desktop/internal/service"
+)
+
+const maxDisplayLines = 5
+
+// recordingState tracks whether the page is idle or actively recording.
+type recordingState int
+
+const (
+	stateIdle      recordingState = iota
+	stateRecording               // actively capturing audio
 )
 
 type recordingViewModel struct {
@@ -23,51 +34,61 @@ type recordingViewModel struct {
 	recordID      int64
 	transcript    string
 	statusMessage string
-	isStopping    bool
+	isPaused      bool
 	isFinished    bool
+	state         recordingState
 
 	// UI elements.
 	titleLabel     *widget.Label
 	transcriptArea *widget.Label
+	startPauseBtn  *widget.Button
 	stopBtn        *widget.Button
 	durationLabel  *widget.Label
 	statusLabel    *widget.Label
 
-	// Recorder.
+	// Recorder (set once recording starts).
 	recorder *service.Recorder
+
+	// The root content object, exposed so App can use it for close intercept.
+	content fyne.CanvasObject
 }
 
-// newRecordingScreen builds the recording page.
-func newRecordingScreen(app *App) fyne.CanvasObject {
+// newRecordingScreen builds the recording page. Recording does NOT start
+// automatically when the page is shown — the user must tap "开始".
+func newRecordingScreen(app *App) *recordingViewModel {
 	vm := &recordingViewModel{
 		app:            app,
-		titleLabel:     widget.NewLabel("录音中"),
-		transcriptArea: widget.NewLabel("语音识别结果将在此显示"),
+		state:          stateIdle,
+		titleLabel:     widget.NewLabel("录音"),
+		transcriptArea: widget.NewLabel("点击「开始」启动录音"),
 		durationLabel:  widget.NewLabel("00:00"),
-		statusLabel:    widget.NewLabel("正在初始化..."),
-		stopBtn:        widget.NewButton("结束录音", nil),
+		statusLabel:    widget.NewLabel("就绪"),
+		startPauseBtn:  widget.NewButton("开始", nil),
+		stopBtn:        widget.NewButton("结束", nil),
 	}
 
 	vm.transcriptArea.Wrapping = fyne.TextWrapWord
 
-	// Make the stop button stand out: red (danger) and on its own line.
-	vm.stopBtn.Importance = widget.DangerImportance
+	vm.startPauseBtn.Importance = widget.HighImportance
+	vm.startPauseBtn.OnTapped = func() { vm.onStartPauseTapped() }
 
-	vm.stopBtn.OnTapped = func() {
-		vm.isStopping = true
-		vm.stopBtn.Disable()
-		vm.stopBtn.SetText("正在保存...")
-		if vm.recorder != nil {
-			vm.recorder.Stop()
-		}
-	}
+	vm.stopBtn.Importance = widget.DangerImportance
+	vm.stopBtn.Disable()
+	vm.stopBtn.OnTapped = func() { vm.onStopTapped(false) }
 
 	vm.statusLabel.TextStyle = fyne.TextStyle{Italic: true}
 
-	// Stop button: fixed width, not full-width — centered in the bottom bar.
-	buttonBox := container.NewCenter(container.NewPadded(vm.stopBtn))
+	// Buttons: Start/Pause | Stop
+	buttonRow := container.NewHBox(
+		layout.NewSpacer(),
+		container.NewPadded(vm.startPauseBtn),
+		layout.NewSpacer(),
+		container.NewPadded(vm.stopBtn),
+		layout.NewSpacer(),
+	)
+	buttonBox := container.NewCenter(buttonRow)
 
-	content := container.NewBorder(
+	c := container.NewBorder(
 		vm.titleLabel,
 		container.NewVBox(vm.statusLabel, buttonBox),
 		nil, nil,
@@ -76,22 +97,78 @@ func newRecordingScreen(app *App) fyne.CanvasObject {
 			vm.transcriptArea,
 		),
 	)
+	vm.content = c
+	return vm
+}
 
-	// Mark recording active immediately so navigation is blocked while the
-	// recording screen is shown (startRecording may still be opening the mic).
-	app.beginRecording()
+// onStartPauseTapped handles both "start" and "pause/resume" depending on state.
+func (vm *recordingViewModel) onStartPauseTapped() {
+	switch vm.state {
+	case stateIdle:
+		vm.state = stateRecording
+		vm.startPauseBtn.SetText("暂停")
+		vm.isPaused = false
+		vm.statusLabel.SetText("正在初始化...")
+		// Mark recording active so navigation is blocked and window-close is
+		// intercepted once recording has actually begun.
+		vm.app.beginRecording()
+		go vm.startRecording()
+	case stateRecording:
+		vm.isPaused = !vm.isPaused
+		if vm.isPaused {
+			vm.startPauseBtn.SetText("继续")
+			if vm.recorder != nil {
+				vm.recorder.Pause(true)
+			}
+		} else {
+			vm.startPauseBtn.SetText("暂停")
+			if vm.recorder != nil {
+				vm.recorder.Pause(false)
+			}
+		}
+	}
+}
 
-	go vm.startRecording()
+// onStopTapped ends the recording and triggers finalize. When closeWindow is
+// true, the window is closed after finalize completes (triggered by the window
+// close intercept).
+func (vm *recordingViewModel) onStopTapped(closeWindow bool) {
+	if vm.recorder == nil {
+		vm.finish(closeWindow)
+		return
+	}
+	vm.stopBtn.Disable()
+	vm.stopBtn.SetText("正在保存...")
+	vm.recorder.Stop()
+	// stateLoop will call finish() when done.
+}
 
-	return content
+// stopRecording is called by the App when the window close (X) is intercepted
+// during an active recording. It triggers the same graceful stop flow.
+func (vm *recordingViewModel) stopRecording() {
+	vm.onStopTapped(true)
 }
 
 func (vm *recordingViewModel) startRecording() {
 	ctx := context.Background()
 
+	// Wait for the ASR engine to be ready (already loaded at startup, but may
+	// still be in-flight if the user hits record immediately). On timeout or
+	// load failure we proceed without transcription.
+	if vm.app.WaitForEngine(30 * time.Second) {
+		fyne.Do(func() {
+			vm.titleLabel.SetText("录音中")
+		})
+	} else {
+		fyne.Do(func() {
+			vm.titleLabel.SetText("录音中（无转写）")
+			vm.statusLabel.SetText("模型未就绪，将以无转写模式录音")
+		})
+	}
+
 	now := time.Now()
 	rec := domain.VoiceRecord{
-		Title:            fmt.Sprintf("新录音 %s", now.Format("1月2日 15:04")),
+		Title:            now.Format("20060102_150405") + "_voice_note",
 		SourceType:       "RECORDING",
 		StartTime:        now,
 		CreatedAt:        now,
@@ -120,7 +197,7 @@ func (vm *recordingViewModel) startRecording() {
 	}
 
 	// Create and start the recorder orchestrator.
-	recorder := service.NewRecorder(audioRec, vm.app.asrEngine, vm.app.dataDir)
+	recorder := service.NewRecorder(audioRec, vm.app.Engine(), vm.app.outputDir)
 	vm.recorder = recorder
 
 	if err := recorder.Start(recordID); err != nil {
@@ -131,6 +208,11 @@ func (vm *recordingViewModel) startRecording() {
 		return
 	}
 
+	vm.stopBtn.Enable()
+	fyne.Do(func() {
+		vm.statusLabel.SetText("正在录音...")
+	})
+
 	// Listen for state updates.
 	go vm.stateLoop(recorder)
 }
@@ -139,7 +221,10 @@ func (vm *recordingViewModel) stateLoop(rec *service.Recorder) {
 	done := rec.Done()
 	stateCh := rec.StateChan()
 
-	// Drain state updates until recording finishes.
+	var finalWavPath string
+	var finalTranscriptPath string
+	var displayLines []string // sliding window of last N lines
+
 	for {
 		select {
 		case state, ok := <-stateCh:
@@ -159,27 +244,33 @@ func (vm *recordingViewModel) stateLoop(rec *service.Recorder) {
 				if state.DurationSec > 0 {
 					vm.durationLabel.SetText(formatDuration(state.DurationSec))
 				}
-				if state.Transcript != "" {
-					vm.transcriptArea.SetText(state.Transcript)
+				if state.NewSegment != "" {
+					lines := strings.Split(state.NewSegment, "\n")
+					for _, line := range lines {
+						line = strings.TrimSpace(line)
+						if line == "" {
+							continue
+						}
+						displayLines = append(displayLines, line)
+					}
+					if len(displayLines) > maxDisplayLines {
+						displayLines = displayLines[len(displayLines)-maxDisplayLines:]
+					}
+					vm.transcriptArea.SetText(strings.Join(displayLines, "\n"))
 				}
 				if state.StatusMessage != "" {
 					vm.statusLabel.SetText(state.StatusMessage)
 				}
 			})
-		case <-done:
-			// Drain any remaining buffered states.
-			for {
-				select {
-				case state := <-stateCh:
-					if state.Transcript != "" {
-						vm.mu.Lock()
-						vm.transcript = state.Transcript
-						vm.mu.Unlock()
-					}
-				default:
-					goto finalize
-				}
+
+			if state.WavPath != "" {
+				finalWavPath = state.WavPath
 			}
+			if state.TranscriptPath != "" {
+				finalTranscriptPath = state.TranscriptPath
+			}
+		case <-done:
+			goto finalize
 		}
 	}
 
@@ -190,14 +281,13 @@ finalize:
 
 	ctx := context.Background()
 
-	// Update audio file path in DB.
-	audioDir := audioDirPath(vm.app.dataDir, vm.recordID)
-	matches := findWavFiles(audioDir)
-	if len(matches) > 0 {
-		_ = vm.app.repo.UpdateAudioFilePath(ctx, vm.recordID, matches[0], time.Now().UnixMilli())
+	if finalWavPath != "" {
+		_ = vm.app.repo.UpdateAudioFilePath(ctx, vm.recordID, finalWavPath, time.Now().UnixMilli())
 	}
 
-	// Update transcript status.
+	if finalTranscriptPath != "" {
+		_ = vm.app.repo.UpdateTranscriptWithFile(ctx, vm.recordID, finalTranscriptPath)
+	}
 	if finalText == "" {
 		_ = vm.app.repo.UpdateTranscriptStatus(ctx, vm.recordID, domain.StatusUnavailable)
 	} else {
@@ -205,20 +295,17 @@ finalize:
 	}
 
 	vm.isFinished = true
-	vm.app.endRecording()
-	fyne.Do(func() { vm.app.navigate(0) })
+	vm.finish(false)
 }
 
-func findWavFiles(dir string) []string {
-	entries, err := readDir(dir)
-	if err != nil {
-		return nil
+// finish cleans up recording state and navigates back to home. If
+// closeWindow is true, the window is closed after cleanup (triggered
+// by a window close intercept).
+func (vm *recordingViewModel) finish(closeWindow bool) {
+	vm.app.endRecording()
+	if closeWindow {
+		vm.app.closeWindowAfterRecording()
+	} else {
+		fyne.Do(func() { vm.app.navigate(0) })
 	}
-	var wavs []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			wavs = append(wavs, dir+"/"+e.Name())
-		}
-	}
-	return wavs
 }

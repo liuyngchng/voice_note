@@ -111,6 +111,7 @@ Terminal=false
 Type=Application
 Categories=Utility;Office;
 StartupNotify=true
+StartupWMClass=VoiceNote
 `, appName, appName, comment, comment, binaryPath, iconPath())
 
 	if err := os.WriteFile(desktopPath(), []byte(content), 0644); err != nil {

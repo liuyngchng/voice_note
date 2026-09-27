@@ -10,4 +10,10 @@ type Recorder interface {
 
 	// Stop permanently stops recording and releases the device.
 	Stop()
+
+	// Pause suspends audio capture without releasing the device.
+	Pause()
+
+	// Resume restarts audio capture after a pause.
+	Resume()
 }

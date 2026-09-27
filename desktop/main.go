@@ -16,6 +16,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 
+	"github.com/go-gl/glfw/v3.4/glfw"
 	"github.com/liuyngchng/voice-note-desktop/internal/database"
 	"github.com/liuyngchng/voice-note-desktop/ui"
 )
@@ -59,11 +60,33 @@ func main() {
 		Level: slog.LevelInfo,
 	})))
 
+	// GLFW must be initialized before we can set window hints.
+	// Fyne's own glfw.Init() later is a no-op after a successful init.
+	if err := glfw.Init(); err != nil {
+		panic("glfw init: " + err.Error())
+	}
+	defer glfw.Terminate()
+
+	// X11: without these ASCII hints GLFW falls back to using the window
+	// title (Chinese) as the ICCCM WM_CLASS property, which docks show as
+	// garbled text and which breaks .desktop matching.
+	glfw.WindowHintString(glfw.X11InstanceName, "voice-note")
+	glfw.WindowHintString(glfw.X11ClassName, "VoiceNote")
+
 	// Determine data directory (user data: DB, settings, audio).
 	dataDir := database.DefaultDataDir()
 
 	// Determine model directory (portable-first).
 	modelDir := findModelDir(dataDir)
+
+	// Output directory: next to the executable, for WAV and transcript files.
+	outputDir := dataDir
+	if exePath, err := os.Executable(); err == nil {
+		outputDir = filepath.Join(filepath.Dir(exePath), "output")
+		if err := os.MkdirAll(outputDir, 0755); err != nil {
+			slog.Warn("cannot create output directory", "path", outputDir, "error", err)
+		}
+	}
 
 	// Open database.
 	db, err := database.Open(dataDir)
@@ -78,7 +101,8 @@ func main() {
 	w := a.NewWindow("语音笔记")
 
 	// Build and run the UI.
-	nav := ui.NewApp(w, dataDir, modelDir, db.RecordDAO)
+	nav := ui.NewApp(w, dataDir, modelDir, outputDir, db.RecordDAO)
+	defer nav.Close()
 	nav.Show()
 
 	w.Resize(fyne.NewSize(900, 640))

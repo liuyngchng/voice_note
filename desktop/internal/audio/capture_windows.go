@@ -61,6 +61,10 @@ func (r *wasapiRecorder) Stop() {
 	})
 }
 
+func (r *wasapiRecorder) Pause() {}
+
+func (r *wasapiRecorder) Resume() {}
+
 func (r *wasapiRecorder) captureLoop() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()

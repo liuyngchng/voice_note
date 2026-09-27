@@ -10,8 +10,8 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-// settingsViewModel manages settings screen state.
-type settingsViewModel struct {
+// infoViewModel manages the system info screen state.
+type infoViewModel struct {
 	app *App
 
 	dataDir     *widget.Label
@@ -20,12 +20,12 @@ type settingsViewModel struct {
 	punctStatus *widget.Label
 }
 
-// newSettingsScreen builds the settings page.
-func newSettingsScreen(app *App) fyne.CanvasObject {
-	vm := &settingsViewModel{app: app}
+// newInfoScreen builds the system info page.
+func newInfoScreen(app *App) fyne.CanvasObject {
+	vm := &infoViewModel{app: app}
 
 	// Data directory.
-	dataTitle := widget.NewLabel("数据与模型")
+	dataTitle := widget.NewLabel("系统信息")
 	dataTitle.TextStyle = fyne.TextStyle{Bold: true}
 
 	vm.dataDir = widget.NewLabel("")

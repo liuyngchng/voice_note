@@ -41,7 +41,7 @@ func newHomeScreen(app *App) fyne.CanvasObject {
 
 	vm.recordList.OnSelected = func(id widget.ListItemID) {
 		if id >= 0 && id < len(vm.records) {
-			app.showDetail(vm.records[id].ID)
+			openDir(app.outputDir)
 		}
 	}
 
