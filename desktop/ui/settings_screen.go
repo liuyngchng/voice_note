@@ -48,10 +48,8 @@ func newInfoScreen(app *App) fyne.CanvasObject {
 		vm.punctStatus,
 	)
 
-	// Load data dir.
-	go func() {
-		vm.dataDir.SetText(app.dataDir)
-	}()
+	// Data dir is known synchronously — no need for a goroutine.
+	vm.dataDir.SetText(app.dataDir)
 
 	return content
 }

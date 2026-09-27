@@ -147,6 +147,12 @@ func (d *RecordDAO) DeleteByID(ctx context.Context, id int64) error {
 	return err
 }
 
+// DeleteAll removes every record in a single statement.
+func (d *RecordDAO) DeleteAll(ctx context.Context) error {
+	_, err := d.conn.ExecContext(ctx, `DELETE FROM voice_records`)
+	return err
+}
+
 // GetAllTitles returns distinct titles.
 func (d *RecordDAO) GetAllTitles(ctx context.Context) ([]string, error) {
 	rows, err := d.conn.QueryContext(ctx,

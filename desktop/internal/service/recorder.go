@@ -26,6 +26,7 @@ const (
 	maxTranscriptChars   = 1000000
 	punctuationChunkSize = 5000
 	checkpointInterval   = 2 * time.Minute
+	maxRecordingDuration = 4 * time.Hour
 )
 
 // State holds the current recording session state, exposed to the UI via channels.
@@ -152,6 +153,7 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, re
 		ticker            = time.NewTicker(time.Second)
 		diskTicker        = time.NewTicker(diskCheckInterval)
 		checkpointTicker  = time.NewTicker(checkpointInterval)
+		maxTimer          = time.NewTimer(maxRecordingDuration)
 		decodeRingBuf     = make([]byte, decodeRingBufferSize)
 		decodeRingBufEnd  int
 	)
@@ -159,6 +161,7 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, re
 	defer ticker.Stop()
 	defer diskTicker.Stop()
 	defer checkpointTicker.Stop()
+	defer maxTimer.Stop()
 
 	// ASR is evaluated lazily each cycle, both at the top and inside the
 	// loop; engines can finish loading asynchronously while recording runs.
@@ -260,6 +263,9 @@ func (r *Recorder) run(sampleCh <-chan []float32, wavWriter *audio.WavWriter, re
 			if err := wavWriter.Flush(); err != nil {
 				slog.Warn("recorder_checkpoint_flush_error", "error", err)
 			}
+		case <-maxTimer.C:
+			r.emit(State{StatusMessage: "已达到最长录音时长（4小时），自动停止"})
+			goto finalizePunct
 		}
 	}
 

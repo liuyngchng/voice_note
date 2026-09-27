@@ -191,8 +191,8 @@ echo "Launch the app, then go to Settings → 桌面集成 to create a desktop s
 INSTEOF
 chmod +x "$PKG_DIR/install.sh"
 
-ARCHIVE="$SCRIPT_DIR/build/$PKG_NAME.tar"
-mkdir -p "$SCRIPT_DIR/build"
+ARCHIVE="$SCRIPT_DIR/dist/$PKG_NAME.tar"
+mkdir -p "$SCRIPT_DIR/dist"
 tar -cf "$ARCHIVE" -C "$TMP_DIR" --dereference "$PKG_NAME"
 
 echo "Package: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"

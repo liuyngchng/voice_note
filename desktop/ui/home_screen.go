@@ -4,6 +4,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -15,15 +16,18 @@ import (
 
 // homeViewModel manages home screen state.
 type homeViewModel struct {
-	app         *App
-	todayCount  *widget.Label
-	totalCount  *widget.Label
+	app *App
+	mu  sync.Mutex // guards records + in-flight refresh
+
+	statsRow    *fyne.Container
 	recordList  *widget.List
 	records     []domain.VoiceRecord
+	refreshing  bool
 }
 
 // newHomeScreen builds the home page with stats and recent records.
-func newHomeScreen(app *App) fyne.CanvasObject {
+// Returns the view model and its root canvas object.
+func newHomeScreen(app *App) (*homeViewModel, fyne.CanvasObject) {
 	vm := &homeViewModel{app: app}
 
 	vm.recordList = widget.NewList(
@@ -46,26 +50,44 @@ func newHomeScreen(app *App) fyne.CanvasObject {
 	}
 
 	// Stats row.
-	statsRow := container.NewGridWithColumns(2,
+	vm.statsRow = container.NewGridWithColumns(2,
 		statCard("今日记录", "0"),
 		statCard("总记录", "0"),
 	)
 
-	vm.todayCount = widget.NewLabel("0")
-	vm.totalCount = widget.NewLabel("0")
-
-	go vm.loadStats(statsRow)
-
 	content := container.NewVBox(
-		statsRow,
+		vm.statsRow,
 		widget.NewLabel("最近记录"),
 		vm.recordList,
 	)
 
-	return content
+	vm.refresh()
+	return vm, content
 }
 
-func (vm *homeViewModel) loadStats(statsRow *fyne.Container) {
+// refresh reloads stats and recent records from the database. It is safe to
+// call on every navigation to the home screen: concurrent calls are coalesced
+// so no goroutine accumulates, and stale results never touch the UI after a
+// newer refresh has started.
+func (vm *homeViewModel) refresh() {
+	vm.mu.Lock()
+	if vm.refreshing {
+		vm.mu.Unlock()
+		return
+	}
+	vm.refreshing = true
+	vm.mu.Unlock()
+
+	go vm.loadStats()
+}
+
+func (vm *homeViewModel) loadStats() {
+	defer func() {
+		vm.mu.Lock()
+		vm.refreshing = false
+		vm.mu.Unlock()
+	}()
+
 	ctx := context.Background()
 	records, err := vm.app.repo.GetAll(ctx)
 	if err != nil {
@@ -86,12 +108,15 @@ func (vm *homeViewModel) loadStats(statsRow *fyne.Container) {
 	totalCard := statCard("总记录", fmt.Sprintf("%d", len(records)))
 
 	fyne.Do(func() {
-		statsRow.Objects = []fyne.CanvasObject{todayCard, totalCard}
-		statsRow.Refresh()
+		vm.mu.Lock()
 		vm.records = records
 		if len(vm.records) > 5 {
 			vm.records = vm.records[:5]
 		}
+		vm.mu.Unlock()
+
+		vm.statsRow.Objects = []fyne.CanvasObject{todayCard, totalCard}
+		vm.statsRow.Refresh()
 		vm.recordList.Refresh()
 	})
 }

@@ -3,11 +3,12 @@ package ui
 
 import (
 	"context"
+	"os"
+	"sync"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/liuyngchng/voice-note-desktop/domain"
@@ -15,19 +16,25 @@ import (
 
 // historyViewModel manages history screen state.
 type historyViewModel struct {
-	app     *App
-	records []domain.VoiceRecord
-	list    *widget.List
+	app *App
+	mu  sync.Mutex // guards records + in-flight refresh
+
+	records    []domain.VoiceRecord
+	list       *widget.List
+	refreshing bool
 }
 
 // newHistoryScreen builds the history page with search and list.
-func newHistoryScreen(app *App) fyne.CanvasObject {
+// Returns the view model and its root canvas object.
+func newHistoryScreen(app *App) (*historyViewModel, fyne.CanvasObject) {
 	vm := &historyViewModel{app: app}
 
 	vm.list = widget.NewList(
 		func() int { return len(vm.records) },
 		func() fyne.CanvasObject {
-			return widget.NewLabel("template")
+			l := widget.NewLabel("template")
+			l.TextStyle = fyne.TextStyle{Underline: true}
+			return l
 		},
 		func(i int, obj fyne.CanvasObject) {
 			rec := vm.records[i]
@@ -55,37 +62,77 @@ func newHistoryScreen(app *App) fyne.CanvasObject {
 	deleteAllBtn.Importance = widget.DangerImportance
 
 	// Keep the clear button from stretching to fill the tab width.
-	deleteAllRow := container.NewHBox(deleteAllBtn, layout.NewSpacer())
+	deleteAllRow := container.NewCenter(deleteAllBtn)
 
 	content := container.NewBorder(
-		container.NewVBox(deleteAllRow),
-		nil, nil, nil,
+		nil,
+		deleteAllRow,
+		nil, nil,
 		vm.list,
 	)
 
+	vm.refresh()
+	return vm, content
+}
+
+// refresh reloads the record list from the database. Like the home screen, it
+// coalesces concurrent calls so no goroutine accumulates across navigation.
+func (vm *historyViewModel) refresh() {
+	vm.mu.Lock()
+	if vm.refreshing {
+		vm.mu.Unlock()
+		return
+	}
+	vm.refreshing = true
+	vm.mu.Unlock()
+
 	go vm.loadAll()
-	return content
 }
 
 func (vm *historyViewModel) loadAll() {
+	defer func() {
+		vm.mu.Lock()
+		vm.refreshing = false
+		vm.mu.Unlock()
+	}()
+
 	ctx := context.Background()
 	records, err := vm.app.repo.GetAll(ctx)
 	if err != nil {
 		return
 	}
 	fyne.Do(func() {
+		vm.mu.Lock()
 		vm.records = records
+		vm.mu.Unlock()
 		vm.list.Refresh()
 	})
 }
 
 func (vm *historyViewModel) deleteAll() {
 	ctx := context.Background()
-	for _, r := range vm.records {
-		vm.app.repo.Delete(ctx, r.ID)
+
+	// Delete disk files (WAV + transcript) first.
+	records, err := vm.app.repo.GetAll(ctx)
+	if err != nil {
+		return
+	}
+	for _, r := range records {
+		if r.AudioFilePath != "" {
+			os.Remove(r.AudioFilePath)
+		}
+		if r.TranscriptFilePath != "" {
+			os.Remove(r.TranscriptFilePath)
+		}
+	}
+
+	if err := vm.app.repo.DeleteAll(ctx); err != nil {
+		return
 	}
 	fyne.Do(func() {
+		vm.mu.Lock()
 		vm.records = nil
+		vm.mu.Unlock()
 		vm.list.Refresh()
 	})
 }

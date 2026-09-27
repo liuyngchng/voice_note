@@ -40,6 +40,9 @@ type VoiceRecordRepository interface {
 	// Delete removes a record by ID.
 	Delete(ctx context.Context, id int64) error
 
+	// DeleteAll removes all records from the database in a single batch.
+	DeleteAll(ctx context.Context) error
+
 	// GetAllTitles returns distinct titles for autocomplete suggestions.
 	GetAllTitles(ctx context.Context) ([]string, error)
 

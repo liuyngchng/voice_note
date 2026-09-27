@@ -107,6 +107,10 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 	return r.dao.DeleteByID(ctx, id)
 }
 
+func (r *Repository) DeleteAll(ctx context.Context) error {
+	return r.dao.DeleteAll(ctx)
+}
+
 func (r *Repository) GetAllTitles(ctx context.Context) ([]string, error) {
 	return r.dao.GetAllTitles(ctx)
 }

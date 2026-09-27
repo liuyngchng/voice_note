@@ -43,6 +43,16 @@ type App struct {
 	// Navigation state.
 	navIndex     int
 	contentStack *fyne.Container // right pane, swapped by navigate
+
+	// Screen cache — pages are created once and refreshed on navigation
+	// instead of being rebuilt from scratch, avoiding goroutine accumulation
+	// and GC pressure on frequent tab switches.
+	homeCache     fyne.CanvasObject
+	homeVM        *homeViewModel
+	historyCache  fyne.CanvasObject
+	historyVM     *historyViewModel
+	settingsCache fyne.CanvasObject
+	lastNavTime   time.Time // debounce rapid clicks
 }
 
 // NewApp constructs the application shell with all backend dependencies.
@@ -157,12 +167,16 @@ func (a *App) buildLayout() fyne.CanvasObject {
 	historyBtn := widget.NewButton("历史记录", func() { a.navigate(2) })
 	settingsBtn := widget.NewButton("系统信息", func() { a.navigate(3) })
 
+	// Recording is disabled until the ASR model finishes loading (success or
+	// failure — recording still works without transcription if loading fails).
+	recordBtn.Disable()
+
 	a.navButtons = []*widget.Button{homeBtn, recordBtn, historyBtn, settingsBtn}
 
 	// Model status indicator (bottom of sidebar).
-	a.modelLabel = widget.NewLabel("模型加载中...")
+	a.modelLabel = widget.NewLabel("初始化中...")
 	a.modelLabel.Wrapping = fyne.TextWrapWord
-	a.refreshModelStatus()
+	a.refreshModelStatus() // sets initial text + disables record button
 
 	// Sidebar column: title + nav + spacer + model status.
 	sidebar := container.NewBorder(
@@ -173,7 +187,7 @@ func (a *App) buildLayout() fyne.CanvasObject {
 	)
 
 	// Right content area — starts with home.
-	a.contentStack = container.NewStack(a.homeScreen())
+	a.contentStack = container.NewStack(a.getHomeScreen())
 	a.navIndex = 0
 	a.updateNavHighlight()
 
@@ -188,6 +202,13 @@ func (a *App) navigate(index int) {
 		return
 	}
 
+	// Debounce rapid clicks so a double-tap doesn't trigger two rebuilds.
+	now := time.Now()
+	if now.Sub(a.lastNavTime) < 200*time.Millisecond && a.navIndex == index {
+		return
+	}
+	a.lastNavTime = now
+
 	// Block leaving the recording screen (index 1) while a recording is active.
 	if a.navIndex == 1 && index != 1 && a.isRecording() {
 		dialog.ShowInformation("录音进行中", "请先结束当前录音", a.win)
@@ -199,13 +220,13 @@ func (a *App) navigate(index int) {
 
 	switch index {
 	case 0:
-		a.contentStack.Objects = []fyne.CanvasObject{a.homeScreen()}
+		a.contentStack.Objects = []fyne.CanvasObject{a.getHomeScreen()}
 	case 1:
-		a.contentStack.Objects = []fyne.CanvasObject{a.recordingScreen()}
+		a.contentStack.Objects = []fyne.CanvasObject{a.getRecordingScreen()}
 	case 2:
-		a.contentStack.Objects = []fyne.CanvasObject{a.historyScreen()}
+		a.contentStack.Objects = []fyne.CanvasObject{a.getHistoryScreen()}
 	case 3:
-		a.contentStack.Objects = []fyne.CanvasObject{a.settingsScreen()}
+		a.contentStack.Objects = []fyne.CanvasObject{a.getSettingsScreen()}
 	}
 	a.contentStack.Refresh()
 }
@@ -243,17 +264,23 @@ func (a *App) updateNavHighlight() {
 	}
 }
 
-// refreshModelStatus updates the sidebar model indicator.
+// refreshModelStatus updates the sidebar model indicator and enables the
+// recording tab once the background engine load finishes (ready or failed).
 func (a *App) refreshModelStatus() {
 	if a.modelLabel == nil {
 		return
 	}
 	eng := a.Engine()
-	if eng == nil || !eng.IsReady() {
-		a.modelLabel.SetText("离线模型未加载")
-		return
+	if eng != nil && eng.IsReady() {
+		a.modelLabel.SetText("模型已就绪")
+	} else {
+		a.modelLabel.SetText("初始化中...")
 	}
-	a.modelLabel.SetText("离线模型就绪")
+
+	// Engine load has finished (success or failure) — allow recording.
+	if len(a.navButtons) > 1 {
+		a.navButtons[1].Enable()
+	}
 }
 
 // buildMainMenu constructs the top-level application menu. The desktop shortcut
@@ -299,25 +326,36 @@ func (a *App) toggleShortcut() {
 	a.win.SetMainMenu(a.buildMainMenu())
 }
 
-// ---- Navigation helpers (called by sub-pages) ----
+// ---- Navigation helpers (cached, created once) ----
 
-func (a *App) homeScreen() fyne.CanvasObject {
-	return newHomeScreen(a)
+func (a *App) getHomeScreen() fyne.CanvasObject {
+	if a.homeCache == nil {
+		a.homeVM, a.homeCache = newHomeScreen(a)
+	}
+	a.homeVM.refresh()
+	return a.homeCache
 }
 
-func (a *App) recordingScreen() fyne.CanvasObject {
+func (a *App) getRecordingScreen() fyne.CanvasObject {
+	// Recording screen is always fresh — it holds mutable recording state.
 	vm := newRecordingScreen(a)
 	a.recordingVM = vm
 	return vm.content
 }
 
-
-func (a *App) historyScreen() fyne.CanvasObject {
-	return newHistoryScreen(a)
+func (a *App) getHistoryScreen() fyne.CanvasObject {
+	if a.historyCache == nil {
+		a.historyVM, a.historyCache = newHistoryScreen(a)
+	}
+	a.historyVM.refresh()
+	return a.historyCache
 }
 
-func (a *App) settingsScreen() fyne.CanvasObject {
-	return newInfoScreen(a)
+func (a *App) getSettingsScreen() fyne.CanvasObject {
+	if a.settingsCache == nil {
+		a.settingsCache = newInfoScreen(a)
+	}
+	return a.settingsCache
 }
 
 // ---- Shared UI helpers ----
