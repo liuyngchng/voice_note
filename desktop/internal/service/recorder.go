@@ -110,6 +110,11 @@ func (r *Recorder) Start(recordID int64) error {
 		return fmt.Errorf("create WAV file: %w", err)
 	}
 
+	slog.Info("recorder_started",
+		"record_id", recordID,
+		"wav_path", r.wavPath,
+		"transcript_path", r.transcriptPath)
+
 	go r.run(sampleCh, wavWriter, recordID)
 	return nil
 }
@@ -122,6 +127,7 @@ func (r *Recorder) Stop() {
 		close(r.stopCh)
 	}
 	r.emit(State{StatusMessage: "录音已结束，正在保存..."})
+	slog.Info("recorder_stop_requested")
 }
 
 // Pause suspends audio capture (releasing the mic) and skips ASR decoding.
@@ -130,9 +136,11 @@ func (r *Recorder) Pause(paused bool) {
 	if paused {
 		r.audioRec.Pause()
 		r.emit(State{StatusMessage: "已暂停"})
+		slog.Info("recorder_paused")
 	} else {
 		r.audioRec.Resume()
 		r.emit(State{StatusMessage: "已恢复录音"})
+		slog.Info("recorder_resumed")
 	}
 }
 
@@ -304,11 +312,17 @@ finalizePunct:
 	}
 	r.emit(State{Transcript: finalTranscript})
 
-// Close WAV file (patches header).
+	// Close WAV file (patches header).
 	if err := wavWriter.Close(); err != nil {
 		slog.Error("recorder_wav_close_error", "error", err)
 	}
 	r.emit(State{IsRecording: false, Transcript: mutableTranscript.String(), WavPath: r.wavPath, TranscriptPath: r.transcriptPath})
+	slog.Info("recorder_finished",
+		"record_id", recordID,
+		"wav_path", r.wavPath,
+		"transcript_path", r.transcriptPath,
+		"duration_sec", durationSec,
+		"transcript_len", len([]rune(mutableTranscript.String())))
 }
 
 func (r *Recorder) emit(s State) {

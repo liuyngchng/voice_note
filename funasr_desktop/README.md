@@ -102,7 +102,7 @@ nohup bash run_server_2pass.sh \
 ## 项目结构
 
 ```
-fun_asr_desktop_client/
+funasr_desktop/
 ├── main.go                      # 程序入口, 日志初始化
 ├── client/
 │   └── funasr.go                # FunASR WebSocket 2pass 客户端

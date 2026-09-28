@@ -30,8 +30,8 @@ for /f "tokens=3" %%v in ('go version') do echo          Go %%v
 where gcc >nul 2>&1 || (echo ERROR: gcc ^(MinGW-w64^) not found in PATH & exit /b 1)
 for /f "tokens=*" %%v in ('gcc --version 2^>^&1 ^| findstr /c:"gcc"') do echo          %%v
 
-if not exist "main.go" (echo ERROR: run this script from fun_asr_desktop_client\ directory & exit /b 1)
-if not exist "go.mod" (echo ERROR: run this script from fun_asr_desktop_client\ directory & exit /b 1)
+if not exist "main.go" (echo ERROR: run this script from funasr_desktop\ directory & exit /b 1)
+if not exist "go.mod" (echo ERROR: run this script from funasr_desktop\ directory & exit /b 1)
 
 :: ----------------------------------------------------------
 :: 2. Set build environment

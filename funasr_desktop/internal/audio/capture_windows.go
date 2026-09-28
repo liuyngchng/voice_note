@@ -32,6 +32,7 @@ type wasapiRecorder struct {
 
 // NewRecorder creates a new Windows WASAPI recorder.
 func NewRecorder() (Recorder, error) {
+	slog.Info("audio_recorder_created", "backend", "wasapi")
 	return &wasapiRecorder{}, nil
 }
 
@@ -62,6 +63,7 @@ func (r *wasapiRecorder) Stop() {
 	close(r.stopCh)
 	r.started = false
 	r.ch = nil
+	slog.Info("audio_capture_stopped", "backend", "wasapi")
 }
 
 func (r *wasapiRecorder) captureLoop(stopCh chan struct{}) {

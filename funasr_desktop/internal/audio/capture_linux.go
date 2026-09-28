@@ -37,6 +37,7 @@ func NewRecorder() (Recorder, error) {
 	if err := r.open(); err != nil {
 		return nil, err
 	}
+	slog.Info("audio_recorder_created", "backend", "alsa")
 	return r, nil
 }
 
@@ -125,6 +126,7 @@ func (r *alsaRecorder) Start() (<-chan []float32, error) {
 	default:
 	}
 
+	slog.Info("audio_capture_started", "backend", "alsa")
 	go r.loop()
 	return r.sampleCh, nil
 }
@@ -177,6 +179,7 @@ func (r *alsaRecorder) Stop() {
 		C.snd_pcm_close(r.handle)
 		r.handle = nil
 	}
+	slog.Info("audio_capture_stopped", "backend", "alsa")
 }
 
 func alsaError(err C.int) string {

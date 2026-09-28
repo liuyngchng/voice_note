@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -55,12 +56,14 @@ func Open(dataDir string) (*DB, error) {
 			return
 		}
 		instance.RecordDAO = NewRecordDAO(conn)
+		slog.Info("database_opened", "path", dbPath)
 	})
 	return instance, initErr
 }
 
 // Close shuts down the database connection.
 func (db *DB) Close() error {
+	slog.Info("database_closed")
 	return db.conn.Close()
 }
 

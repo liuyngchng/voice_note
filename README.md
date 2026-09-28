@@ -334,11 +334,11 @@ TodoItem:
 
 详见 [desktop/README.md](./desktop/README.md)。
 
-### 实时转写（`fun_asr_desktop_client/`）
+### 实时转写（`funasr_desktop/`）
 
 通过 WebSocket 连接 FunASR 2pass 服务，实时采集麦克风推流、实时显示转写文本。支持暂停/继续、录音本地保存。
 
-详见 [fun_asr_desktop_client/README.md](./fun_asr_desktop_client/README.md)。
+详见 [funasr_desktop/README.md](./funasr_desktop/README.md)。
 
 ## 最低要求
 

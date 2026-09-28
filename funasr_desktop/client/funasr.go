@@ -10,6 +10,7 @@ package client
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"time"
 
@@ -75,6 +76,7 @@ func (c *Client) Connect(host string, port int) error {
 	if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 		return fmt.Errorf("send config: %w", err)
 	}
+	slog.Info("funasr_connected", "addr", u.String())
 	return nil
 }
 
@@ -130,5 +132,6 @@ func (c *Client) Close() {
 	if c.conn != nil {
 		_ = c.conn.Close()
 		c.conn = nil
+		slog.Info("funasr_disconnected")
 	}
 }

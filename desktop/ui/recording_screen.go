@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -24,7 +25,7 @@ type recordingState int
 
 const (
 	stateIdle      recordingState = iota
-	stateRecording               // actively capturing audio
+	stateRecording                // actively capturing audio
 )
 
 type recordingViewModel struct {
@@ -109,6 +110,7 @@ func (vm *recordingViewModel) onStartPauseTapped() {
 		vm.startPauseBtn.SetText("暂停")
 		vm.isPaused = false
 		vm.statusLabel.SetText("正在初始化...")
+		slog.Info("recording_screen_start")
 		// Mark recording active so navigation is blocked and window-close is
 		// intercepted once recording has actually begun.
 		vm.app.beginRecording()
@@ -120,11 +122,13 @@ func (vm *recordingViewModel) onStartPauseTapped() {
 			if vm.recorder != nil {
 				vm.recorder.Pause(true)
 			}
+			slog.Info("recording_screen_paused")
 		} else {
 			vm.startPauseBtn.SetText("暂停")
 			if vm.recorder != nil {
 				vm.recorder.Pause(false)
 			}
+			slog.Info("recording_screen_resumed")
 		}
 	}
 }
@@ -185,6 +189,7 @@ func (vm *recordingViewModel) startRecording() {
 		return
 	}
 	vm.recordID = recordID
+	slog.Info("recording_started", "record_id", recordID)
 
 	// Create audio capture.
 	audioRec, err := audio.NewRecorder()
@@ -295,6 +300,11 @@ finalize:
 	}
 
 	vm.isFinished = true
+	slog.Info("recording_finalized",
+		"record_id", vm.recordID,
+		"wav_path", finalWavPath,
+		"transcript_path", finalTranscriptPath,
+		"transcript_len", len([]rune(finalText)))
 	vm.finish(false)
 }
 

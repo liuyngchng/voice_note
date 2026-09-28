@@ -51,6 +51,7 @@ func New(outputDir, wavName, transcriptName string, warnFn func(string)) (*Write
 		w.wavWriter = ww
 	}
 
+	slog.Info("storage_writer_started", "transcript", w.transcriptPath, "recording", wavName)
 	go w.run()
 	return w, nil
 }
@@ -62,6 +63,7 @@ func (w *Writer) run() {
 				slog.Error("wav_close", "err", err)
 			}
 		}
+		slog.Info("storage_writer_done")
 	}()
 
 	for {

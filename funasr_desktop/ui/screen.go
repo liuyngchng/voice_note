@@ -276,6 +276,7 @@ func (m *mainScreen) doPause() {
 	m.toggleBtn.SetText("继续")
 	m.setUIStatus("已暂停")
 	m.setUIMode(statePaused)
+	slog.Info("session_paused")
 
 	select {
 	case m.pauseCh <- true:
@@ -291,6 +292,7 @@ func (m *mainScreen) doResume() {
 	m.toggleBtn.SetText("暂停")
 	m.setUIStatus("识别中...")
 	m.setUIMode(stateActive)
+	slog.Info("session_resumed")
 
 	select {
 	case m.pauseCh <- false:
@@ -306,6 +308,7 @@ func (m *mainScreen) stopInternal() {
 			close(m.stopCh)
 		}
 	}
+	slog.Info("session_stop_requested")
 }
 
 func (m *mainScreen) setUIStatus(s string) {
@@ -535,6 +538,8 @@ func (m *mainScreen) run() {
 		}
 		m.setUIMode(stateIdle)
 		m.mu.Unlock()
+
+		slog.Info("session_ended", "final_text_len", len([]rune(finalText)), "err", errStatus)
 	}()
 
 	// ---- 1. Pre-check TCP ----
@@ -577,6 +582,7 @@ func (m *mainScreen) run() {
 	m.recording = true
 	m.mu.Unlock()
 	m.setUIStatus("识别中...")
+	slog.Info("session_recording_started")
 
 	// ---- 4. Result reader ----
 	resultCh := make(chan *client.Result, 32)

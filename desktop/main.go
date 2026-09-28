@@ -1,17 +1,19 @@
 // Package main is the entry point for the Voice Note desktop application.
 //
 // Model loading strategy (portable-first):
-//   1. ./models/  next to the executable (ZIP portable distribution)
-//   2. %APPDATA%/VoiceNote/models/ (installed mode)
+//  1. ./models/  next to the executable (ZIP portable distribution)
+//  2. %APPDATA%/VoiceNote/models/ (installed mode)
 //
 // User data (database, settings, audio) always goes to %APPDATA%/VoiceNote/
 // on Windows and ~/.voicenote/ on Linux.
 package main
 
 import (
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -20,6 +22,31 @@ import (
 	"github.com/liuyngchng/voice-note-desktop/internal/database"
 	"github.com/liuyngchng/voice-note-desktop/ui"
 )
+
+// initLogging configures slog to write to both stderr and a rotating daily log
+// file under logs/ (e.g. logs/app_2025-09-28.log).
+func initLogging() {
+	if err := os.MkdirAll("logs", 0o755); err != nil {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})))
+		return
+	}
+
+	logPath := filepath.Join("logs", "app_"+time.Now().Format("2006-01-02")+".log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})))
+		return
+	}
+
+	w := io.MultiWriter(os.Stderr, f)
+	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+}
 
 // findModelDir returns the path to the models directory. It tries:
 // 1. ./models/ adjacent to the current working directory, then
@@ -55,10 +82,8 @@ func findModelDir(dataDir string) string {
 }
 
 func main() {
-	// Setup structured logging.
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	})))
+	// Setup structured logging (stderr + rotating daily log file).
+	initLogging()
 
 	// GLFW must be initialized before we can set window hints.
 	// Fyne's own glfw.Init() later is a no-op after a successful init.
@@ -95,6 +120,8 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+
+	slog.Info("app_starting", "data_dir", dataDir, "model_dir", modelDir, "output_dir", outputDir)
 
 	// Create Fyne application.
 	a := app.NewWithID("com.voicenote.desktop")

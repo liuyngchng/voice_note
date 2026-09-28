@@ -26,9 +26,9 @@ type App struct {
 	modelDir  string
 	outputDir string
 
-	repo      *data.Repository
-	asrEngine *asr.Engine
-	engineMu  sync.RWMutex    // protects asrEngine reads/writes
+	repo        *data.Repository
+	asrEngine   *asr.Engine
+	engineMu    sync.RWMutex  // protects asrEngine reads/writes
 	engineReady chan struct{} // closed when ASR engine load finishes (success or failure)
 
 	// Recording guard — only one recording at a time.
@@ -86,6 +86,7 @@ func (a *App) initEngine() {
 		a.asrEngine = nil
 	} else {
 		a.asrEngine = engine
+		slog.Info("app_engine_ready")
 	}
 	a.engineMu.Unlock()
 
@@ -120,6 +121,7 @@ func (a *App) Close() {
 	if eng != nil {
 		eng.Close()
 	}
+	slog.Info("app_shutdown")
 }
 
 // Show starts the app at the home screen and installs the top menu bar.
@@ -229,6 +231,7 @@ func (a *App) navigate(index int) {
 		a.contentStack.Objects = []fyne.CanvasObject{a.getSettingsScreen()}
 	}
 	a.contentStack.Refresh()
+	slog.Info("app_navigate", "index", index)
 }
 
 // isRecording reports whether a recording is currently active.
@@ -243,6 +246,7 @@ func (a *App) beginRecording() {
 	a.recordingMu.Lock()
 	a.recordingActive = true
 	a.recordingMu.Unlock()
+	slog.Info("recording_active")
 }
 
 // endRecording clears the active-recording flag (called when recording stops).
@@ -250,6 +254,7 @@ func (a *App) endRecording() {
 	a.recordingMu.Lock()
 	a.recordingActive = false
 	a.recordingMu.Unlock()
+	slog.Info("recording_inactive")
 }
 
 // updateNavHighlight marks the selected sidebar button.
