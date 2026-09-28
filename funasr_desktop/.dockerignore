@@ -1,0 +1,36 @@
+# Docker 构建上下文里只需要 build/deps 下的 Go 工具链 tarball
+# （Dockerfile 里唯一 COPY 的文件）。其余要么是运行期 volume 挂载的
+# 缓存目录，要么是产物/源码，都不该进构建上下文。
+
+.git
+
+# 构建产物（Dockerfile 只需要 build/deps/，其余排除）
+build/*
+!build/deps/
+
+# Go 编译缓存（运行期通过 volume 挂载）
+.gocache/
+
+# 已编译的二进制
+funasr-desktop-client
+funasr-desktop-client.exe
+
+# 运行时输出
+output/
+logs/
+
+# Desktop entry 文件（宿主机侧用）
+*.desktop
+
+# 文档
+README.md
+
+# 构建脚本（不需要在镜像内部）
+build.sh
+build.bat
+
+# IDE / 编辑器
+*.iml
+.DS_Store
+*.swp
+*.swo
