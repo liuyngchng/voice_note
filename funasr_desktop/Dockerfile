@@ -23,10 +23,16 @@ RUN if [ -n "$HTTP_PROXY" ]; then \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates gcc libc6-dev pkg-config \
+    # MinGW-w64 for Windows cross-compilation
+    gcc-mingw-w64-x86-64 \
+    # Fyne: OpenGL rendering
     libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev \
+    # Fyne: X11 window system
     libx11-dev libxrandr-dev libxcursor-dev libxinerama-dev libxi-dev \
     libxxf86vm-dev \
+    # Fyne: Wayland
     libwayland-dev wayland-protocols libxkbcommon-dev \
+    # ALSA for Linux audio capture
     libasound2-dev \
     patchelf \
     && rm -rf /var/lib/apt/lists/*

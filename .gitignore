@@ -87,6 +87,7 @@ funasr_desktop/funasr-desktop-client.exe
 funasr_desktop/.gocache/
 funasr_desktop/output/
 funasr_desktop/logs/
+funasr_desktop/dist/
 
 # ===== Claude Code =====
 .claude/settings.local.json

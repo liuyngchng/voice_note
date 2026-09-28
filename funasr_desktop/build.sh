@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Build script for funasr-desktop-client (Go + Fyne).
-# Compiles inside Docker using the same image as voice-note-desktop.
+# Compiles inside Docker — outputs both Linux and Windows binaries.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="voice_note_fyne:1.0"
@@ -61,8 +61,7 @@ fi
 mkdir -p "$DEPS_DIR"
 if [[ ! -f "$DEPS_DIR/$GO_TAR" && -f "/home/rd/workspace/voice_note/desktop/build/deps/$GO_TAR" ]]; then
   echo "Reusing Go $GO_VERSION tarball from desktop/build/deps"
-  ln -s "/home/rd/workspace/voice_note/desktop/build/deps/$GO_TAR" "$DEPS_DIR/$GO_TAR" 2>/dev/null \
-    || cp "/home/rd/workspace/voice_note/desktop/build/deps/$GO_TAR" "$DEPS_DIR/$GO_TAR"
+  cp "/home/rd/workspace/voice_note/desktop/build/deps/$GO_TAR" "$DEPS_DIR/$GO_TAR"
 fi
 if [[ ! -f "$DEPS_DIR/$GO_TAR" ]]; then
   echo "Downloading Go $GO_VERSION ..."
@@ -86,35 +85,69 @@ else
 fi
 
 # ── 4. Build in Docker ──
-echo "Building $BINARY (in Docker)..."
 
 # Persistent Go caches on the host so deps aren't re-downloaded every build.
 GOCACHE_DIR="$SCRIPT_DIR/build/gocache"
 GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
-mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR"
+mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR" "$SCRIPT_DIR/dist"
 
+COMMON_ENV=(
+  -e GOFLAGS="-buildvcs=false"
+  -e GOCACHE=/tmp/gocache
+  -e GOMODCACHE=/go/pkg/mod
+  -e GOPROXY="https://goproxy.cn,direct"
+  -e CGO_ENABLED=1
+  -e HOST_UID="$(id -u)"
+  -e HOST_GID="$(id -g)"
+)
+
+# ── 4a. Linux binary ──
+echo ""
+echo "=== Building $BINARY (Linux) ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
   -v "$GOMODCACHE_DIR":/go/pkg/mod \
   -w /workspace \
-  -e GOFLAGS="-buildvcs=false" \
-  -e GOCACHE=/tmp/gocache \
-  -e GOMODCACHE=/go/pkg/mod \
-  -e GOPROXY="https://goproxy.cn,direct" \
+  "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
-  -e HOST_UID="$(id -u)" \
-  -e HOST_GID="$(id -g)" \
+  -e GOOS=linux \
+  -e GOARCH=amd64 \
   "$IMAGE" \
   bash -c "
-    go build -o '$BINARY' . && \
-    chown \$HOST_UID:\$HOST_GID '$BINARY' && \
-    echo 'Build complete.'
+    go build -ldflags='-s -w' -o dist/$BINARY . && \
+    chown \$HOST_UID:\$HOST_GID dist/$BINARY && \
+    echo 'Linux build complete.'
   "
 
-echo "Binary: $SCRIPT_DIR/$BINARY"
+# ── 4b. Windows .exe ──
+echo ""
+echo "=== Building $BINARY.exe (Windows) ==="
+docker run --rm \
+  -v "$SCRIPT_DIR":/workspace \
+  -v "$GOCACHE_DIR":/tmp/gocache \
+  -v "$GOMODCACHE_DIR":/go/pkg/mod \
+  -w /workspace \
+  "${COMMON_ENV[@]}" \
+  ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
+  -e GOOS=windows \
+  -e GOARCH=amd64 \
+  -e CC=x86_64-w64-mingw32-gcc \
+  "$IMAGE" \
+  bash -c "
+    go build -ldflags='-s -w -H windowsgui' -o dist/${BINARY}.exe . && \
+    chown \$HOST_UID:\$HOST_GID dist/${BINARY}.exe && \
+    echo 'Windows build complete.'
+  "
 
-# ── 5. Install desktop integration (optional, host-side) ──
+echo ""
+echo "=== Build complete ==="
+echo "  Linux:   dist/$BINARY      ($(du -h "$SCRIPT_DIR/dist/$BINARY" | cut -f1))"
+echo "  Windows: dist/$BINARY.exe  ($(du -h "$SCRIPT_DIR/dist/$BINARY.exe" | cut -f1))"
+echo ""
+echo "Both are standalone; no external DLLs / .so required."
+
+# ── 5. Install desktop integration (optional, host-side, Linux only) ──
 # Registers the app so docks show the proper (Chinese) name and icon. The
 # WM_CLASS set in main.go must stay in sync with StartupWMClass below.
 DESKTOP_FILE="$SCRIPT_DIR/funasr-desktop-client.desktop"
@@ -123,8 +156,13 @@ ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/512x512/apps"
 
 if [[ -f "$DESKTOP_FILE" ]]; then
   mkdir -p "$DESKTOP_INSTALL_DIR"
-  # Set an absolute path so the entry works regardless of the launch directory.
-  sed "s|^Exec=.*|Exec=$SCRIPT_DIR/$BINARY|" "$DESKTOP_FILE" > "$DESKTOP_INSTALL_DIR/funasr-desktop-client.desktop"
+  # Point Exec to the dist/ binary (prefer dist/ if it exists, else fall back to repo root).
+  if [[ -f "$SCRIPT_DIR/dist/$BINARY" ]]; then
+    BIN_PATH="$SCRIPT_DIR/dist/$BINARY"
+  else
+    BIN_PATH="$SCRIPT_DIR/$BINARY"
+  fi
+  sed "s|^Exec=.*|Exec=$BIN_PATH|" "$DESKTOP_FILE" > "$DESKTOP_INSTALL_DIR/funasr-desktop-client.desktop"
   echo "Installed desktop entry: $DESKTOP_INSTALL_DIR/funasr-desktop-client.desktop"
 
   # Install an icon if one is provided.
