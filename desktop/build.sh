@@ -2,8 +2,7 @@
 set -euo pipefail
 
 # Build script for voice_note desktop (Go + Fyne + sherpa-onnx).
-# Compiles inside Docker using an image with all X11/GL/Wayland -dev headers,
-# producing: voice-note-desktop
+# Compiles inside Docker — outputs both Linux and Windows binaries.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 IMAGE="voice_note_fyne:1.0"
@@ -92,35 +91,125 @@ else
 fi
 
 # ── 4. Build in Docker ──────────────────────────────────────────
-echo "Building $BINARY (in Docker)..."
 
 # Persistent Go caches on the host so deps aren't re-downloaded every build.
 GOCACHE_DIR="$SCRIPT_DIR/build/gocache"
 GOMODCACHE_DIR="$SCRIPT_DIR/build/gomodcache"
-mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR"
+mkdir -p "$GOCACHE_DIR" "$GOMODCACHE_DIR" "$SCRIPT_DIR/dist"
 
+COMMON_ENV=(
+  -e GOFLAGS="-buildvcs=false"
+  -e GOCACHE=/tmp/gocache
+  -e GOMODCACHE=/go/pkg/mod
+  -e GOPROXY="https://goproxy.cn,direct"
+  -e CGO_ENABLED=1
+  -e HOST_UID="$(id -u)"
+  -e HOST_GID="$(id -g)"
+)
+
+# ── 4a. Linux binary ────────────────────────────────────────────
+echo ""
+echo "=== Building ${BINARY} (Linux) ==="
 docker run --rm \
   -v "$SCRIPT_DIR":/workspace \
   -v "$GOCACHE_DIR":/tmp/gocache \
   -v "$GOMODCACHE_DIR":/go/pkg/mod \
   -w /workspace \
-  -e GOFLAGS="-buildvcs=false" \
-  -e GOCACHE=/tmp/gocache \
-  -e GOMODCACHE=/go/pkg/mod \
-  -e GOPROXY="https://goproxy.cn,direct" \
+  "${COMMON_ENV[@]}" \
   ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
-  -e HOST_UID="$(id -u)" \
-  -e HOST_GID="$(id -g)" \
+  -e GOOS=linux \
+  -e GOARCH=amd64 \
   "$IMAGE" \
   bash -c "
-    go build -o '$BINARY' . && \
-    patchelf --set-rpath '\$ORIGIN' '$BINARY' && \
-    chown \$HOST_UID:\$HOST_GID '$BINARY' && \
-    echo 'RPATH fixed to \$ORIGIN'
+    go build -ldflags='-s -w' -o dist/${BINARY} . && \
+    patchelf --set-rpath '\$ORIGIN' dist/${BINARY} && \
+    chown \$HOST_UID:\$HOST_GID dist/${BINARY} && \
+    echo 'Linux build complete (RPATH fixed to \$ORIGIN).'
   "
 
-# ── 5. Package into tar.gz ─────────────────────────────────────────
-echo "Packaging..."
+# ── 4b. Windows .exe ────────────────────────────────────────────
+echo ""
+echo "=== Building ${BINARY}.exe (Windows) ==="
+docker run --rm \
+  -v "$SCRIPT_DIR":/workspace \
+  -v "$GOCACHE_DIR":/tmp/gocache \
+  -v "$GOMODCACHE_DIR":/go/pkg/mod \
+  -w /workspace \
+  "${COMMON_ENV[@]}" \
+  ${DOCKER_RUN_ENV[@]+"${DOCKER_RUN_ENV[@]}"} \
+  -e GOOS=windows \
+  -e GOARCH=amd64 \
+  -e CC=x86_64-w64-mingw32-gcc \
+  "$IMAGE" \
+  bash -c "
+    go build -ldflags='-s -w -H windowsgui' -o dist/${BINARY}.exe . && \
+    chown \$HOST_UID:\$HOST_GID dist/${BINARY}.exe && \
+    echo 'Windows build complete.'
+  "
+
+echo ""
+echo "=== Build complete ==="
+echo "  Linux:   dist/${BINARY}     ($(du -h "$SCRIPT_DIR/dist/${BINARY}" | cut -f1))"
+echo "  Windows: dist/${BINARY}.exe ($(du -h "$SCRIPT_DIR/dist/${BINARY}.exe" | cut -f1))"
+
+# ── 5. Windows packaging (zip with .exe + DLLs) ────────────────────
+echo ""
+echo "Packaging Windows distribution..."
+
+# Temp directory for packaging (shared with Linux packaging step).
+TMP_DIR=$(mktemp -d)
+trap "rm -rf '$TMP_DIR'" EXIT
+
+WIN_SHERPA_DLL_DIR="$GOMODCACHE_DIR/github.com/k2-fsa/sherpa-onnx-go-windows@v1.13.6/lib/x86_64-pc-windows-gnu"
+# Fall back to host GOPATH in case the project cache doesn't have it yet.
+if [[ ! -d "$WIN_SHERPA_DLL_DIR" ]]; then
+  WIN_SHERPA_DLL_DIR="$HOME/go/pkg/mod/github.com/k2-fsa/sherpa-onnx-go-windows@v1.13.6/lib/x86_64-pc-windows-gnu"
+fi
+
+if [[ -d "$WIN_SHERPA_DLL_DIR" ]]; then
+  WIN_PKG_NAME="voice-note-desktop-windows-$(date +%Y%m%d)"
+  WIN_PKG_DIR="$TMP_DIR/$WIN_PKG_NAME"
+  mkdir -p "$WIN_PKG_DIR"
+
+  cp "dist/${BINARY}.exe" "$WIN_PKG_DIR/"
+  cp "$WIN_SHERPA_DLL_DIR"/*.dll "$WIN_PKG_DIR/"
+
+  # Write a README for Windows users.
+  cat > "$WIN_PKG_DIR/README.txt" << 'WINEOF'
+Voice Note - Windows 版本使用说明
+==================================
+
+运行前请确保以下文件在同一目录中：
+  voice-note-desktop.exe    主程序
+  onnxruntime.dll           ONNX Runtime 运行库
+  sherpa-onnx-c-api.dll     Sherpa-ONNX 运行库
+  sherpa-onnx-cxx-api.dll   Sherpa-ONNX C++ 运行库
+
+模型文件需要放在以下位置之一：
+  1. 程序同目录下的 models/ 目录（便携模式，优先级最高）
+  2. %APPDATA%\VoiceNote\models\ 目录
+
+模型文件列表：
+  - model.int8.onnx        (SenseVoiceSmall 模型)
+  - tokens.txt             (词表)
+  - silero_vad.onnx        (语音端点检测，可选)
+  - punct_ct_transformer.onnx (标点模型，可选)
+
+用户数据（数据库、设置、录音输出）存放在 %APPDATA%\VoiceNote\ 下。
+WINEOF
+
+  WIN_ARCHIVE="$SCRIPT_DIR/dist/$WIN_PKG_NAME.zip"
+  rm -f "$WIN_ARCHIVE"
+  zip -jr "$WIN_ARCHIVE" "$WIN_PKG_DIR"
+  echo "Windows package: dist/$WIN_PKG_NAME.zip ($(du -h "$WIN_ARCHIVE" | cut -f1))"
+else
+  echo "WARNING: Windows sherpa-onnx DLLs not found; skipping Windows package."
+  echo "  Expected at: $WIN_SHERPA_DLL_DIR"
+fi
+
+# ── 6. Linux packaging (tar.gz with models + .so) ─────────────────
+echo ""
+echo "Packaging Linux distribution..."
 
 # Check model files exist
 MODEL_FILES=("model.int8.onnx" "tokens.txt" "silero_vad.onnx" "punct_ct_transformer.onnx")
@@ -145,15 +234,13 @@ fi
 
 # Create distributable tarball.
 # Uses symlinks to avoid copying 1.2GB of model files into a temp directory.
-TMP_DIR=$(mktemp -d)
-trap "rm -rf '$TMP_DIR'" EXIT
 
 PKG_NAME="voice-note-desktop-$(date +%Y%m%d)"
 PKG_DIR="$TMP_DIR/$PKG_NAME"
 mkdir -p "$PKG_DIR/models"
 
 # Binary and .so — small, copy is fine
-cp "$BINARY" "$PKG_DIR/"
+cp "dist/$BINARY" "$PKG_DIR/"
 cp "$SCRIPT_DIR"/*.so "$PKG_DIR/"
 
 # Models — symlink to avoid duplicating ~520MB on disk
@@ -195,5 +282,5 @@ ARCHIVE="$SCRIPT_DIR/dist/$PKG_NAME.tar"
 mkdir -p "$SCRIPT_DIR/dist"
 tar -cf "$ARCHIVE" -C "$TMP_DIR" --dereference "$PKG_NAME"
 
-echo "Package: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
+echo "Linux package: dist/$PKG_NAME.tar ($(du -h "$ARCHIVE" | cut -f1))"
 echo "Binary + .so also available in $SCRIPT_DIR/ for local run."
