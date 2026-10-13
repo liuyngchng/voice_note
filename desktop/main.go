@@ -132,6 +132,6 @@ func main() {
 	defer nav.Close()
 	nav.Show()
 
-	w.Resize(fyne.NewSize(900, 640))
+	w.Resize(fyne.NewSize(780, 540))
 	w.ShowAndRun()
 }
