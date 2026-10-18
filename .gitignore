@@ -7,6 +7,8 @@
 .gradle/
 .idea/
 .kotlin/
+# NOTE: "build/" below matches EVERY build/ directory in the tree — that
+# includes desktop/build/ and funasr_desktop/build/ (Go caches, tarballs).
 build/
 
 # ===== Android =====
@@ -73,6 +75,8 @@ desktop/voice-note-desktop
 desktop/voice-note-desktop.exe
 desktop/voice-note.exe
 desktop/.gocache/
+desktop/logs/
+desktop/output/
 # sherpa-onnx runtime libs (copied next to the binary by build.sh)
 desktop/*.so
 
