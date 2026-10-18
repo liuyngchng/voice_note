@@ -263,13 +263,13 @@ func convertLoopbackFrames(
 				// Integer format (16-bit or 32-bit).
 				bytesPerSample := srcBits / 8
 				offset := (i*srcChannels + ch) * bytesPerSample
-				rawPtr := &(*[1 << 30]byte)(unsafe.Pointer(data))[offset]
+				p := &(*[1 << 30]byte)(unsafe.Pointer(data))[offset]
 				switch srcBits {
 				case 16:
-					raw := int16(binary.LittleEndian.Uint16(rawPtr))
+					raw := *(*int16)(unsafe.Pointer(p))
 					val = float32(raw) / 32768.0
 				case 32:
-					raw := int32(binary.LittleEndian.Uint32(rawPtr))
+					raw := *(*int32)(unsafe.Pointer(p))
 					val = float32(raw) / 2147483648.0
 				default:
 					val = 0
