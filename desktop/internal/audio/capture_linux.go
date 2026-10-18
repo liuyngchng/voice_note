@@ -28,8 +28,8 @@ type alsaRecorder struct {
 	closed   bool
 }
 
-// NewRecorder creates a new Linux ALSA recorder.
-func NewRecorder() (Recorder, error) {
+// newMicRecorder creates a new Linux ALSA microphone recorder.
+func newMicRecorder() (Recorder, error) {
 	r := &alsaRecorder{
 		sampleCh: make(chan []float32, 8),
 		done:     make(chan struct{}),

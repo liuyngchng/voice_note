@@ -27,9 +27,9 @@ type alsaRecorder struct {
 	done     chan struct{}
 }
 
-// NewRecorder creates a new Linux ALSA recorder (16kHz / mono / S16_LE) and
+// newMicRecorder creates a new Linux ALSA recorder (16kHz / mono / S16_LE) and
 // opens the capture device, which occupies the microphone until Stop.
-func NewRecorder() (Recorder, error) {
+func newMicRecorder() (Recorder, error) {
 	r := &alsaRecorder{
 		sampleCh: make(chan []float32, 8),
 		done:     make(chan struct{}),

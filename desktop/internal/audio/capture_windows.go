@@ -31,8 +31,9 @@ type wasapiRecorder struct {
 	once    sync.Once
 }
 
-// NewRecorder creates a new Windows WASAPI recorder.
-func NewRecorder() (Recorder, error) {
+// newMicRecorder creates a new Windows WASAPI microphone recorder.
+func newMicRecorder() (Recorder, error) {
+	slog.Info("wasapi_mic_recorder_created")
 	return &wasapiRecorder{}, nil
 }
 

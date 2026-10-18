@@ -30,8 +30,8 @@ type wasapiRecorder struct {
 	started bool
 }
 
-// NewRecorder creates a new Windows WASAPI recorder.
-func NewRecorder() (Recorder, error) {
+// newMicRecorder creates a new Windows WASAPI recorder.
+func newMicRecorder() (Recorder, error) {
 	slog.Info("audio_recorder_created", "backend", "wasapi")
 	return &wasapiRecorder{}, nil
 }
