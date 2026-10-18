@@ -142,6 +142,7 @@ docker run --rm \
   -e CC=x86_64-w64-mingw32-gcc \
   "$IMAGE" \
   bash -c "
+    go-winres make --arch amd64 && \
     go build -ldflags='-s -w -H windowsgui' -o dist/${BINARY}.exe . && \
     chown \$HOST_UID:\$HOST_GID dist/${BINARY}.exe && \
     echo 'Windows build complete.'

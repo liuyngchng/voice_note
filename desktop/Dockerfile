@@ -51,4 +51,7 @@ RUN tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOTOOLCHAIN=local
 
+# Install go-winres for embedding Windows resources (.syso).
+RUN GOBIN=/usr/local/bin go install github.com/tc-hib/go-winres@latest
+
 WORKDIR /workspace
