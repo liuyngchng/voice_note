@@ -5,6 +5,7 @@
 package main
 
 import (
+	_ "embed"
 	"io"
 	"log/slog"
 	"os"
@@ -17,6 +18,9 @@ import (
 	"github.com/go-gl/glfw/v3.4/glfw"
 	"github.com/liuyngchng/funasr-desktop-client/ui"
 )
+
+//go:embed icon.png
+var iconPNG []byte
 
 // initLogging configures slog to write to both stderr and a rotating
 // daily log file under logs/ (e.g. logs/app_2025-09-26.log).
@@ -59,6 +63,15 @@ func main() {
 
 	a := app.NewWithID("com.funasr.desktop.client")
 	w := a.NewWindow("实时语音转文本")
+
+	// Set the window icon (taskbar / dock / title bar) from the embedded PNG.
+	// On Windows the .exe icon comes from the .syso resource, but this also
+	// fixes the runtime window icon on Linux.
+	if iconPNG != nil {
+		if res := fyne.NewStaticResource("icon.png", iconPNG); res != nil {
+			w.SetIcon(res)
+		}
+	}
 
 	w.SetContent(ui.NewMainScreen(w, a.Preferences()))
 

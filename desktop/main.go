@@ -9,6 +9,7 @@
 package main
 
 import (
+	_ "embed"
 	"io"
 	"log/slog"
 	"os"
@@ -22,6 +23,9 @@ import (
 	"github.com/liuyngchng/voice-note-desktop/internal/database"
 	"github.com/liuyngchng/voice-note-desktop/ui"
 )
+
+//go:embed internal/desktopentry/icon.png
+var iconPNG []byte
 
 // initLogging configures slog to write to both stderr and a rotating daily log
 // file under logs/ (e.g. logs/app_2025-09-28.log).
@@ -126,6 +130,15 @@ func main() {
 	// Create Fyne application.
 	a := app.NewWithID("com.voicenote.desktop")
 	w := a.NewWindow("语音笔记")
+
+	// Set the window icon (taskbar / dock / title bar) from the embedded PNG.
+	// On Windows the .exe icon comes from the .syso resource, but this also
+	// fixes the runtime window icon on Linux.
+	if iconPNG != nil {
+		if res := fyne.NewStaticResource("icon.png", iconPNG); res != nil {
+			w.SetIcon(res)
+		}
+	}
 
 	// Build and run the UI.
 	nav := ui.NewApp(w, dataDir, modelDir, outputDir, db.RecordDAO)
