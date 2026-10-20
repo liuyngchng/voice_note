@@ -3,6 +3,7 @@ package com.voicenote.app.ui.recording
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
@@ -37,7 +38,9 @@ data class RecordingUiState(
     val error: String? = null,
     val showBatteryOptDialog: Boolean = false,
     val batteryOptimizationDisabled: Boolean = false,
-    val audioLevelHistory: List<Float> = emptyList()
+    val audioLevelHistory: List<Float> = emptyList(),
+    val captureSystemAudio: Boolean = false,
+    val needsMediaProjection: Boolean = false
 )
 
 @HiltViewModel
@@ -50,10 +53,33 @@ class RecordingViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(RecordingUiState())
     val uiState: StateFlow<RecordingUiState> = _uiState.asStateFlow()
 
+    private var pendingMediaProjectionResultCode: Int = -1
+    private var pendingMediaProjectionData: Intent? = null
+    private var pendingOfflineModelQuality: String = "int8"
+
     fun updateTitle(title: String) { _uiState.value = _uiState.value.copy(title = title) }
     fun updateMemo(memo: String) { _uiState.value = _uiState.value.copy(memo = memo) }
     fun updateDescription(description: String) { _uiState.value = _uiState.value.copy(description = description) }
     fun updateSpeakers(speakers: String) { _uiState.value = _uiState.value.copy(speakers = speakers) }
+
+    /**
+     * Handle MediaProjection authorization result.
+     * Called from RecordingScreen after the system dialog is dismissed.
+     */
+    fun onMediaProjectionResult(resultCode: Int, data: Intent?) {
+        if (resultCode == android.app.Activity.RESULT_OK && data != null) {
+            pendingMediaProjectionResultCode = resultCode
+            pendingMediaProjectionData = data
+            // Now actually start recording with system audio capture
+            startRecordingInternal()
+        } else {
+            // User denied MediaProjection — start with mic-only
+            pendingMediaProjectionResultCode = -1
+            pendingMediaProjectionData = null
+            _uiState.value = _uiState.value.copy(captureSystemAudio = false)
+            startRecordingInternal()
+        }
+    }
 
     fun startRecording() {
         val state = _uiState.value
@@ -69,6 +95,11 @@ class RecordingViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isStarting = true, error = null)
 
             val settings = settingsDataStore.settingsFlow.first()
+
+            _uiState.value = _uiState.value.copy(
+                captureSystemAudio = settings.captureSystemAudio
+            )
+            pendingOfflineModelQuality = settings.offlineModelQuality
 
             val title = state.title.trim().ifBlank {
                 "新录音 ${dateFormatter.format(java.time.Instant.now())}"
@@ -87,20 +118,56 @@ class RecordingViewModel @Inject constructor(
             val recordId = recordRepository.createRecord(record)
             _uiState.value = _uiState.value.copy(
                 currentRecordId = recordId,
-                isRecording = true,
-                isStarting = false
+                isRecording = true
             )
 
-            startRecordingService(recordId, settings)
+            // If system audio capture is enabled and device supports it, request
+            // MediaProjection first. The recording will start after authorization.
+            if (settings.captureSystemAudio &&
+                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q
+            ) {
+                _uiState.value = _uiState.value.copy(
+                    needsMediaProjection = true,
+                    isStarting = false
+                )
+            } else {
+                pendingMediaProjectionResultCode = -1
+                pendingMediaProjectionData = null
+                startRecordingInternal()
+            }
         }
     }
 
-    private fun startRecordingService(recordId: Long, settings: com.voicenote.app.core.di.AppSettings) {
+    private fun startRecordingInternal() {
+        val state = _uiState.value
+        _uiState.value = state.copy(needsMediaProjection = false)
+
+        startRecordingService(
+            state.currentRecordId,
+            state.captureSystemAudio,
+            pendingMediaProjectionResultCode,
+            pendingMediaProjectionData
+        )
+    }
+
+    private fun startRecordingService(
+        recordId: Long,
+        captureSystemAudio: Boolean,
+        mediaProjectionResultCode: Int = -1,
+        mediaProjectionData: Intent? = null
+    ) {
         val context = getApplication<Application>()
         val intent = Intent(context, RecordingService::class.java).apply {
             action = RecordingService.ACTION_START
             putExtra(RecordingService.EXTRA_RECORD_ID, recordId)
-            putExtra(RecordingService.EXTRA_OFFLINE_MODEL_QUALITY, settings.offlineModelQuality)
+            putExtra(RecordingService.EXTRA_CAPTURE_SYSTEM_AUDIO, captureSystemAudio)
+            putExtra(RecordingService.EXTRA_OFFLINE_MODEL_QUALITY, pendingOfflineModelQuality)
+        }
+        if (mediaProjectionResultCode >= 0 && mediaProjectionData != null) {
+            intent.putExtra(RecordingService.EXTRA_MEDIA_PROJECTION_RESULT_CODE,
+                mediaProjectionResultCode)
+            intent.putExtra(RecordingService.EXTRA_MEDIA_PROJECTION_DATA,
+                mediaProjectionData)
         }
         try {
             context.startForegroundService(intent)

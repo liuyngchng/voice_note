@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -20,9 +21,11 @@ import com.voicenote.app.R
 import com.voicenote.app.core.asr.ASRModelManager
 import com.voicenote.app.core.asr.ModelQuality
 import com.voicenote.app.core.asr.OfflineASRClient
-import com.voicenote.app.core.audio.AudioCapture
 import com.voicenote.app.core.audio.AudioFileManager
+import com.voicenote.app.core.audio.AudioMixer
+import com.voicenote.app.core.audio.MicAudioCapture
 import com.voicenote.app.core.audio.PcmUtil
+import com.voicenote.app.core.audio.SystemAudioCapture
 import com.voicenote.app.core.common.TimeUtil
 import com.voicenote.app.data.repository.VoiceRecordRepositoryImpl
 import dagger.hilt.android.AndroidEntryPoint
@@ -43,7 +46,7 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class RecordingService : Service() {
 
-    @Inject lateinit var audioCapture: AudioCapture
+    @Inject lateinit var micAudioCapture: MicAudioCapture
     @Inject lateinit var offlineASRClient: OfflineASRClient
     @Inject lateinit var asrModelManager: ASRModelManager
     @Inject lateinit var recordRepository: VoiceRecordRepositoryImpl
@@ -57,6 +60,10 @@ class RecordingService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var actualStopTime: java.time.Instant? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+
+    // System audio capture (MediaProjection)
+    private var mediaProjection: android.media.projection.MediaProjection? = null
+    private var systemAudioCapture: SystemAudioCapture? = null
 
     // Delegated monitors
     private lateinit var diskMonitor: DiskMonitor
@@ -85,6 +92,9 @@ class RecordingService : Service() {
         const val ACTION_STOP = "com.voicenote.app.action.STOP_RECORDING"
         const val EXTRA_RECORD_ID = "record_id"
         const val EXTRA_OFFLINE_MODEL_QUALITY = "offline_model_quality"
+        const val EXTRA_MEDIA_PROJECTION_RESULT_CODE = "media_projection_result_code"
+        const val EXTRA_MEDIA_PROJECTION_DATA = "media_projection_data"
+        const val EXTRA_CAPTURE_SYSTEM_AUDIO = "capture_system_audio"
 
         // Offline ASR strategy:
         // - Audio capture writes to file independently, never blocked by ASR.
@@ -144,7 +154,21 @@ class RecordingService : Service() {
                 }
                 val recordId = intent.getLongExtra(EXTRA_RECORD_ID, 0)
                 val offlineModelQuality = intent.getStringExtra(EXTRA_OFFLINE_MODEL_QUALITY) ?: "int8"
-                startRecording(recordId, offlineModelQuality)
+                val captureSystemAudio = intent.getBooleanExtra(EXTRA_CAPTURE_SYSTEM_AUDIO, false)
+                val mediaProjectionResultCode = intent.getIntExtra(EXTRA_MEDIA_PROJECTION_RESULT_CODE, -1)
+                val mediaProjectionData = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(EXTRA_MEDIA_PROJECTION_DATA, android.content.Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(EXTRA_MEDIA_PROJECTION_DATA)
+                }
+                startRecording(
+                    recordId,
+                    offlineModelQuality,
+                    captureSystemAudio,
+                    mediaProjectionResultCode,
+                    mediaProjectionData
+                )
             }
             ACTION_STOP -> stopRecording()
         }
@@ -156,7 +180,10 @@ class RecordingService : Service() {
 
     private fun startRecording(
         recordId: Long,
-        offlineModelQualityStr: String = "int8"
+        offlineModelQualityStr: String = "int8",
+        captureSystemAudio: Boolean = false,
+        mediaProjectionResultCode: Int = -1,
+        mediaProjectionData: Intent? = null
     ) {
         try {
             currentRecordId = recordId
@@ -184,8 +211,13 @@ class RecordingService : Service() {
 
             // Start foreground
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, buildNotification("录音中..."),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                val foregroundType = if (captureSystemAudio) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                startForeground(NOTIFICATION_ID, buildNotification("录音中..."), foregroundType)
             } else {
                 startForeground(NOTIFICATION_ID, buildNotification("录音中..."))
             }
@@ -241,7 +273,11 @@ class RecordingService : Service() {
                 transcriptFilePath = File(transcriptDir, "${dateStr}_voice_note.txt").absolutePath
             }
 
-            startOfflineASR()
+            startOfflineASR(
+                captureSystemAudio,
+                mediaProjectionResultCode,
+                mediaProjectionData
+            )
 
             // Persist active recording marker for crash recovery
             writeActiveRecordingMarker(recordId)
@@ -257,7 +293,11 @@ class RecordingService : Service() {
     }
 
 
-    private fun startOfflineASR() {
+    private fun startOfflineASR(
+        captureSystemAudio: Boolean = false,
+        mediaProjectionResultCode: Int = -1,
+        mediaProjectionData: Intent? = null
+    ) {
         recordingJob = serviceScope.launch {
             // ── Model/VAD should already be preloaded; ensureReady is a fast no-op ──
             var asrReady = false
@@ -355,8 +395,35 @@ class RecordingService : Service() {
             try {
                 var lastDecodeTime = 0L
 
+                // ── Setup audio capture: mic-only or mic+system (dual-source mixer) ──
+                // This matches desktop/internal/audio/capture.go NewRecorder() pattern.
+                val captureFlow: kotlinx.coroutines.flow.Flow<ByteArray>
+                if (captureSystemAudio && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                    mediaProjectionResultCode == android.app.Activity.RESULT_OK &&
+                    mediaProjectionData != null
+                ) {
+                    val mpManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    val mp = mpManager.getMediaProjection(
+                        mediaProjectionResultCode, mediaProjectionData
+                    )
+                    mediaProjection = mp
+                    val sysCap = SystemAudioCapture(mp)
+                    systemAudioCapture = sysCap
+                    Log.i(TAG, "Dual-source capture enabled: mic + system audio")
+                    _statusMessage.value = "正在采集麦克风和系统声音..."
+                    captureFlow = AudioMixer().mix(
+                        micAudioCapture.startCapture(),
+                        sysCap.startCapture()
+                    )
+                } else {
+                    if (captureSystemAudio) {
+                        Log.w(TAG, "System audio capture requested but MediaProjection not available, falling back to mic only")
+                    }
+                    captureFlow = micAudioCapture.startCapture()
+                }
+
                 startDurationCounter()
-                audioCapture.startCapture().collect { audioData ->
+                captureFlow.collect { audioData ->
                     audioFileManager.writeAudioChunk(audioData)
 
                     // Compute and publish real-time audio level for waveform
@@ -568,8 +635,9 @@ class RecordingService : Service() {
         durationJob?.cancel()
         diskCheckJob?.cancel()
         checkpointJob?.cancel()
-        audioCapture.stopCapture()
-        // Flow ends naturally when audioCapture stops.
+        systemAudioCapture?.stopCapture()
+        micAudioCapture.stopCapture()
+        // Flow ends naturally when micAudioCapture stops.
         // Cancelling here would truncate the WAV file.
 
         _isRecording.value = false
@@ -780,6 +848,11 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         releaseWakeLock()
+        try {
+            mediaProjection?.stop()
+        } catch (_: Exception) {}
+        mediaProjection = null
+        systemAudioCapture = null
         super.onDestroy()
     }
 }

@@ -45,6 +45,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -70,6 +71,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.os.Build
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -300,6 +302,43 @@ fun SettingsScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                }
+            }
+
+            // Audio Capture Config Card
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "录制系统声音",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "同时录制设备正在播放的声音（如在线会议对方的声音）。开启后每次录音需授权一次屏幕采集。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    "💡 建议佩戴耳机使用，避免外放时对方声音被麦克风二次拾取产生回声。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Switch(
+                                checked = uiState.captureSystemAudio,
+                                onCheckedChange = viewModel::updateCaptureSystemAudio
+                            )
+                        }
+                    }
                 }
             }
 

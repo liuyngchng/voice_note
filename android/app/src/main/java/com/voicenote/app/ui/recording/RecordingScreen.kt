@@ -26,6 +26,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Stop
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
@@ -56,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.media.projection.MediaProjectionManager
 import kotlin.math.sqrt
 
 private val RecordingRed = Color(0xFFD32F2F)
@@ -70,6 +74,23 @@ fun RecordingScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
+
+    // MediaProjection launcher — only registered once
+    val mediaProjectionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.onMediaProjectionResult(result.resultCode, result.data)
+    }
+
+    // Launch MediaProjection system dialog when needed
+    LaunchedEffect(uiState.needsMediaProjection) {
+        if (uiState.needsMediaProjection) {
+            val mpManager = context.getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE)
+                as MediaProjectionManager
+            mediaProjectionLauncher.launch(mpManager.createScreenCaptureIntent())
+        }
+    }
 
     // Reconnect to existing recording or start fresh
     LaunchedEffect(Unit) {

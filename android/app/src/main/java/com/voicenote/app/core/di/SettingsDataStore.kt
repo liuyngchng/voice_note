@@ -3,6 +3,7 @@ package com.voicenote.app.core.di
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -25,7 +26,9 @@ data class AppSettings(
     // 登录状态
     val authToken: String = "",
     val username: String = "",
-    val password: String = ""
+    val password: String = "",
+    // 音频采集配置
+    val captureSystemAudio: Boolean = false
 )
 
 @Singleton
@@ -41,6 +44,7 @@ class SettingsDataStore @Inject constructor(
         val AUTH_TOKEN = stringPreferencesKey("auth_token")
         val USERNAME = stringPreferencesKey("username")
         val PASSWORD = stringPreferencesKey("password")
+        val CAPTURE_SYSTEM_AUDIO = booleanPreferencesKey("capture_system_audio")
     }
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
@@ -52,7 +56,8 @@ class SettingsDataStore @Inject constructor(
             serverUri = prefs[Keys.SERVER_URI] ?: "http://192.168.1.110:8080",
             authToken = prefs[Keys.AUTH_TOKEN] ?: "",
             username = prefs[Keys.USERNAME] ?: "",
-            password = prefs[Keys.PASSWORD] ?: ""
+            password = prefs[Keys.PASSWORD] ?: "",
+            captureSystemAudio = prefs[Keys.CAPTURE_SYSTEM_AUDIO] ?: false
         )
     }
 
@@ -78,6 +83,10 @@ class SettingsDataStore @Inject constructor(
             it[Keys.USERNAME] = username
             it[Keys.PASSWORD] = password
         }
+    }
+
+    suspend fun updateCaptureSystemAudio(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.CAPTURE_SYSTEM_AUDIO] = enabled }
     }
 
     suspend fun clearAuth() {

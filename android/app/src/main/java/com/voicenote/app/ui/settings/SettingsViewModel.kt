@@ -51,7 +51,9 @@ data class SettingsUiState(
     val serverUri: String = "http://192.168.1.110:8080",
     // 登录状态
     val username: String = "",
-    val isLoggedIn: Boolean = false
+    val isLoggedIn: Boolean = false,
+    // 音频采集配置
+    val captureSystemAudio: Boolean = false
 )
 
 @HiltViewModel
@@ -77,7 +79,8 @@ class SettingsViewModel @Inject constructor(
                     llmModelName = settings.llmModelName,
                     serverUri = settings.serverUri,
                     username = settings.username,
-                    isLoggedIn = settings.authToken.isNotBlank()
+                    isLoggedIn = settings.authToken.isNotBlank(),
+                    captureSystemAudio = settings.captureSystemAudio
                 )
             }
         }
@@ -160,6 +163,11 @@ class SettingsViewModel @Inject constructor(
                 .onFailure { e -> Log.e(TAG, "Punctuation model import failed: ${e.message}") }
             refreshModelStatus()
         }
+    }
+
+    fun updateCaptureSystemAudio(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(captureSystemAudio = enabled)
+        viewModelScope.launch { settingsDataStore.updateCaptureSystemAudio(enabled) }
     }
 
     fun updateOfflineModelQuality(quality: String) {
